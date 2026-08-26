@@ -4,9 +4,19 @@ All notable changes to **Money Tracker (Offline AI Expense Tracker & Financial I
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
----
+## [1.1.0] - 2026-08-27
+
+### Added
+- **Native Android Application (`android/`)**:
+  - Built with Kotlin and **Jetpack Compose (Material 3)**, targeting **Android 15 (SDK 35)** with Edge-to-Edge display support.
+  - **Apple HIG Design Language**: Custom translucent glass cards (`HigGlassCard`), iOS-style spring sliding segmented controls (`HigSegmentedControl`), Inset Grouped list containers (`HigInsetGroup`), and bottom modal sheets.
+  - **Multi-User Profile Architecture**: Full Room SQLite database isolation per profile (`ExpenseTrackerDB_<profileId>`) ensuring 100% clean-slate privacy on mobile.
+  - **Executive Bento Dashboard**: Live Net Worth hero card, Inflow vs Outflow split bar, KPI metrics (Inflow, Outflow, Savings Rate), and custom Canvas cash flow curve.
+  - **Transactions & Cards Screens**: Searchable transaction ledger with filters, add transaction bottom sheet, and luxury gradient credit/debit card carousel.
+  - **Complete Gradle Project Setup**: Configured with Version Catalogs (`libs.versions.toml`), Android Gradle Plugin 8.8, Kotlin 2.1, and local SDK properties for immediate opening in Android Studio.
 
 ## [1.0.0] - 2026-08-27
+
 
 ### Added
 - **Multi-User Profile System (`profiles.js`)**:
