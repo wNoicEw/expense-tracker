@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Logo Preview — Money Tracker Concepts</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    padding: 2.5rem;
+    transition: background-color 0.3s, color 0.3s;
+  }
+  body.light { background: #f8fafc; color: #0f172a; }
+  body.dark { background: #090d16; color: #f8fafc; }
+  .header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 2rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid rgba(128, 128, 128, 0.2);
+  }
+  h1 { font-size: 1.6rem; font-weight: 700; }
+  .toggle {
+    padding: 0.6rem 1.2rem;
+    border: 1px solid rgba(128, 128, 128, 0.4);
+    border-radius: 8px;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    font-size: 0.875rem;
+    font-weight: 600;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 1.8rem;
+    margin-bottom: 3rem;
+  }
+  .card {
+    border: 1px solid rgba(128, 128, 128, 0.2);
+    border-radius: 16px;
+    overflow: hidden;
+    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.2);
+    transition: transform 0.2s ease;
+  }
+  .card:hover {
+    transform: translateY(-4px);
+  }
+  .card-img {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2.5rem;
+    min-height: 260px;
+  }
+  body.light .card-img { background: #ffffff; }
+  body.dark .card-img { background: #131b2e; }
+  .card-img img {
+    max-width: 100%;
+    max-height: 200px;
+  }
+  .card-label {
+    padding: 1rem 1.2rem;
+    font-size: 0.9rem;
+    font-weight: 600;
+    border-top: 1px solid rgba(128, 128, 128, 0.2);
+  }
+  body.light .card-label { background: #f1f5f9; }
+  body.dark .card-label { background: #0f172a; }
+  .subtext { font-size: 0.78rem; opacity: 0.7; margin-top: 4px; font-weight: normal; }
+
+  .favicon-section {
+    margin-top: 2rem;
+    padding-top: 2rem;
+    border-top: 1px solid rgba(128, 128, 128, 0.2);
+  }
+  .favicon-section h2 { font-size: 1.2rem; font-weight: 700; margin-bottom: 1.5rem; }
+  .favicon-strip {
+    display: flex;
+    gap: 2.5rem;
+    flex-wrap: wrap;
+    align-items: flex-end;
+  }
+</style>
+</head>
+<body class="dark">
+  <div class="header">
+    <div>
+      <h1>Money Tracker — Logo Design Concepts</h1>
+      <p style="font-size:0.88rem; opacity:0.75; margin-top:4px;">Vector SVG Concepts for Brand Icon, Favicon &amp; Header</p>
+    </div>
+    <button class="toggle" onclick="document.body.classList.toggle('dark'); document.body.classList.toggle('light'); this.textContent = document.body.classList.contains('dark') ? '☀️ Light Mode' : '🌙 Dark Mode';">☀️ Light Mode</button>
+  </div>
+
+  <div class="grid">
+    <!-- Concept 1 -->
+    <div class="card">
+      <div class="card-img">
+        <img src="concepts/concept-1.svg" alt="concept-1">
+      </div>
+      <div class="card-label">
+        Concept 1: Modern Geometric Vault 'M'
+        <div class="subtext">Interlocking pillars forming an 'M' with ascending vertex &amp; floating node.</div>
+      </div>
+    </div>
+
+    <!-- Concept 2 -->
+    <div class="card">
+      <div class="card-img">
+        <img src="concepts/concept-2.svg" alt="concept-2">
+      </div>
+      <div class="card-label">
+        Concept 2: Dynamic Dual Cashflow Orbit
+        <div class="subtext">Two continuous interlocking ribbons (Inflow + Outflow) encircling central node.</div>
+      </div>
+    </div>
+
+    <!-- Concept 3 -->
+    <div class="card">
+      <div class="card-img">
+        <img src="concepts/concept-3.svg" alt="concept-3">
+      </div>
+      <div class="card-label">
+        Concept 3: Futuristic Currency Prism
+        <div class="subtext">Hexagonal boundary with ascending financial data bars and trend arrow.</div>
+      </div>
+    </div>
+
+    <!-- Concept 4 -->
+    <div class="card">
+      <div class="card-img">
+        <img src="concepts/concept-4.svg" alt="concept-4">
+      </div>
+      <div class="card-label">
+        Concept 4: Precision Wealth Shield
+        <div class="subtext">Shield silhouette with check curve and financial security node.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="favicon-section">
+    <h2>Favicon &amp; App Icon Size Check</h2>
+    <div class="favicon-strip">
+      <div style="display:flex;flex-direction:column;align-items:center;gap:0.5rem;">
+        <div style="font-size:0.85rem;font-weight:600;">Concept 1</div>
+        <div style="display:flex;gap:1.5rem;align-items:end;">
+          <div><img src="concepts/concept-1.svg" width="64" height="64"><div style="font-size:0.75rem;opacity:0.6;text-align:center;">64px</div></div>
+          <div><img src="concepts/concept-1.svg" width="32" height="32"><div style="font-size:0.75rem;opacity:0.6;text-align:center;">32px</div></div>
+          <div><img src="concepts/concept-1.svg" width="16" height="16"><div style="font-size:0.75rem;opacity:0.6;text-align:center;">16px</div></div>
+        </div>
+      </div>
+
+      <div style="display:flex;flex-direction:column;align-items:center;gap:0.5rem;">
+        <div style="font-size:0.85rem;font-weight:600;">Concept 2</div>
+        <div style="display:flex;gap:1.5rem;align-items:end;">
+          <div><img src="concepts/concept-2.svg" width="64" height="64"><div style="font-size:0.75rem;opacity:0.6;text-align:center;">64px</div></div>
+          <div><img src="concepts/concept-2.svg" width="32" height="32"><div style="font-size:0.75rem;opacity:0.6;text-align:center;">32px</div></div>
+          <div><img src="concepts/concept-2.svg" width="16" height="16"><div style="font-size:0.75rem;opacity:0.6;text-align:center;">16px</div></div>
+        </div>
+      </div>
+
+      <div style="display:flex;flex-direction:column;align-items:center;gap:0.5rem;">
+        <div style="font-size:0.85rem;font-weight:600;">Concept 3</div>
+        <div style="display:flex;gap:1.5rem;align-items:end;">
+          <div><img src="concepts/concept-3.svg" width="64" height="64"><div style="font-size:0.75rem;opacity:0.6;text-align:center;">64px</div></div>
+          <div><img src="concepts/concept-3.svg" width="32" height="32"><div style="font-size:0.75rem;opacity:0.6;text-align:center;">32px</div></div>
+          <div><img src="concepts/concept-3.svg" width="16" height="16"><div style="font-size:0.75rem;opacity:0.6;text-align:center;">16px</div></div>
+        </div>
+      </div>
+
+      <div style="display:flex;flex-direction:column;align-items:center;gap:0.5rem;">
+        <div style="font-size:0.85rem;font-weight:600;">Concept 4</div>
+        <div style="display:flex;gap:1.5rem;align-items:end;">
+          <div><img src="concepts/concept-4.svg" width="64" height="64"><div style="font-size:0.75rem;opacity:0.6;text-align:center;">64px</div></div>
+          <div><img src="concepts/concept-4.svg" width="32" height="32"><div style="font-size:0.75rem;opacity:0.6;text-align:center;">32px</div></div>
+          <div><img src="concepts/concept-4.svg" width="16" height="16"><div style="font-size:0.75rem;opacity:0.6;text-align:center;">16px</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

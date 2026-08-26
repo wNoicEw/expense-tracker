@@ -1,0 +1,100 @@
+/* ==========================================================================
+   OFFLINE EXPENSE TRACKER - PRINT & PDF EXPORT STYLES
+   ========================================================================== */
+
+@media print {
+  body {
+    background: #ffffff !important;
+    color: #0f172a !important;
+    font-size: 11pt;
+  }
+
+  body::before {
+    display: none !important;
+  }
+
+  .sidebar,
+  .top-actions,
+  .btn,
+  .filter-bar,
+  .dropzone-container,
+  .toast-container,
+  .modal-overlay {
+    display: none !important;
+  }
+
+  .main-content {
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+
+  .tab-panel {
+    display: block !important;
+  }
+
+  .glass-card, .kpi-card, .table-container {
+    background: #ffffff !important;
+    border: 1px solid #e2e8f0 !important;
+    box-shadow: none !important;
+    backdrop-filter: none !important;
+    color: #0f172a !important;
+  }
+
+  .kpi-value {
+    color: #0f172a !important;
+  }
+
+  .data-table th {
+    background: #f1f5f9 !important;
+    color: #334155 !important;
+    border-bottom: 2px solid #cbd5e1 !important;
+  }
+
+  .data-table td {
+    border-bottom: 1px solid #e2e8f0 !important;
+    color: #1e293b !important;
+  }
+
+  .badge-tag.income { background: #dcfce7 !important; color: #15803d !important; }
+  .badge-tag.expense { background: #ffe4e6 !important; color: #be123c !important; }
+  .amount-display.income { color: #15803d !important; }
+  .amount-display.expense { color: #be123c !important; }
+
+  .print-page-break {
+    page-break-before: always;
+  }
+}
+
+/* Formatted PDF Report Preview Container */
+.pdf-report-template {
+  background: #0b1120;
+  color: #f8fafc;
+  padding: 32px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--glass-border);
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.report-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 2px solid var(--glass-border);
+  padding-bottom: 20px;
+}
+
+.report-title-area h2 {
+  font-size: 1.6rem;
+  font-weight: 700;
+  color: #fff;
+}
+
+.report-meta {
+  text-align: right;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}

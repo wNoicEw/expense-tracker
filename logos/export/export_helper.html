@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html>
+<head><title>Export Helper</title></head>
+<body>
+<canvas id="c"></canvas>
+<script>
+async function exportSizes() {
+  const sizes = [16, 32, 48, 192, 512, 1024];
+  const img = new Image();
+  img.src = 'logo.svg';
+  await new Promise(r => img.onload = r);
+  
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+  
+  for (const s of sizes) {
+    canvas.width = s;
+    canvas.height = s;
+    ctx.clearRect(0, 0, s, s);
+    ctx.drawImage(img, 0, 0, s, s);
+    const dataUrl = canvas.toDataURL('image/png');
+    // Store in localStorage or expose to window
+    window['png_' + s] = dataUrl;
+  }
+  window.status = 'DONE';
+}
+exportSizes();
+</script>
+</body>
+</html>

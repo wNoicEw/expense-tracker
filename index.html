@@ -1,0 +1,960 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Money Tracker — AI Expense Tracker & Financial Intelligence</title>
+  <meta name="description" content="Slick, private, offline-first personal financial manager with bank & UPI statement parsing, interactive Chart.js analytics, duplicate reconciliation, auto-classification, and multi-format exports.">
+  <link rel="icon" type="image/svg+xml" href="logos/export/logo.svg">
+  
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800;900&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  
+  <!-- CSS Stylesheets -->
+  <link rel="stylesheet" href="css/main.css?v=5">
+  <link rel="stylesheet" href="css/components.css?v=5">
+  <link rel="stylesheet" href="css/print.css?v=5">
+
+  <!-- Core Offline Libraries -->
+  <script src="https://cdn.jsdelivr.net/npm/lucide@latest/dist/umd/lucide.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <script>
+    if (window.pdfjsLib) {
+      pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    }
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+</head>
+<body>
+
+  <!-- ==================== PROFILE CHOOSER SCREEN ==================== -->
+  <!-- Shown on first launch or when no profile is active. Hides the rest of the app. -->
+  <div id="profileChooserScreen" style="display:none;">
+
+    <!-- Background orbs -->
+    <div class="pcs-orb pcs-orb-1"></div>
+    <div class="pcs-orb pcs-orb-2"></div>
+
+    <div class="profile-chooser-wrapper">
+
+      <!-- Header lockup -->
+      <div class="profile-chooser-header">
+        <div class="pcs-logo-ring">
+          <img src="logos/export/logo.svg" alt="Money Tracker" style="width:36px;height:36px;border-radius:8px;">
+        </div>
+        <h1 class="profile-chooser-title">Money Tracker</h1>
+        <p class="profile-chooser-subtitle">Who's tracking finances today?</p>
+      </div>
+
+      <!-- Profile card grid -->
+      <div class="profile-chooser-grid" id="profileChooserGrid">
+        <!-- Profile cards rendered by JS -->
+      </div>
+
+      <!-- Divider -->
+      <div class="pcs-divider">
+        <span>or create a new profile</span>
+      </div>
+
+      <!-- Create new profile row -->
+      <div class="profile-chooser-create">
+        <div class="profile-create-row">
+          <div class="pci-input-wrap">
+            <i data-lucide="user" style="width:15px;height:15px;color:var(--text-dim);flex-shrink:0;"></i>
+            <input
+              type="text"
+              id="newProfileNameInput"
+              class="profile-create-input"
+              placeholder="Enter a profile name..."
+              maxlength="32"
+              autocomplete="off"
+              onkeydown="if(event.key==='Enter') app.createProfileFromChooser()"
+            >
+          </div>
+          <button class="pcs-create-btn" onclick="app.createProfileFromChooser()">
+            <i data-lucide="plus" style="width:15px;height:15px;"></i>
+            Create
+          </button>
+        </div>
+        <div id="newProfileError" class="profile-create-error" style="display:none;"></div>
+      </div>
+
+    </div>
+  </div>
+
+  <div class="app-container">
+    
+    <!-- SIDEBAR NAVIGATION -->
+    <aside class="sidebar">
+      <div class="brand-header">
+        <div class="brand-icon" style="padding:0; overflow:hidden; background:transparent; border:none;">
+          <img src="logos/export/logo.svg" alt="Money Tracker Logo" style="width:36px; height:36px; border-radius:10px; box-shadow:0 4px 12px rgba(16,185,129,0.3);">
+        </div>
+        <div class="brand-text">
+          <h1>Money Tracker</h1>
+        </div>
+      </div>
+
+      <ul class="nav-links">
+        <li class="nav-item active">
+          <button data-tab="dashboard">
+            <i data-lucide="layout-dashboard" style="width:18px; height:18px;"></i>
+            <span>Dashboard</span>
+          </button>
+        </li>
+        <li class="nav-item">
+          <button data-tab="import">
+            <i data-lucide="file-up" style="width:18px; height:18px;"></i>
+            <span>Upload Statements</span>
+          </button>
+        </li>
+        <li class="nav-item">
+          <button data-tab="review">
+            <i data-lucide="help-circle" style="width:18px; height:18px;"></i>
+            <span>Needs Review</span>
+            <span class="badge" id="sidebarReviewBadge" style="display:none; background:#f59e0b; color:#000;">0</span>
+          </button>
+        </li>
+        <li class="nav-item">
+          <button data-tab="transactions">
+            <i data-lucide="receipt" style="width:18px; height:18px;"></i>
+            <span>Transactions</span>
+          </button>
+        </li>
+        <li class="nav-item">
+          <button data-tab="duplicates">
+            <i data-lucide="copy-check" style="width:18px; height:18px;"></i>
+            <span>Duplicate Resolver</span>
+            <span class="badge" id="sidebarDupBadge" style="display:none;">0</span>
+          </button>
+        </li>
+        <li class="nav-item">
+          <button data-tab="accounts">
+            <i data-lucide="credit-card" style="width:18px; height:18px;"></i>
+            <span>Cards & Accounts</span>
+          </button>
+        </li>
+        <li class="nav-item">
+          <button data-tab="rules">
+            <i data-lucide="brain" style="width:18px; height:18px;"></i>
+            <span>Learned Rules</span>
+          </button>
+        </li>
+        <li class="nav-item">
+          <button data-tab="reports">
+            <i data-lucide="file-spreadsheet" style="width:18px; height:18px;"></i>
+            <span>Export Reports</span>
+          </button>
+        </li>
+      </ul>
+
+      <div class="sidebar-footer">
+        <button class="sidebar-profile-pill" id="sidebarProfilePill" onclick="app.openProfileModal()" title="Manage Profiles">
+          <!-- Populated by JS after profile loads -->
+          <div class="sidebar-profile-avatar" style="background: linear-gradient(135deg,#6366f1,#8b5cf6);">?</div>
+          <div class="sidebar-profile-info">
+            <div class="sidebar-profile-name">Loading...</div>
+            <div class="sidebar-profile-sub">Switch profile</div>
+          </div>
+          <i data-lucide="chevrons-up-down" style="width:13px;height:13px;opacity:0.4;flex-shrink:0;"></i>
+        </button>
+      </div>
+    </aside>
+
+    <!-- MAIN CONTENT -->
+    <main class="main-content">
+      
+      <!-- TOP BAR -->
+      <header class="top-bar">
+        <div style="display:flex; align-items:center; gap:16px;">
+          <button class="mobile-menu-btn" id="mobileMenuToggle">
+            <i data-lucide="menu" style="width:20px; height:20px;"></i>
+          </button>
+          <div class="page-title">
+            <h2>Financial Dashboard</h2>
+          </div>
+        </div>
+
+        <div class="top-actions">
+          <button class="btn btn-secondary btn-sm" id="btnThemeToggle" onclick="app.toggleTheme()" title="Switch Light/Dark Mode">
+            <i data-lucide="sun" id="themeToggleIcon" style="width:14px; height:14px;"></i>
+            <span id="themeToggleLabel">Light</span>
+          </button>
+          <button class="btn btn-secondary btn-sm" onclick="app.switchTab('import')">
+            <i data-lucide="upload" style="width:14px; height:14px;"></i> Import Statement
+          </button>
+          <button class="btn btn-primary btn-sm" id="btnOpenAddTxnModal">
+            <i data-lucide="plus" style="width:14px; height:14px;"></i> Add Transaction
+          </button>
+        </div>
+      </header>
+
+      <!-- ==================== TAB 1: DASHBOARD ==================== -->
+      <section class="tab-panel active" id="panel-dashboard">
+        
+        <!-- Interactive Review Banner (Appears when there are undetected transactions) -->
+        <div class="review-banner" id="dashboardReviewBanner" style="display:none;">
+          <div class="review-banner-text">
+            <div class="review-banner-icon">
+              <i data-lucide="help-circle" style="width:22px; height:22px;"></i>
+            </div>
+            <div>
+              <div style="font-weight:700; font-size:0.98rem; color:var(--text-main);" id="dashboardReviewBannerTitle">
+                Undetected Expenses Need Classification
+              </div>
+              <div style="font-size:0.82rem; color:var(--text-muted); margin-top:2px;">
+                Classify once, and Money Tracker will remember the UPI ID / Account to auto-classify future transactions!
+              </div>
+            </div>
+          </div>
+          <button class="btn btn-warning btn-sm" onclick="app.switchTab('review')">
+            <i data-lucide="sparkles" style="width:14px; height:14px;"></i> Review &amp; Teach AI
+          </button>
+        </div>
+
+        <!-- BENTO HERO ROW -->
+        <div class="bento-hero-row">
+          
+          <!-- Main Net Worth Hero Block -->
+          <div class="bento-hero-card">
+            <div class="bento-hero-header">
+              <div>
+                <span class="bento-hero-tag">
+                  <i data-lucide="shield-check" style="width:13px; height:13px; color:#10b981;"></i>
+                  <span>Live Reconciled Portfolio</span>
+                </span>
+                <div class="bento-hero-label">Total Net Worth / Balance</div>
+              </div>
+              <div class="bento-hero-icon">
+                <i data-lucide="wallet" style="width:24px; height:24px;"></i>
+              </div>
+            </div>
+
+            <div class="hero-balance-value" id="kpiTotalBalance">₹ 0</div>
+
+            <!-- Inflow vs Outflow Mini Flow Bar -->
+            <div class="flow-ratio-container">
+              <div class="flow-ratio-labels">
+                <span style="color:#10b981; font-weight:600; font-size:0.82rem;" id="heroInflowLabel">Inflow: ₹ 0</span>
+                <span style="color:#f43f5e; font-weight:600; font-size:0.82rem;" id="heroOutflowLabel">Outflow: ₹ 0</span>
+              </div>
+              <div class="flow-ratio-bar">
+                <div class="flow-ratio-fill income" id="heroFlowBarIncome" style="width:70%;"></div>
+                <div class="flow-ratio-fill expense" id="heroFlowBarExpense" style="width:30%;"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 3 Quick KPI Stat Tiles -->
+          <div class="bento-stats-column">
+            
+            <!-- Inflow Card -->
+            <div class="bento-stat-card income">
+              <div class="bento-stat-top">
+                <span class="bento-stat-label">Total Inflow (30D)</span>
+                <div class="bento-stat-icon income"><i data-lucide="arrow-down-left" style="width:16px; height:16px;"></i></div>
+              </div>
+              <div class="bento-stat-val" id="kpiTotalIncome" style="color:#10b981;">₹ 0</div>
+              <div class="bento-stat-sub positive">Salary &amp; Credits</div>
+            </div>
+
+            <!-- Outflow Card -->
+            <div class="bento-stat-card expense">
+              <div class="bento-stat-top">
+                <span class="bento-stat-label">Total Outflow (30D)</span>
+                <div class="bento-stat-icon expense"><i data-lucide="arrow-up-right" style="width:16px; height:16px;"></i></div>
+              </div>
+              <div class="bento-stat-val" id="kpiTotalExpense" style="color:#f43f5e;">₹ 0</div>
+              <div class="bento-stat-sub negative">Excl. Duplicates</div>
+            </div>
+
+            <!-- Savings Rate Card -->
+            <div class="bento-stat-card savings">
+              <div class="bento-stat-top">
+                <span class="bento-stat-label">Net Savings Rate</span>
+                <div class="bento-stat-icon savings"><i data-lucide="trending-up" style="width:16px; height:16px;"></i></div>
+              </div>
+              <div class="bento-stat-val" id="kpiSavingsRate" style="color:#06b6d4;">0%</div>
+              <div class="bento-stat-sub positive">Of Cashflow Saved</div>
+            </div>
+
+          </div>
+
+        </div>
+
+        <!-- MAIN DASHBOARD BENTO GRID -->
+        <div class="dashboard-bento-grid">
+          
+          <!-- LEFT COLUMN: Charts & Recent Ledger (62% width) -->
+          <div class="dashboard-bento-col-left">
+            
+            <!-- Cash Flow Chart Card -->
+            <div class="glass-card bento-chart-card">
+              <div class="glass-card-header">
+                <div class="glass-card-title">
+                  <i data-lucide="activity" style="width:18px; height:18px; color:#3b82f6;"></i>
+                  <span>Cash Flow</span>
+                  <span class="badge-tag income" id="cashflowNetBadge" style="margin-left:8px; font-size:0.75rem;">🟢 Balance: +₹ 0</span>
+                </div>
+                <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+                  <!-- View Mode Selector -->
+                  <div class="segmented-control">
+                    <button class="btn btn-primary btn-sm" id="btnChartModeCumulative" style="padding:4px 10px; font-size:0.75rem;" onclick="app.setChartMode('cumulative')">
+                      Cumulative Flow
+                    </button>
+                    <button class="btn btn-ghost btn-sm" id="btnChartModeUnified" style="padding:4px 10px; font-size:0.75rem;" onclick="app.setChartMode('unified')">
+                      Unified Flow
+                    </button>
+                  </div>
+
+                  <!-- Range Buttons -->
+                  <button class="btn btn-secondary btn-sm" data-range="7">7D</button>
+                  <button class="btn btn-primary btn-sm" data-range="30">30D</button>
+                  <button class="btn btn-secondary btn-sm" data-range="90">90D</button>
+                  <button class="btn btn-ghost btn-sm btn-icon-only" onclick="chartsEngine.exportChartAsPNG('chartCashflow', 'cashflow-graph.png')" title="Download High-Res PNG">
+                    <i data-lucide="download" style="width:14px; height:14px;"></i>
+                  </button>
+                </div>
+              </div>
+
+              <div class="chart-wrapper" style="height:330px;">
+                <canvas id="chartCashflow"></canvas>
+              </div>
+            </div>
+
+            <!-- Recent Transactions Preview -->
+            <div class="glass-card" style="margin-top:20px;">
+              <div class="glass-card-header">
+                <div class="glass-card-title">
+                  <i data-lucide="history" style="width:18px; height:18px; color:#10b981;"></i>
+                  <span>Recent Transactions</span>
+                </div>
+                <button class="btn btn-ghost btn-sm" onclick="app.switchTab('transactions')">View All Ledger</button>
+              </div>
+              <div class="table-container" style="border:none; border-radius:8px;">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Description</th>
+                      <th>Category</th>
+                      <th>Account</th>
+                      <th style="text-align:right;">Amount</th>
+                    </tr>
+                  </thead>
+                  <tbody id="dashboardRecentTxns">
+                    <!-- Dynamically populated -->
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- RIGHT COLUMN: Expense Breakdown & Accounts Snapshot (38% width) -->
+          <div class="dashboard-bento-col-right">
+            
+            <!-- Expense by Category Donut Chart -->
+            <div class="glass-card">
+              <div class="glass-card-header">
+                <div class="glass-card-title">
+                  <i data-lucide="pie-chart" style="width:18px; height:18px; color:#f59e0b;"></i>
+                  <span>Expense Breakdown</span>
+                </div>
+                <button class="btn btn-ghost btn-sm btn-icon-only" onclick="chartsEngine.exportChartAsPNG('chartCategoryDonut', 'category-breakdown.png')" title="Download High-Res PNG">
+                  <i data-lucide="download" style="width:14px; height:14px;"></i>
+                </button>
+              </div>
+              <div class="chart-wrapper donut" style="height:210px;">
+                <canvas id="chartCategoryDonut"></canvas>
+              </div>
+              <div class="category-breakdown-list" id="dashboardCategoryList" style="max-height:220px; overflow-y:auto;">
+                <!-- Dynamically rendered -->
+              </div>
+            </div>
+
+            <!-- Mini Accounts & Cards Snapshot -->
+            <div class="glass-card" style="margin-top:20px;">
+              <div class="glass-card-header">
+                <div class="glass-card-title">
+                  <i data-lucide="credit-card" style="width:18px; height:18px; color:#8b5cf6;"></i>
+                  <span>Accounts &amp; Cards</span>
+                </div>
+                <button class="btn btn-ghost btn-sm" onclick="app.switchTab('accounts')">Manage</button>
+              </div>
+              <div id="dashboardAccountsList" style="display:flex; flex-direction:column; gap:10px;">
+                <!-- Dynamically rendered -->
+              </div>
+            </div>
+
+          </div>
+
+        </div>
+
+      </section>
+
+      <!-- ==================== TAB 2: IMPORT STATEMENTS ==================== -->
+      <section class="tab-panel" id="panel-import">
+        <div class="glass-card" style="margin-bottom:24px;">
+          <div class="glass-card-header">
+            <div class="glass-card-title">
+              <i data-lucide="file-up" style="width:20px; height:20px; color:#3b82f6;"></i>
+              <span>Universal Offline Statement Ingestion</span>
+            </div>
+            <span class="brand-badge">Private &amp; Offline</span>
+          </div>
+          
+          <div class="dropzone-container" id="statementDropzone">
+            <input type="file" id="statementFileInput" accept=".pdf,.csv,.xlsx,.xls,.txt" style="display:none;">
+            <div class="dropzone-icon">
+              <i data-lucide="upload-cloud" style="width:32px; height:32px;"></i>
+            </div>
+            <h3 class="dropzone-title">Drag &amp; Drop Bank Statement or UPI Transaction History</h3>
+            <p class="dropzone-subtitle">
+              Upload your PDF, CSV, or Excel statements. All parsing runs 100% locally in your browser memory — nothing is ever uploaded to any server.
+            </p>
+            <div class="dropzone-formats">
+              <span class="format-pill">Google Pay PDF</span>
+              <span class="format-pill">PhonePe Statement</span>
+              <span class="format-pill">Paytm Passbook</span>
+              <span class="format-pill">CRED Card PDF</span>
+              <span class="format-pill">HDFC / SBI / ICICI Bank PDF</span>
+              <span class="format-pill">Excel (.xlsx)</span>
+              <span class="format-pill">CSV</span>
+            </div>
+          </div>
+
+          <div id="uploadStatusBox" class="upload-status-box" style="display:none;"></div>
+
+          <div class="statement-profiles">
+            <div class="profile-card">
+              <div class="profile-icon"><i data-lucide="zap" style="width:16px; height:16px;"></i></div>
+              <div>
+                <div style="font-weight:600; font-size:0.85rem; color:var(--text-main);">Auto-Classifier &amp; Learner</div>
+                <div style="font-size:0.75rem; color:var(--text-muted);">Learns merchant UPI IDs forever</div>
+              </div>
+            </div>
+            <div class="profile-card">
+              <div class="profile-icon"><i data-lucide="landmark" style="width:16px; height:16px;"></i></div>
+              <div>
+                <div style="font-weight:600; font-size:0.85rem; color:var(--text-main);">Major Banks Supported</div>
+                <div style="font-size:0.75rem; color:var(--text-muted);">HDFC, SBI, ICICI, Axis, Kotak</div>
+              </div>
+            </div>
+            <div class="profile-card">
+              <div class="profile-icon"><i data-lucide="copy" style="width:16px; height:16px;"></i></div>
+              <div>
+                <div style="font-weight:600; font-size:0.85rem; color:var(--text-main);">Smart Deduplication</div>
+                <div style="font-size:0.75rem; color:var(--text-muted);">Auto-detects UPI vs Bank pairs</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Upload History Table -->
+        <div class="glass-card">
+          <div class="glass-card-header">
+            <div class="glass-card-title">
+              <i data-lucide="history" style="width:18px; height:18px;"></i>
+              <span>Uploaded Statement History</span>
+            </div>
+          </div>
+          <div class="table-container">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>File Name</th>
+                  <th>Detected Bank / App</th>
+                  <th>Transactions</th>
+                  <th>Import Date</th>
+                </tr>
+              </thead>
+              <tbody id="statementHistoryTableBody">
+                <!-- Dynamically populated -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ==================== TAB: NEEDS REVIEW (UNDETECTED EXPENSES) ==================== -->
+      <section class="tab-panel" id="panel-review">
+        <div class="glass-card" style="margin-bottom:20px;">
+          <div class="glass-card-header">
+            <div class="glass-card-title">
+              <i data-lucide="help-circle" style="width:20px; height:20px; color:#f59e0b;"></i>
+              <span>Undetected Expenses &amp; AI Classification Learning</span>
+            </div>
+            <span class="badge-tag duplicate" id="reviewCountHeaderBadge">0 Pending</span>
+          </div>
+          <p style="color:#94a3b8; font-size:0.88rem;">
+            When a transaction cannot be classified with high confidence, it appears here. When you select a type/category for it, Money Tracker <strong>memorizes the merchant / UPI ID</strong> so all future (and past) transactions to that same account will be classified automatically!
+          </p>
+        </div>
+
+        <div id="reviewTransactionsContainer">
+          <!-- Dynamically rendered resolution cards -->
+        </div>
+      </section>
+
+      <!-- ==================== TAB 3: TRANSACTIONS ==================== -->
+      <section class="tab-panel" id="panel-transactions">
+        
+        <!-- Filter Toolbar -->
+        <div class="filter-bar">
+          <div class="search-box">
+            <i data-lucide="search" class="search-icon" style="width:16px; height:16px;"></i>
+            <input type="text" id="txnSearchInput" class="input-control" placeholder="Search by merchant, UTR, narration, notes...">
+          </div>
+
+          <div style="width:180px;">
+            <select id="txnCategoryFilter" class="select-control">
+              <option value="all">All Categories</option>
+            </select>
+          </div>
+
+          <div style="width:180px;">
+            <select id="txnAccountFilter" class="select-control">
+              <option value="all">All Accounts</option>
+            </select>
+          </div>
+
+          <div style="width:150px;">
+            <select id="txnTypeFilter" class="select-control">
+              <option value="all">All Types</option>
+              <option value="needs_review">Needs Review ⚠️</option>
+              <option value="expense">Expenses Only</option>
+              <option value="income">Income Only</option>
+              <option value="transfer">Transfers</option>
+            </select>
+          </div>
+
+          <button class="btn btn-secondary btn-sm" onclick="exportEngine.exportCSV()">
+            <i data-lucide="download" style="width:14px; height:14px;"></i> Export CSV
+          </button>
+        </div>
+
+        <!-- Transactions Table -->
+        <div class="glass-card" style="padding:0; overflow:hidden;">
+          <div class="table-container" style="border:none; border-radius:0;">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Description / Merchant</th>
+                  <th>Category</th>
+                  <th>Account</th>
+                  <th>Type</th>
+                  <th style="text-align:right;">Amount</th>
+                  <th style="text-align:center;">Action</th>
+                </tr>
+              </thead>
+              <tbody id="transactionsTableBody">
+                <!-- Dynamically populated -->
+              </tbody>
+            </table>
+          </div>
+
+          <div class="pagination-bar">
+            <div id="txnPaginationInfo" style="font-size:0.82rem; color:var(--text-muted);">Showing 1-15 transactions</div>
+            <div style="display:flex; gap:8px;">
+              <button class="btn btn-secondary btn-sm" id="btnPrevPage" onclick="app.prevPage()">Previous</button>
+              <button class="btn btn-secondary btn-sm" id="btnNextPage" onclick="app.nextPage()">Next</button>
+            </div>
+          </div>
+        </div>
+
+      </section>
+
+      <!-- ==================== TAB 4: DUPLICATE RESOLVER ==================== -->
+      <section class="tab-panel" id="panel-duplicates">
+        <div class="glass-card" style="margin-bottom:20px;">
+          <div class="glass-card-header">
+            <div class="glass-card-title">
+              <i data-lucide="copy-check" style="width:20px; height:20px; color:#f59e0b;"></i>
+              <span>Cross-Statement Duplicate Matching Engine</span>
+            </div>
+            <button class="btn btn-secondary btn-sm" onclick="app.rescanDuplicates()">
+              <i data-lucide="refresh-cw" style="width:14px; height:14px;"></i> Re-Scan All Records
+            </button>
+          </div>
+          <p style="color:#94a3b8; font-size:0.88rem;">
+            When you upload both your UPI app statement (Google Pay, PhonePe, Paytm) and your Bank account statement (HDFC, SBI, etc.), the same purchases appear in both files. Our AI engine identifies matching UTRs, timestamps, and amounts so you can merge them into a single enriched transaction and eliminate double-counting.
+          </p>
+        </div>
+
+        <div id="duplicateResolverContainer">
+          <!-- Dynamically populated duplicate cards -->
+        </div>
+      </section>
+
+      <!-- ==================== TAB 5: ACCOUNTS & CARDS ==================== -->
+      <section class="tab-panel" id="panel-accounts">
+        <div class="glass-card-header" style="margin-bottom:20px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
+          <div class="glass-card-title">
+            <i data-lucide="credit-card" style="width:20px; height:20px; color:#3b82f6;"></i>
+            <span>Connected Bank Accounts &amp; Credit Cards</span>
+          </div>
+          <button class="btn btn-primary btn-sm" id="btnOpenAddAccountModal">
+            <i data-lucide="plus" style="width:16px; height:16px;"></i>
+            <span>Add Account / Card</span>
+          </button>
+        </div>
+
+        <div class="account-cards-grid" id="accountsGridContainer">
+          <!-- Dynamically populated accounts & cards with integrated expandable intelligence drawers -->
+        </div>
+      </section>
+
+
+
+      <!-- ==================== TAB 7: LEARNED RULES ==================== -->
+      <section class="tab-panel" id="panel-rules">
+        <div class="glass-card" style="margin-bottom:20px;">
+          <div class="glass-card-header">
+            <div class="glass-card-title">
+              <i data-lucide="brain" style="width:20px; height:20px; color:#06b6d4;"></i>
+              <span>AI Auto-Classification Memory (Learned Rules)</span>
+            </div>
+          </div>
+          <p style="color:#94a3b8; font-size:0.88rem;">
+            Below are the custom merchant patterns, UPI IDs, and payee keywords that Money Tracker has memorized. Future transactions matching any of these will be classified automatically.
+          </p>
+        </div>
+
+        <div id="learnedRulesContainer">
+          <!-- Dynamically populated rules list -->
+        </div>
+      </section>
+
+      <!-- ==================== TAB 8: REPORTS & EXPORTS ==================== -->
+      <section class="tab-panel" id="panel-reports">
+        <div class="glass-card" style="margin-bottom:24px;">
+          <div class="glass-card-header">
+            <div class="glass-card-title">
+              <i data-lucide="file-spreadsheet" style="width:20px; height:20px; color:#3b82f6;"></i>
+              <span>Comprehensive Multi-Format Export Center</span>
+            </div>
+          </div>
+          <p style="color:#94a3b8; font-size:0.88rem; margin-bottom:20px;">
+            Export calculated ledgers, categorized expenses, and high-resolution charts as Excel workbooks, raw CSVs, or full multi-page PDF executive summaries.
+          </p>
+
+          <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(260px, 1fr)); gap:16px;">
+            
+            <!-- Excel Export Card -->
+            <div class="export-card">
+              <div>
+                <div style="width:40px; height:40px; border-radius:8px; background:rgba(16, 185, 129, 0.15); color:#10b981; display:flex; align-items:center; justify-content:center; margin-bottom:12px;">
+                  <i data-lucide="table" style="width:20px; height:20px;"></i>
+                </div>
+                <h4 style="font-size:1.05rem; font-weight:700; margin-bottom:6px; color:var(--text-main);">Multi-Sheet Excel (.xlsx)</h4>
+                <p style="font-size:0.8rem; color:var(--text-muted); margin-bottom:16px;">
+                  Includes 4 structured sheets: Executive Summary, Transactions Register, Category Budgets, and Accounts Ledger.
+                </p>
+              </div>
+              <button class="btn btn-income btn-sm" onclick="exportEngine.exportExcel()">
+                <i data-lucide="download" style="width:14px; height:14px;"></i> Download Excel Workbook
+              </button>
+            </div>
+
+            <!-- Full PDF Report Card -->
+            <div class="export-card">
+              <div>
+                <div style="width:40px; height:40px; border-radius:8px; background:rgba(244, 63, 94, 0.15); color:#f43f5e; display:flex; align-items:center; justify-content:center; margin-bottom:12px;">
+                  <i data-lucide="file-text" style="width:20px; height:20px;"></i>
+                </div>
+                <h4 style="font-size:1.05rem; font-weight:700; margin-bottom:6px; color:var(--text-main);">Executive PDF Statement</h4>
+                <p style="font-size:0.8rem; color:var(--text-muted); margin-bottom:16px;">
+                  Generates an executive-ready multi-page PDF report with KPIs, accounts overview, and itemized ledger.
+                </p>
+              </div>
+              <button class="btn btn-primary btn-sm" onclick="exportEngine.exportPDF()">
+                <i data-lucide="printer" style="width:14px; height:14px;"></i> Generate PDF Report
+              </button>
+            </div>
+
+            <!-- CSV Export Card -->
+            <div class="export-card">
+              <div>
+                <div style="width:40px; height:40px; border-radius:8px; background:rgba(59, 130, 246, 0.15); color:#3b82f6; display:flex; align-items:center; justify-content:center; margin-bottom:12px;">
+                  <i data-lucide="code" style="width:20px; height:20px;"></i>
+                </div>
+                <h4 style="font-size:1.05rem; font-weight:700; margin-bottom:6px; color:var(--text-main);">Raw Transactions (CSV)</h4>
+                <p style="font-size:0.8rem; color:var(--text-muted); margin-bottom:16px;">
+                  Export cleaned, deduplicated, RFC4180 standard CSV file for external accounting software.
+                </p>
+              </div>
+              <button class="btn btn-secondary btn-sm" onclick="exportEngine.exportCSV()">
+                <i data-lucide="download" style="width:14px; height:14px;"></i> Download CSV
+              </button>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- Quick Summary Metrics -->
+        <div class="glass-card">
+          <div class="glass-card-header">
+            <div class="glass-card-title">
+              <i data-lucide="check-circle" style="width:18px; height:18px; color:#10b981;"></i>
+              <span>Current Reconciled Snapshot</span>
+            </div>
+          </div>
+          <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:16px;">
+            <div>
+              <div style="font-size:0.75rem; color:#94a3b8; text-transform:uppercase;">Total Inflow</div>
+              <div style="font-size:1.4rem; font-weight:bold; color:#10b981; font-family:var(--font-mono);" id="reportIncomeVal">₹ 0</div>
+            </div>
+            <div>
+              <div style="font-size:0.75rem; color:#94a3b8; text-transform:uppercase;">Total Outflow</div>
+              <div style="font-size:1.4rem; font-weight:bold; color:#f43f5e; font-family:var(--font-mono);" id="reportExpenseVal">₹ 0</div>
+            </div>
+            <div>
+              <div style="font-size:0.75rem; color:#94a3b8; text-transform:uppercase;">Net Retained Savings</div>
+              <div style="font-size:1.4rem; font-weight:bold; color:#3b82f6; font-family:var(--font-mono);" id="reportSavingsVal">₹ 0</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- ==================== MANUAL TRANSACTION ENTRY MODAL ==================== -->
+  <div class="modal-overlay" id="manualTxnModal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <div style="display:flex; align-items:center; gap:8px;">
+          <div style="width:32px; height:32px; border-radius:8px; background:rgba(59,130,246,0.2); color:#3b82f6; display:flex; align-items:center; justify-content:center;">
+            <i data-lucide="plus-circle" style="width:18px; height:18px;"></i>
+          </div>
+          <h3 style="font-size:1.15rem; font-weight:700;">Record Offline / Manual Transaction</h3>
+        </div>
+        <button class="btn btn-ghost btn-sm btn-icon-only" id="btnCloseAddTxnModal">
+          <i data-lucide="x" style="width:18px; height:18px;"></i>
+        </button>
+      </div>
+
+      <form id="manualTxnForm">
+        <div class="modal-body">
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Transaction Type</label>
+              <select id="mTxnType" class="select-control">
+                <option value="expense">Expense (Debit)</option>
+                <option value="income">Income (Credit)</option>
+                <option value="transfer">Transfer</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Amount (INR ₹)</label>
+              <input type="number" step="0.01" min="0.01" id="mTxnAmount" class="input-control" placeholder="0.00" required>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Date</label>
+              <input type="date" id="mTxnDate" class="input-control" required>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Account / Payment Method</label>
+              <select id="mTxnAccount" class="select-control">
+                <!-- Dynamically populated -->
+              </select>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Category</label>
+            <select id="mTxnCategory" class="select-control">
+              <!-- Dynamically populated -->
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Description / Merchant Name</label>
+            <input type="text" id="mTxnDesc" class="input-control" placeholder="e.g. Local Tea Stall, Cash Groceries, Freelance Advance" required>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Notes / Tags (Optional)</label>
+            <input type="text" id="mTxnNotes" class="input-control" placeholder="e.g. Evening snacks with team, #cash">
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" id="btnCancelAddTxn">Cancel</button>
+          <button type="submit" class="btn btn-primary">
+            <i data-lucide="check" style="width:16px; height:16px;"></i> Save Transaction
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ==================== ADD / EDIT ACCOUNT OR CARD MODAL ==================== -->
+  <div class="modal-overlay" id="accountModal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <div style="display:flex; align-items:center; gap:8px;">
+          <div style="width:32px; height:32px; border-radius:8px; background:rgba(37,99,235,0.15); color:#2563eb; display:flex; align-items:center; justify-content:center;">
+            <i data-lucide="credit-card" style="width:18px; height:18px;"></i>
+          </div>
+          <h3 style="font-size:1.15rem; font-weight:700;" id="accountModalTitle">Add Bank Account or Card</h3>
+        </div>
+        <button class="btn btn-ghost btn-sm btn-icon-only" id="btnCloseAccountModal">
+          <i data-lucide="x" style="width:18px; height:18px;"></i>
+        </button>
+      </div>
+
+      <form id="accountForm">
+        <input type="hidden" id="accFormId" value="">
+        <div class="modal-body">
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Account / Card Display Name</label>
+              <input type="text" id="accFormName" class="input-control" placeholder="e.g. HDFC Salary A/c, ICICI Amazon Pay Card" required>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Institution / Bank / Provider</label>
+              <input type="text" id="accFormBank" class="input-control" placeholder="e.g. HDFC Bank, SBI, ICICI, Google Pay" required>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Account / Instrument Type</label>
+              <select id="accFormType" class="select-control" required>
+                <option value="bank">Bank Account (Savings / Current)</option>
+                <option value="credit_card">Credit Card (Visa / Mastercard / Amex)</option>
+                <option value="rupay_credit_card">RuPay Credit Card (UPI-Linked)</option>
+                <option value="wallet">UPI / Digital Wallet</option>
+                <option value="cash">Cash in Hand</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Last 4 Digits / ID</label>
+              <input type="text" id="accFormLast4" class="input-control" placeholder="e.g. 8821 or UPI" maxlength="8">
+            </div>
+          </div>
+
+          <div class="form-row" id="accBalanceRow">
+            <div class="form-group">
+              <label class="form-label">Starting / Base Balance (₹)</label>
+              <input type="number" step="0.01" id="accFormBalance" class="input-control" placeholder="0.00" value="0.00">
+            </div>
+            <div class="form-group" id="accCreditLimitGroup" style="display:none;">
+              <label class="form-label">Total Credit Limit (₹)</label>
+              <input type="number" step="0.01" id="accFormLimit" class="input-control" placeholder="100000.00" value="100000.00">
+            </div>
+          </div>
+
+          <div class="form-row" id="accCardDetailsRow" style="display:none;">
+            <div class="form-group">
+              <label class="form-label">Monthly Billing Cycle Day</label>
+              <input type="number" min="1" max="31" id="accFormBillingDay" class="input-control" placeholder="15" value="15">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Card Theme Gradient</label>
+              <select id="accFormColor" class="select-control">
+                <option value="#1e3a8a">Royal Navy Blue</option>
+                <option value="#065f46">Emerald Green</option>
+                <option value="#831843">Crimson Burgundy</option>
+                <option value="#9a3412">Copper Orange</option>
+                <option value="#5b21b6">Deep Violet</option>
+                <option value="#171717">Stealth Onyx Black</option>
+                <option value="#854d0e">Amber Gold</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" id="btnCancelAccountModal">Cancel</button>
+          <button type="submit" class="btn btn-primary">
+            <i data-lucide="check" style="width:16px; height:16px;"></i> Save Account
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- PROFILE MANAGER MODAL -->
+  <div class="modal-overlay" id="profileManagerModal">
+    <div class="pmm-sheet">
+
+      <!-- Modal header with gradient accent -->
+      <div class="pmm-header">
+        <div class="pmm-header-left">
+          <div class="pmm-header-icon">
+            <i data-lucide="users" style="width:18px;height:18px;"></i>
+          </div>
+          <div>
+            <div class="pmm-title">Profiles</div>
+            <div class="pmm-subtitle">Switch or manage your accounts</div>
+          </div>
+        </div>
+        <button class="pmm-close-btn" onclick="app.closeProfileModal()" aria-label="Close">
+          <i data-lucide="x" style="width:16px;height:16px;"></i>
+        </button>
+      </div>
+
+      <!-- Profile list -->
+      <div class="pmm-body">
+        <div id="profileManagerList" class="pmm-list">
+          <!-- Rendered by JS -->
+        </div>
+
+        <!-- Add new profile -->
+        <div class="pmm-add-section">
+          <div class="pmm-add-label">
+            <i data-lucide="plus-circle" style="width:13px;height:13px;"></i>
+            Add Profile
+          </div>
+          <div class="pmm-add-row">
+            <div class="pmm-add-input-wrap">
+              <i data-lucide="user" style="width:14px;height:14px;opacity:0.5;flex-shrink:0;"></i>
+              <input
+                type="text"
+                id="newProfileNameManagerInput"
+                class="pmm-add-input"
+                placeholder="New profile name..."
+                maxlength="32"
+                autocomplete="off"
+                onkeydown="if(event.key==='Enter') app.createProfileFromManager()"
+              >
+            </div>
+            <button class="pmm-add-btn" onclick="app.createProfileFromManager()">
+              <i data-lucide="plus" style="width:14px;height:14px;"></i>
+            </button>
+          </div>
+          <div id="newProfileManagerError" class="profile-create-error" style="display:none; margin-top:6px;"></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  </div><!-- end .app-container -->
+
+  <!-- Application Logic Scripts -->
+  <script src="js/profiles.js"></script>
+  <script src="js/db.js"></script>
+  <script src="js/categorizer.js"></script>
+  <script src="js/parser.js"></script>
+  <script src="js/duplicateDetector.js"></script>
+  <script src="js/accounts.js"></script>
+  <script src="js/budgets.js"></script>
+  <script src="js/charts.js"></script>
+  <script src="js/export.js"></script>
+  <script src="js/app.js"></script>
+
+</body>
+</html>
