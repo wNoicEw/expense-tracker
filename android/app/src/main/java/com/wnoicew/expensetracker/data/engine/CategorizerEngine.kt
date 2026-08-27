@@ -253,27 +253,186 @@ object CategorizerEngine {
         return clean.split(" ").take(3).joinToString(" ")
     }
 
-    fun extractMerchantName(rawNarration: String, matchedKeyword: String): String {
-        val lower = matchedKeyword.lowercase()
-        for ((key, pretty) in brandPrettyMap) {
-            if (lower.contains(key)) return pretty
-        }
-        return cleanNarration(rawNarration).ifBlank { matchedKeyword.replaceFirstChar { it.uppercase() } }
+    fun extractMerchantName(rawNarration: String, matchedKeyword: String, type: TransactionType = TransactionType.EXPENSE): String {
+        return cleanIndianTransactionTitle(rawNarration, type)
     }
 
-    fun cleanNarration(narration: String): String {
-        if (narration.isBlank()) return "Transaction"
-        var clean = narration
-            .replace(Regex("""^(UPI/|POS/|ACH CR/|ACH DR/|IMPS/|NEFT/|RTGS/|BBPS/|TRANSFER-UPI/DR/|TRANSFER-UPI/CR/|TO TRANSFER-UPI/DR/)""", RegexOption.IGNORE_CASE), "")
-            .replace(Regex("""\b\d{6,}\b"""), "")
-            .replace(Regex("""(CARD \d{4}|XX\d{4}|X{4,}\d{4})""", RegexOption.IGNORE_CASE), "")
-            .replace(Regex("""@[a-zA-Z0-9_-]+"""), "")
-            .replace(Regex("""/(MUMBAI|BANGALORE|BLR|DELHI|HYDERABAD|CHENNAI|PUNE|KOLKATA|NOIDA|GURGAON)\b""", RegexOption.IGNORE_CASE), "")
-            .replace(Regex("""[/_\-]+"""), " ")
+    fun cleanIndianTransactionTitle(rawNarration: String, transactionType: TransactionType = TransactionType.EXPENSE): String {
+        if (rawNarration.isBlank()) return "Transaction"
+        val raw = rawNarration.trim()
+
+        // 1. Navi statement format
+        val naviMatch = Regex("""^(Paid\s+to|Paid\s+for|Received\s+from|Refund\s+from)\s+([^—\[]+)(?:\s*[—\-]\s*([^\[]+))?""", RegexOption.IGNORE_CASE).find(raw)
+        if (naviMatch != null) {
+            val direction = naviMatch.groupValues[1].lowercase()
+            val person = naviMatch.groupValues[2].trim()
+            val note = naviMatch.groupValues.getOrNull(3)?.trim() ?: ""
+            val personClean = person.split(Regex("""\s+""")).joinToString(" ") { it.replaceFirstChar { c -> c.uppercase() } }
+
+            if (note.length > 1) {
+                return "$personClean ($note)".take(40)
+            } else if (direction.contains("received")) {
+                return "$personClean (Received)".take(40)
+            } else if (direction.contains("refund")) {
+                return "$personClean (Refund)".take(40)
+            }
+            return personClean.take(40)
+        }
+
+        val lowerText = raw.lowercase()
+
+        // 2. Standard brand mappings
+        val brandMap = mapOf(
+            "swiggy" to "Swiggy Food",
+            "instamart" to "Swiggy Instamart",
+            "zomato" to "Zomato Dining",
+            "blinkit" to "Blinkit Groceries",
+            "zepto" to "Zepto Quick Mart",
+            "bigbasket" to "BigBasket",
+            "amazon" to "Amazon India",
+            "flipkart" to "Flipkart",
+            "myntra" to "Myntra Fashion",
+            "uber" to "Uber Rides",
+            "ola" to "Ola Cabs",
+            "rapido" to "Rapido Bike Taxi",
+            "groww" to "Groww",
+            "zerodha" to "Zerodha",
+            "cred" to "CRED Club",
+            "irctc" to "IRCTC Indian Railways",
+            "uts" to "IRCTC UTS (Train Ticket)",
+            "indian r" to "Indian Railways (IRCTC)",
+            "indian s" to "SBI ePay / Govt. Portal",
+            "google" to "Google Pay / BBPS",
+            "dominos" to "Domino's Pizza",
+            "barbequ" to "Barbeque Nation",
+            "jugals" to "Jugals Sweets",
+            "sbi life" to "SBI Life Insurance",
+            "iit guwa" to "IIT Guwahati Fee",
+            "flightsm" to "Flightsmode Travel",
+            "k s foods" to "K S Foods",
+            "bhojoho" to "Bhojohori Manna Restaurant",
+            "yeasin" to "Yeasin Ali",
+            "santher" to "Santhiya",
+            "santhiya" to "Santhiya",
+            "indstock" to "INDstocks (Trading)",
+            "mutual f" to "Groww Mutual Funds (BSE)",
+            "iccl" to "ICCL (Groww Mutual Funds)",
+            "sbimops" to "SBI MOPS Portal Fee",
+            "grips" to "GRIPS WB State Govt. Portal",
+            "sujay" to "Sujay S",
+            "sahil" to "Sahil Ar",
+            "banhisha" to "Banhisha",
+            "kuntal" to "Kuntal Saha",
+            "ishita" to "Ishita Saha",
+            "rajib" to "Rajib Saha",
+            "tarun" to "Tarun Ka",
+            "sanjay" to "Sanjay",
+            "nuego" to "NueGo Bus Travel",
+            "bharatpe" to "BharatPe Merchant",
+            "netflix" to "Netflix OTT",
+            "spotify" to "Spotify Music",
+            "airtel" to "Airtel Broadband / Bill",
+            "jio" to "Reliance Jio Recharge",
+            "bescom" to "BESCOM Electricity",
+            "starbucks" to "Starbucks Coffee",
+            "apollo" to "Apollo Pharmacy"
+        )
+
+        for ((k, v) in brandMap) {
+            if (lowerText.contains(k)) {
+                return if (transactionType == TransactionType.INCOME && !v.contains("received", ignoreCase = true) && !v.endsWith(")")) {
+                    "$v (Received)"
+                } else {
+                    v
+                }
+            }
+        }
+
+        // 3. UPI format: UPI/DR/<ref>/<NAME>/<BANK>/<VPA>/... or UPI/<NAME>/PAYMENT/...
+        if (raw.contains("UPI/", ignoreCase = true) || raw.contains("UPI /", ignoreCase = true)) {
+            val parts = raw.split("/").map { it.trim() }.filter { it.isNotBlank() }
+            val upiIdx = parts.indexOfFirst { it.contains("UPI", ignoreCase = true) }
+            
+            var payee = ""
+            if (upiIdx != -1) {
+                if (parts.size > upiIdx + 3 && (parts[upiIdx + 1].equals("DR", ignoreCase = true) || parts[upiIdx + 1].equals("CR", ignoreCase = true))) {
+                    payee = parts[upiIdx + 3]
+                } else if (parts.size > upiIdx + 1) {
+                    payee = parts[upiIdx + 1]
+                }
+            }
+
+            payee = payee.replace(Regex("""\b\d{8,}\s+AT\s+\d+.*$""", RegexOption.IGNORE_CASE), "")
+                .replace(Regex("""\bAT\s+\d+.*$""", RegexOption.IGNORE_CASE), "")
+                .trim()
+
+            if (payee.isNotBlank()) {
+                val cleanWords = payee.split(Regex("""\s+"""))
+                    .filter { !listOf("dr", "cr", "upi", "paid", "payment", "p", "at", "in", "-").contains(it.lowercase()) }
+                    .map { it.replaceFirstChar { c -> c.uppercase() } }
+
+                if (cleanWords.isNotEmpty()) {
+                    var title = cleanWords.joinToString(" ")
+                    if (transactionType == TransactionType.INCOME) title += " (Received)"
+                    return title.take(35)
+                }
+            }
+        }
+
+
+
+        // 3. Direct Debit / Mandate / AMC
+        if (raw.contains("sbi life", ignoreCase = true)) return "SBI Life Insurance (Mandate)"
+        if (raw.contains("atmcard amc", ignoreCase = true) || raw.contains("atm card amc", ignoreCase = true)) return "SBI Debit Card Annual Fee (AMC)"
+        if (raw.contains("error cr", ignoreCase = true)) return "Bank Correction / Adjustment"
+
+        // 4. Interest Credit
+        if (raw.contains("interest credit", ignoreCase = true) || raw.contains("int credit", ignoreCase = true)) return "Savings Account Interest"
+
+        // 5. CEMTEX / Govt Benefit
+        if (raw.contains("cemtex", ignoreCase = true)) {
+            if (raw.contains("banglar yuba", ignoreCase = true)) return "Govt. Assistance — Banglar Yuba Sathi"
+            val benefit = raw.replace(Regex("""CEMTEX\s+(?:DEP|CR)\s*""", RegexOption.IGNORE_CASE), "").trim()
+            return "Govt. Direct Benefit (${benefit.take(20)})"
+        }
+
+        // 6. NEFT / IMPS transfers
+        if (raw.contains("neft", ignoreCase = true) || raw.contains("imps", ignoreCase = true)) {
+            val neftMatch = Regex("""(?:NEFT|IMPS)\*[^*]+\*[^*]+\*([^*-]+)""", RegexOption.IGNORE_CASE).find(raw)
+            if (neftMatch != null) {
+                val party = neftMatch.groupValues[1].trim()
+                if (party.contains("icici prudentia", ignoreCase = true)) return "ICICI Prudential Life Insurance"
+                return party.split(Regex("""\s+""")).joinToString(" ") { it.replaceFirstChar { c -> c.uppercase() } }.take(35)
+            }
+        }
+
+        // 7. Insurance Survival Benefit
+        if (raw.contains("survival benefit", ignoreCase = true)) return "Insurance Survival Benefit Credit"
+
+        // 8. Reversal / Internal Transfer code
+        if (Regex("""^\d{8,}\s+AT\s+\d+""", RegexOption.IGNORE_CASE).containsMatchIn(raw)) {
+            return if (transactionType == TransactionType.INCOME) "Instant Reversal / Refund" else "Direct Account Transfer"
+        }
+
+        // 9. Generic cleanup fallback
+        var clean = raw
+            .replace(Regex("""\b\d{8,}\s+AT\s+\d+.*$""", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("""\bAT\s+\d+.*$""", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("""^(UPI|POS|NEFT|IMPS|DEP|WDL|TFR|CLG|TRF|TRANSFER|DEBIT|CREDIT)[\s/-]+""", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("""[-_/]+"""), " ")
             .replace(Regex("""\s+"""), " ")
             .trim()
 
-        if (clean.length < 3) return narration.take(30)
-        return clean
+        val words = clean.split(Regex("""\s+"""))
+            .filter { it.length > 1 && !it.matches(Regex("""^\d+$""")) }
+            .map { it.replaceFirstChar { c -> c.uppercase() } }
+            .take(4)
+
+        return words.joinToString(" ").take(35).ifBlank { "Transaction" }
+    }
+
+    fun cleanNarration(narration: String): String {
+        return cleanIndianTransactionTitle(narration)
     }
 }
+

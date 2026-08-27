@@ -268,11 +268,41 @@ class Categorizer {
   }
 
   /**
-   * Extract pretty merchant name from bank narration
+   * Extract pretty merchant / payee name from bank & UPI narration
    */
-  extractMerchantName(rawNarration, matchedKeyword) {
-    if (!rawNarration) return 'Transaction';
+  extractMerchantName(rawNarration, matchedKeyword = '', type = 'expense') {
+    return this.cleanIndianTransactionTitle(rawNarration, type);
+  }
 
+  /**
+   * Smart Indian Transaction Cleaner — converts chaotic raw bank/UPI narrations into clean, readable merchant/payee titles
+   */
+  cleanIndianTransactionTitle(rawNarration, transactionType = 'expense') {
+    if (!rawNarration || !rawNarration.trim()) return 'Transaction';
+    
+    let raw = rawNarration.trim();
+
+    // 1. Navi statement format: "Paid to NAME — Note [Bank Instrument]" or "Received from..."
+    const naviMatch = raw.match(/^(Paid\s+to|Paid\s+for|Received\s+from|Refund\s+from)\s+([^—\[]+)(?:\s*[—\-]\s*([^\[]+))?/i);
+    if (naviMatch) {
+      const direction = naviMatch[1].toLowerCase();
+      const person = naviMatch[2].trim();
+      const note = (naviMatch[3] || '').trim();
+      const personClean = person.split(/\s+/).map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
+
+      if (note && note.length > 1) {
+        return `${personClean} (${note})`.slice(0, 40);
+      } else if (direction.includes('received')) {
+        return `${personClean} (Received)`.slice(0, 40);
+      } else if (direction.includes('refund')) {
+        return `${personClean} (Refund)`.slice(0, 40);
+      }
+      return personClean.slice(0, 40);
+    }
+
+    const lowerText = raw.toLowerCase();
+
+    // 2. Standard brand mappings
     const brandMap = {
       'swiggy': 'Swiggy Food',
       'instamart': 'Swiggy Instamart',
@@ -286,47 +316,147 @@ class Categorizer {
       'uber': 'Uber Rides',
       'ola': 'Ola Cabs',
       'rapido': 'Rapido Bike Taxi',
+      'groww': 'Groww',
+      'zerodha': 'Zerodha',
+      'cred': 'CRED Club',
       'irctc': 'IRCTC Indian Railways',
+      'uts': 'IRCTC UTS (Train Ticket)',
+      'indian r': 'Indian Railways (IRCTC)',
+      'indian s': 'SBI ePay / Govt. Portal',
+      'google': 'Google Pay / BBPS',
+      'dominos': "Domino's Pizza",
+      'barbequ': 'Barbeque Nation',
+      'jugals': 'Jugals Sweets',
+      'sbi life': 'SBI Life Insurance',
+      'iit guwa': 'IIT Guwahati Fee',
+      'flightsm': 'Flightsmode Travel',
+      'k s foods': 'K S Foods',
+      'bhojoho': 'Bhojohori Manna Restaurant',
+      'yeasin': 'Yeasin Ali',
+      'santher': 'Santhiya',
+      'santhiya': 'Santhiya',
+      'indstock': 'INDstocks (Trading)',
+      'mutual f': 'Groww Mutual Funds (BSE)',
+      'iccl': 'ICCL (Groww Mutual Funds)',
+      'sbimops': 'SBI MOPS Portal Fee',
+      'grips': 'GRIPS WB State Govt. Portal',
+      'sujay': 'Sujay S',
+      'sahil': 'Sahil Ar',
+      'banhisha': 'Banhisha',
+      'kuntal': 'Kuntal Saha',
+      'ishita': 'Ishita Saha',
+      'rajib': 'Rajib Saha',
+      'tarun': 'Tarun Ka',
+      'sanjay': 'Sanjay',
+      'nuego': 'NueGo Bus Travel',
+      'bharatpe': 'BharatPe Merchant',
       'netflix': 'Netflix OTT',
       'spotify': 'Spotify Music',
       'airtel': 'Airtel Broadband / Bill',
       'jio': 'Reliance Jio Recharge',
       'bescom': 'BESCOM Electricity',
-      'zerodha': 'Zerodha Coin / Kite',
-      'groww': 'Groww Investment',
       'starbucks': 'Starbucks Coffee',
-      'apollo': 'Apollo Pharmacy',
-      'cred': 'CRED Card Bill Payment'
+      'apollo': 'Apollo Pharmacy'
     };
 
-    const lower = matchedKeyword.toLowerCase();
-    for (const [key, pretty] of Object.entries(brandMap)) {
-      if (lower.includes(key)) return pretty;
+    for (const [k, v] of Object.entries(brandMap)) {
+      if (lowerText.includes(k)) {
+        if (transactionType === 'income' && !v.toLowerCase().includes('received') && !v.endsWith(')')) {
+          return `${v} (Received)`;
+        }
+        return v;
+      }
     }
 
-    return this.cleanNarration(rawNarration) || matchedKeyword;
+    // 3. UPI Format: UPI/DR/<ref>/<NAME>/<BANK>/<VPA>/... or UPI/<NAME>/PAYMENT/...
+    if (/UPI\s*\//i.test(raw)) {
+      const parts = raw.split('/').map(p => p.trim()).filter(Boolean);
+      const upiIdx = parts.findIndex(p => /UPI/i.test(p));
+      
+      let payee = '';
+      if (upiIdx !== -1) {
+        if (parts.length > upiIdx + 3 && (/^DR$/i.test(parts[upiIdx + 1]) || /^CR$/i.test(parts[upiIdx + 1]))) {
+          payee = parts[upiIdx + 3];
+        } else if (parts.length > upiIdx + 1) {
+          payee = parts[upiIdx + 1];
+        }
+      }
+
+      payee = payee.replace(/\b\d{8,}\s+AT\s+\d+.*$/i, '').replace(/\bAT\s+\d+.*$/i, '').trim();
+
+      if (payee) {
+        const cleanWords = payee.split(/\s+/)
+          .filter(w => !['dr', 'cr', 'upi', 'paid', 'payment', 'p', 'at', 'in', '-'].includes(w.toLowerCase()))
+          .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
+
+        if (cleanWords.length > 0) {
+          let title = cleanWords.join(' ');
+          if (transactionType === 'income') title += ' (Received)';
+          return title.slice(0, 35);
+        }
+      }
+    }
+
+
+
+    // 3. Direct Debit / Mandate / AMC
+    if (/sbi life/i.test(raw)) return 'SBI Life Insurance (Mandate)';
+    if (/atm\s*card\s*amc|atmcard\s*amc/i.test(raw)) return 'SBI Debit Card Annual Fee (AMC)';
+    if (/error\s*cr/i.test(raw)) return 'Bank Correction / Adjustment';
+
+    // 4. Interest Credit
+    if (/interest\s*credit|int\s*credit/i.test(raw)) return 'Savings Account Interest';
+
+    // 5. CEMTEX / Govt Direct Benefit
+    if (/cemtex/i.test(raw)) {
+      if (/banglar yuba/i.test(raw)) return 'Govt. Assistance — Banglar Yuba Sathi';
+      const benefit = raw.replace(/CEMTEX\s+(?:DEP|CR)\s*/i, '').trim();
+      return `Govt. Direct Benefit (${benefit.slice(0, 20)})`;
+    }
+
+    // 6. NEFT / IMPS transfers
+    if (/neft|imps/i.test(raw)) {
+      const neftMatch = raw.match(/(?:NEFT|IMPS)\*[^*]+\*[^*]+\*([^*-]+)/i);
+      if (neftMatch) {
+        const party = neftMatch[1].trim();
+        if (/icici prudentia/i.test(party)) return 'ICICI Prudential Life Insurance';
+        return party.split(/\s+/).map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ').slice(0, 35);
+      }
+    }
+
+    // 7. Insurance Survival Benefit
+    if (/survival\s*benefit/i.test(raw)) return 'Insurance Survival Benefit Credit';
+
+    // 8. Reversal / Internal Transfer code (e.g. 009769... AT 04744 CHAKDAH)
+    if (/^\d{8,}\s+AT\s+\d+/i.test(raw)) {
+      return transactionType === 'income' ? 'Instant Reversal / Refund' : 'Direct Account Transfer';
+    }
+
+    // 9. Generic cleanup fallback
+    let clean = raw
+      .replace(/\b\d{8,}\s+AT\s+\d+.*$/i, '')
+      .replace(/\bAT\s+\d+.*$/i, '')
+      .replace(/^(UPI|POS|NEFT|IMPS|DEP|WDL|TFR|CLG|TRF|TRANSFER|DEBIT|CREDIT)[\s/-]+/i, '')
+      .replace(/[-_/]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    const words = clean.split(/\s+/)
+      .filter(w => w.length > 1 && !/^\d+$/.test(w))
+      .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+      .slice(0, 4);
+
+    return words.join(' ').slice(0, 35) || 'Transaction';
   }
 
   /**
    * Strip cryptographic bank noise, raw routing prefixes, and timestamps
    */
   cleanNarration(narration) {
-    if (!narration) return 'Transaction';
-
-    let clean = narration
-      .replace(/^(UPI\/|POS\/|ACH CR\/|ACH DR\/|IMPS\/|NEFT\/|RTGS\/|BBPS\/|TRANSFER-UPI\/DR\/|TRANSFER-UPI\/CR\/|TO TRANSFER-UPI\/DR\/)/i, '')
-      .replace(/\b\d{6,}\b/g, '')
-      .replace(/(CARD \d{4}|XX\d{4}|X{4,}\d{4})/gi, '')
-      .replace(/@[a-zA-Z0-9_-]+/g, '')
-      .replace(/\/(MUMBAI|BANGALORE|BLR|DELHI|HYDERABAD|CHENNAI|PUNE|KOLKATA|NOIDA|GURGAON)\b/gi, '')
-      .replace(/[\/\-_]+/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim();
-
-    if (clean.length < 3) return narration.substring(0, 30);
-    return clean;
+    return this.cleanIndianTransactionTitle(narration);
   }
 }
+
 
 // Global instance
 window.categorizer = new Categorizer();

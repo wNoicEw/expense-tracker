@@ -308,12 +308,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    // Statement CSV Parser & Batch Commit
+    // Statement Parser (PDF & CSV) & Batch Commit
+    fun parseStatementStream(inputStream: java.io.InputStream, fileName: String, accountId: String = "", accountName: String = ""): StatementParseResult {
+        val profile = activeProfile.value ?: throw IllegalStateException("No active profile")
+        val customRules = rules.value
+        return StatementParserEngine.parseStatementStream(inputStream, fileName, accountId, accountName, customRules)
+    }
+
     fun parseCsvStatement(lines: List<String>, fileName: String, accountId: String = "", accountName: String = ""): StatementParseResult {
         val profile = activeProfile.value ?: return StatementParseResult("Unknown", emptyList(), 0.0, 0.0)
         val customRules = rules.value
         return StatementParserEngine.parseCsvLines(lines, fileName, accountId, accountName, customRules)
     }
+
 
     fun commitBatchTransactions(fileName: String, detectedBank: String, transactionsToInsert: List<TransactionEntity>) {
         val profile = activeProfile.value ?: return

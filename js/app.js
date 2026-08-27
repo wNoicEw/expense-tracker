@@ -1325,12 +1325,23 @@ class App {
 
   async handleFileUpload(file) {
     const statusBox = document.getElementById('uploadStatusBox');
+    const isPDF = file.name.toLowerCase().endsWith('.pdf');
     if (statusBox) {
       statusBox.style.display = 'block';
       statusBox.innerHTML = `
-        <div style="display:flex; align-items:center; gap:12px;">
-          <div class="spinner" style="width:20px; height:20px; border:2px solid #3b82f6; border-top-color:transparent; border-radius:50%; animation:spin 0.8s linear infinite;"></div>
-          <span>Parsing <strong>${file.name}</strong> 100% offline in browser...</span>
+        <div style="display:flex; flex-direction:column; gap:10px;">
+          <div style="display:flex; align-items:center; gap:12px;">
+            <div class="spinner" style="width:20px; height:20px; border:2px solid #6366f1; border-top-color:transparent; border-radius:50%; animation:spin 0.8s linear infinite; flex-shrink:0;"></div>
+            <div>
+              <div style="font-weight:600; color:var(--text-main); font-size:0.9rem;">Parsing <strong>${this.escape(file.name)}</strong></div>
+              <div style="font-size:0.78rem; color:var(--text-muted); margin-top:2px;">100% offline · nothing leaves your device</div>
+            </div>
+          </div>
+          ${isPDF ? `
+          <div style="display:flex; gap:0; font-size:0.75rem; color:var(--text-muted); padding-left:32px;">
+            <span style="color:#6366f1; font-weight:600;">① Extracting text&nbsp;</span>
+            <span style="color:#94a3b8;">→ ② Auto-detecting format → ③ Categorising</span>
+          </div>` : ''}
         </div>
       `;
     }
@@ -1359,13 +1370,40 @@ class App {
 
       if (statusBox) {
         statusBox.innerHTML = `
-          <div style="color:#10b981; font-weight:600;">
-            ✓ Successfully imported ${parseResult.count} transactions from ${parseResult.detectedProfile}!
-            ${unclassified > 0 ? `<div style="color:#f59e0b; margin-top:4px; font-size:0.85rem;">⚡ ${unclassified} transaction(s) need your review to teach the AI classifier.</div>` : ''}
-            ${dupScan.duplicatesFound > 0 ? `<div style="color:#f59e0b; margin-top:4px; font-size:0.85rem;">⚠️ Found ${dupScan.duplicatesFound} potential duplicate transaction(s).</div>` : ''}
+          <div style="
+            background: linear-gradient(135deg, rgba(16,185,129,0.08), rgba(5,150,105,0.05));
+            border: 1px solid rgba(16,185,129,0.3);
+            border-radius: 12px;
+            padding: 16px 20px;
+          ">
+            <div style="display:flex; align-items:center; gap:10px; margin-bottom:${unclassified > 0 || dupScan.duplicatesFound > 0 ? '10px' : '0'};">
+              <span style="font-size:1.3rem;">✅</span>
+              <div>
+                <div style="font-weight:700; color:#10b981; font-size:0.95rem;">
+                  Imported ${parseResult.count} transaction${parseResult.count !== 1 ? 's' : ''}
+                </div>
+                <div style="font-size:0.78rem; color:var(--text-muted); margin-top:2px;">
+                  Detected as <span style="
+                    background:rgba(99,102,241,0.15); color:#818cf8;
+                    padding:1px 8px; border-radius:10px; font-size:0.75rem;
+                    border:1px solid rgba(99,102,241,0.25); font-weight:600;
+                  ">${this.escape(parseResult.detectedProfile)}</span>
+                  &nbsp;·&nbsp; ${this.escape(file.name)}
+                </div>
+              </div>
+            </div>
+            ${unclassified > 0 ? `
+              <div style="color:#f59e0b; font-size:0.82rem; padding:6px 10px; background:rgba(245,158,11,0.1); border-radius:6px; margin-top:6px;">
+                ⚡ <strong>${unclassified}</strong> transaction(s) need your review to teach the AI classifier.
+              </div>` : ''}
+            ${dupScan.duplicatesFound > 0 ? `
+              <div style="color:#f97316; font-size:0.82rem; padding:6px 10px; background:rgba(249,115,22,0.1); border-radius:6px; margin-top:6px;">
+                ⚠️ <strong>${dupScan.duplicatesFound}</strong> potential duplicate transaction(s) detected.
+              </div>` : ''}
           </div>
         `;
       }
+
 
       this.showToast(`Imported ${parseResult.count} transactions!`, 'success');
       await this.refreshAllViews();
@@ -1377,10 +1415,85 @@ class App {
       }
     } catch (err) {
       console.error('File parsing error:', err);
+
       if (statusBox) {
-        statusBox.innerHTML = `<div style="color:#f43f5e; font-weight:600;">✗ Failed to parse statement: ${err.message}</div>`;
+        if (err.detectionFailed) {
+          // Two sub-cases: (a) format detected but empty, (b) format not detected at all
+          const profileKnown = err.detectedProfile && err.detectedProfile !== 'Generic Statement';
+
+          statusBox.innerHTML = `
+            <div style="
+              background: linear-gradient(135deg, rgba(244,63,94,0.08), rgba(239,68,68,0.05));
+              border: 1px solid rgba(244,63,94,0.3);
+              border-radius: 12px;
+              padding: 18px 20px;
+              font-size: 0.88rem;
+            ">
+              <div style="display:flex; align-items:flex-start; gap:12px; margin-bottom:14px;">
+                <span style="font-size:1.5rem; flex-shrink:0;">⚠️</span>
+                <div>
+                  <div style="font-weight:700; color:#f43f5e; font-size:0.95rem; margin-bottom:4px;">
+                    ${profileKnown ? `Detected: "${this.escape(err.detectedProfile)}" — but no transactions found` : 'Failed to detect statement format'}
+                  </div>
+                  <div style="color:var(--text-muted);">
+                    File: <strong style="color:var(--text-main);">${this.escape(file.name)}</strong>
+                  </div>
+                </div>
+              </div>
+
+              ${profileKnown ? `
+                <div style="background:rgba(251,191,36,0.1); border:1px solid rgba(251,191,36,0.3); border-radius:8px; padding:12px 14px; margin-bottom:14px;">
+                  <div style="font-weight:600; color:#f59e0b; margin-bottom:6px;">💡 Likely Causes</div>
+                  <ul style="margin:0; padding-left:18px; color:var(--text-muted); line-height:1.8;">
+                    <li>PDF is <strong>password-protected</strong> — open it in Adobe / browser, enter the password, then print/save as PDF without password</li>
+                    <li>PDF contains <strong>scanned images</strong> instead of selectable text — requires OCR (unsupported in offline mode)</li>
+                    <li>Statement is in an <strong>unsupported variant</strong> of this bank's format</li>
+                  </ul>
+                </div>
+              ` : `
+                <div style="background:rgba(251,191,36,0.1); border:1px solid rgba(251,191,36,0.3); border-radius:8px; padding:12px 14px; margin-bottom:14px;">
+                  <div style="font-weight:600; color:#f59e0b; margin-bottom:8px;">📋 Supported Formats</div>
+                  <div style="display:flex; flex-wrap:wrap; gap:6px;">
+                    ${['Navi UPI','PhonePe','Paytm','Google Pay','SBI Bank','HDFC Bank','ICICI Bank','Axis Bank','Kotak Bank','HDFC CC','ICICI CC','Axis CC','SBI Card','Amazon Pay ICICI','CSV','Excel (.xlsx)'].map(f =>
+                      `<span style="background:rgba(99,102,241,0.15); color:#818cf8; padding:2px 10px; border-radius:20px; font-size:0.78rem; border:1px solid rgba(99,102,241,0.25);">${f}</span>`
+                    ).join('')}
+                  </div>
+                  <div style="margin-top:10px; color:var(--text-muted); line-height:1.7;">
+                    💡 <strong>Tips:</strong> Make sure the PDF has selectable text (not scanned). If password-protected, unlock it first. For best results, download the statement directly from your bank's official app.
+                  </div>
+                </div>
+              `}
+
+              <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                <button onclick="document.getElementById('statementFileInput').click()" style="
+                  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+                  color: #fff; border: none; border-radius: 8px;
+                  padding: 8px 16px; cursor: pointer; font-size: 0.83rem; font-weight: 600;
+                ">📂 Try Another File</button>
+                <button onclick="this.closest('.upload-status-box').style.display='none'" style="
+                  background: transparent; color: var(--text-muted);
+                  border: 1px solid var(--border-color); border-radius: 8px;
+                  padding: 8px 14px; cursor: pointer; font-size: 0.83rem;
+                ">Dismiss</button>
+              </div>
+            </div>
+          `;
+        } else {
+          // Generic parse/runtime error
+          statusBox.innerHTML = `
+            <div style="display:flex; align-items:center; gap:10px; color:#f43f5e; font-weight:600; padding:4px 0;">
+              <span style="font-size:1.2rem;">✗</span>
+              <span>Failed to parse <strong>${this.escape(file.name)}</strong>: ${this.escape(err.message)}</span>
+            </div>
+          `;
+        }
       }
-      this.showToast(err.message, 'error');
+
+      this.showToast(err.detectionFailed
+        ? (err.detectedProfile ? `Detected "${err.detectedProfile}" but found 0 transactions` : 'Failed to detect statement format')
+        : err.message,
+        'error'
+      );
     }
   }
 
