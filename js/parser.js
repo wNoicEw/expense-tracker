@@ -30,7 +30,7 @@ class StatementParser {
   /**
    * Main Entry Point: parse any File object
    */
-  async parseFile(file, targetAccountId = null) {
+  async parseFile(file, targetAccountId = null, password = null) {
     const fileName = file.name;
     const fileExt = fileName.split('.').pop().toLowerCase();
 
@@ -39,7 +39,7 @@ class StatementParser {
     let accountMetadata = null;
 
     if (fileExt === 'pdf') {
-      const parsed = await this.parsePDF(file);
+      const parsed = await this.parsePDF(file, password);
       rawRecords = parsed.records;
       detectedProfile = parsed.profile;
       accountMetadata = parsed.accountMetadata;
@@ -167,9 +167,34 @@ class StatementParser {
   // --- PDF PARSING ENGINE (Using PDF.js) ---
   // 3-stage pipeline: extract items with coords → build spatial rows → route to bank-specific parser
 
-  async parsePDF(file) {
+  async parsePDF(file, password = null) {
     const arrayBuffer = await this.readFileAsArrayBuffer(file);
-    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+    let pdf;
+    try {
+      const loadingTask = pdfjsLib.getDocument({
+        data: arrayBuffer,
+        password: password || undefined
+      });
+      pdf = await loadingTask.promise;
+    } catch (err) {
+      if (
+        err.name === 'PasswordException' ||
+        err.code === 1 || // NEED_PASSWORD
+        err.code === 2 || // INCORRECT_PASSWORD
+        (err.message && err.message.toLowerCase().includes('password'))
+      ) {
+        const pwErr = new Error(
+          err.code === 2 || (err.message && err.message.toLowerCase().includes('incorrect'))
+            ? 'Incorrect PDF password. Please check and try again.'
+            : 'This PDF statement is password-protected.'
+        );
+        pwErr.isPasswordProtected = true;
+        pwErr.isIncorrectPassword = err.code === 2 || (err.message && err.message.toLowerCase().includes('incorrect'));
+        pwErr.fileName = file.name;
+        throw pwErr;
+      }
+      throw err;
+    }
 
     // Stage 1: collect all text items with x,y coordinates across all pages
     let allItems = []; // [{text, x, y, pageH}]

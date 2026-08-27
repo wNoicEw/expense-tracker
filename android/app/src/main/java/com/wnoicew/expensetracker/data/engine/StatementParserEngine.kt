@@ -17,7 +17,9 @@ class StatementParsingException(
     val title: String,
     val detail: String,
     val detectedProfile: String? = null,
-    val isDetectionFailure: Boolean = true
+    val isDetectionFailure: Boolean = true,
+    val isPasswordProtected: Boolean = false,
+    val isIncorrectPassword: Boolean = false
 ) : Exception("$title: $detail")
 
 object StatementParserEngine {
@@ -46,11 +48,12 @@ object StatementParserEngine {
         fileName: String,
         accountId: String = "",
         accountName: String = "",
-        customRules: List<RuleEntity> = emptyList()
+        customRules: List<RuleEntity> = emptyList(),
+        password: String? = null
     ): StatementParseResult {
         val ext = fileName.substringAfterLast('.', "").lowercase()
         return if (ext == "pdf") {
-            parsePdfStream(inputStream, fileName, accountId, accountName, customRules)
+            parsePdfStream(inputStream, fileName, accountId, accountName, customRules, password)
         } else {
             parseCsvStream(inputStream, fileName, accountId, accountName, customRules)
         }
@@ -62,17 +65,37 @@ object StatementParserEngine {
         fileName: String,
         accountId: String = "",
         accountName: String = "",
-        customRules: List<RuleEntity> = emptyList()
+        customRules: List<RuleEntity> = emptyList(),
+        password: String? = null
     ): StatementParseResult {
         val document: PDDocument
         try {
-            document = PDDocument.load(inputStream)
-        } catch (_: Exception) {
-            throw StatementParsingException(
-                title = "Unable to open PDF",
-                detail = "The PDF may be password-protected or corrupted. If protected, please unlock it before uploading.",
-                isDetectionFailure = true
-            )
+            document = if (!password.isNullOrEmpty()) {
+                PDDocument.load(inputStream, password)
+            } else {
+                PDDocument.load(inputStream)
+            }
+        } catch (e: Exception) {
+            val isPwError = e is com.tom_roush.pdfbox.pdmodel.encryption.InvalidPasswordException ||
+                    e.javaClass.name.contains("Password", ignoreCase = true) ||
+                    (e.message ?: "").contains("password", ignoreCase = true)
+
+            if (isPwError) {
+                val isWrong = !password.isNullOrEmpty()
+                throw StatementParsingException(
+                    title = if (isWrong) "Incorrect PDF Password" else "Password-Protected PDF",
+                    detail = if (isWrong) "The password entered is incorrect. Please check and try again." else "This PDF statement is password-protected by your bank or app (e.g. DOB, Account No, PAN).",
+                    isDetectionFailure = true,
+                    isPasswordProtected = true,
+                    isIncorrectPassword = isWrong
+                )
+            } else {
+                throw StatementParsingException(
+                    title = "Unable to open PDF",
+                    detail = "The PDF could not be opened (${e.message ?: "corrupted or unsupported"}). Please check the file.",
+                    isDetectionFailure = true
+                )
+            }
         }
 
         val fullText: String

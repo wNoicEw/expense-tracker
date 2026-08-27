@@ -908,6 +908,64 @@
     </div>
   </div>
 
+  <!-- PDF PASSWORD UNLOCK MODAL -->
+  <div class="modal-overlay" id="pdfPasswordModal">
+    <div class="modal-content" style="max-width: 440px;">
+      <div class="modal-header">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <div style="width:36px; height:36px; border-radius:10px; background:rgba(99,102,241,0.15); display:flex; align-items:center; justify-content:center; color:#818cf8;">
+            <i data-lucide="lock" style="width:20px; height:20px;"></i>
+          </div>
+          <div>
+            <h3 class="modal-title" style="margin:0; font-size:1.05rem;">Password-Protected PDF</h3>
+            <span style="font-size:0.75rem; color:var(--text-muted);" id="pdfPasswordFileName">statement.pdf</span>
+          </div>
+        </div>
+        <button type="button" class="btn btn-ghost btn-icon-only" onclick="app.closePdfPasswordModal()">
+          <i data-lucide="x" style="width:18px; height:18px;"></i>
+        </button>
+      </div>
+
+      <div class="modal-body" style="padding:20px;">
+        <p style="font-size:0.83rem; color:var(--text-muted); line-height:1.5; margin-bottom:14px;">
+          This statement is encrypted. Enter the PDF password (e.g. <strong>Date of Birth DDMMYYYY</strong>, <strong>PAN in CAPITALS</strong>, or <strong>Last 4 digits of Account/Card</strong>) to unlock:
+        </p>
+
+        <div class="form-group" style="margin-bottom:12px;">
+          <label class="form-label" style="font-size:0.8rem; font-weight:600;">PDF Password</label>
+          <div style="position:relative;">
+            <input
+              type="password"
+              id="pdfPasswordInput"
+              class="input-control"
+              placeholder="Enter statement password..."
+              autocomplete="off"
+              style="padding-right:40px;"
+              onkeydown="if(event.key==='Enter') app.submitPdfPassword()"
+            >
+            <button
+              type="button"
+              onclick="app.togglePdfPasswordVisibility()"
+              style="position:absolute; right:10px; top:50%; transform:translateY(-50%); background:none; border:none; color:var(--text-muted); cursor:pointer; padding:4px;"
+              title="Toggle password visibility"
+            >
+              <i id="pdfPwEyeIcon" data-lucide="eye" style="width:16px; height:16px;"></i>
+            </button>
+          </div>
+        </div>
+
+        <div id="pdfPasswordError" style="display:none; color:#f43f5e; font-size:0.8rem; margin-bottom:12px; font-weight:600; background:rgba(244,63,94,0.1); border:1px solid rgba(244,63,94,0.25); padding:8px 12px; border-radius:8px;"></div>
+
+        <div class="modal-footer" style="padding:0; margin-top:16px; border:none; display:flex; justify-content:flex-end; gap:10px;">
+          <button type="button" class="btn btn-secondary" onclick="app.closePdfPasswordModal()">Cancel</button>
+          <button type="button" class="btn btn-primary" id="btnSubmitPdfPassword" onclick="app.submitPdfPassword()">
+            <i data-lucide="unlock" style="width:16px; height:16px;"></i> Unlock &amp; Import
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- PROFILE MANAGER MODAL -->
   <div class="modal-overlay" id="profileManagerModal">
     <div class="pmm-sheet">

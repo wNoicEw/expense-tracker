@@ -25,6 +25,8 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -56,6 +58,15 @@ fun UploadScreen(
     var parsingError by remember { mutableStateOf<com.wnoicew.expensetracker.data.engine.StatementParsingException?>(null) }
     var genericError by remember { mutableStateOf<String?>(null) }
     var currentProcessingFile by remember { mutableStateOf<String?>(null) }
+
+    // Password-protected PDF states
+    var pendingPdfUri by remember { mutableStateOf<Uri?>(null) }
+    var pendingPdfFileName by remember { mutableStateOf("") }
+    var showPasswordDialog by remember { mutableStateOf(false) }
+    var passwordInput by remember { mutableStateOf("") }
+    var passwordError by remember { mutableStateOf<String?>(null) }
+    var isPasswordVisible by remember { mutableStateOf(false) }
+    var isUnlockingPdf by remember { mutableStateOf(false) }
 
     val currencyFormat = remember {
         NumberFormat.getCurrencyInstance(Locale("en", "IN")).apply {
@@ -103,7 +114,14 @@ fun UploadScreen(
                     genericError = "Could not open file stream."
                 }
             } catch (e: com.wnoicew.expensetracker.data.engine.StatementParsingException) {
-                parsingError = e
+                if (e.isPasswordProtected) {
+                    pendingPdfUri = uri
+                    pendingPdfFileName = currentProcessingFile ?: "statement.pdf"
+                    passwordError = if (e.isIncorrectPassword) "Incorrect password. Please try again." else null
+                    showPasswordDialog = true
+                } else {
+                    parsingError = e
+                }
             } catch (e: Exception) {
                 genericError = e.message ?: "Failed to process statement file."
             } finally {
@@ -542,6 +560,124 @@ fun UploadScreen(
                 Spacer(modifier = Modifier.height(16.dp))
             }
         }
+    }
+
+    // Password Unlock Prompt Dialog
+    if (showPasswordDialog && pendingPdfUri != null) {
+        AlertDialog(
+            onDismissRequest = {
+                showPasswordDialog = false
+                passwordInput = ""
+                passwordError = null
+                pendingPdfUri = null
+            },
+            icon = {
+                Icon(
+                    imageVector = Icons.Default.Lock,
+                    contentDescription = null,
+                    tint = PrimaryBlue,
+                    modifier = Modifier.size(28.dp)
+                )
+            },
+            title = {
+                Text(
+                    text = "Password-Protected PDF",
+                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.titleMedium
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = "This statement (${pendingPdfFileName}) is encrypted. Enter the PDF password (e.g. Date of Birth DDMMYYYY, PAN in CAPITALS, or Last 4 digits of Account) to unlock:",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    OutlinedTextField(
+                        value = passwordInput,
+                        onValueChange = {
+                            passwordInput = it
+                            passwordError = null
+                        },
+                        label = { Text("PDF Password") },
+                        placeholder = { Text("Enter statement password...") },
+                        singleLine = true,
+                        isError = passwordError != null,
+                        supportingText = passwordError?.let { { Text(it, color = ExpenseRose) } },
+                        visualTransformation = if (isPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                        trailingIcon = {
+                            IconButton(onClick = { isPasswordVisible = !isPasswordVisible }) {
+                                Icon(
+                                    imageVector = if (isPasswordVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                    contentDescription = null
+                                )
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val stream = context.contentResolver.openInputStream(pendingPdfUri!!)
+                        if (stream != null) {
+                            try {
+                                isUnlockingPdf = true
+                                val parsed = viewModel.parseStatementStream(
+                                    stream,
+                                    pendingPdfFileName,
+                                    password = passwordInput
+                                )
+                                stream.close()
+                                showPasswordDialog = false
+                                passwordInput = ""
+                                passwordError = null
+                                pendingPdfUri = null
+                                parseResultToPreview = parsed
+                            } catch (e: com.wnoicew.expensetracker.data.engine.StatementParsingException) {
+                                stream.close()
+                                if (e.isPasswordProtected) {
+                                    passwordError = if (e.isIncorrectPassword) "Incorrect password. Please try again." else e.detail
+                                } else {
+                                    showPasswordDialog = false
+                                    parsingError = e
+                                }
+                            } catch (e: Exception) {
+                                stream.close()
+                                showPasswordDialog = false
+                                genericError = e.message ?: "Failed to unlock PDF."
+                            } finally {
+                                isUnlockingPdf = false
+                            }
+                        }
+                    },
+                    enabled = passwordInput.isNotBlank() && !isUnlockingPdf
+                ) {
+                    if (isUnlockingPdf) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            color = MaterialTheme.colorScheme.onPrimary,
+                            strokeWidth = 2.dp
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                    }
+                    Text("Unlock & Import")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        showPasswordDialog = false
+                        passwordInput = ""
+                        passwordError = null
+                        pendingPdfUri = null
+                    }
+                ) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 }
 
