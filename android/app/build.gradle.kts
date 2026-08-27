@@ -108,6 +108,9 @@ dependencies {
     // Coroutines
     implementation(libs.kotlinx.coroutines.android)
 
+    // PDF Parser
+    implementation(libs.pdfbox.android)
+
     testImplementation(libs.junit)
     testImplementation("org.json:json:20231013")
     androidTestImplementation(libs.androidx.junit)

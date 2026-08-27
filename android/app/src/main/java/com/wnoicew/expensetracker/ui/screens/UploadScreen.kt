@@ -35,6 +35,7 @@ import com.wnoicew.expensetracker.ui.components.HigInsetGroup
 import com.wnoicew.expensetracker.ui.theme.IncomeGreen
 import com.wnoicew.expensetracker.ui.theme.ExpenseRose
 import com.wnoicew.expensetracker.ui.theme.PrimaryBlue
+import com.wnoicew.expensetracker.ui.theme.WarningAmber
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.text.NumberFormat
@@ -52,6 +53,10 @@ fun UploadScreen(
     var currentImportFileName by remember { mutableStateOf("") }
     var isReadingFile by remember { mutableStateOf(false) }
 
+    var parsingError by remember { mutableStateOf<com.wnoicew.expensetracker.data.engine.StatementParsingException?>(null) }
+    var genericError by remember { mutableStateOf<String?>(null) }
+    var currentProcessingFile by remember { mutableStateOf<String?>(null) }
+
     val currencyFormat = remember {
         NumberFormat.getCurrencyInstance(Locale("en", "IN")).apply {
             maximumFractionDigits = 0
@@ -64,26 +69,43 @@ fun UploadScreen(
         parseResultToPreview = null
     }
 
-    // Statement CSV Picker
-    val csvPickerLauncher = rememberLauncherForActivityResult(
+    // Statement File Picker (PDF, CSV, Excel, TXT)
+    val statementPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
         if (uri != null) {
+            parsingError = null
+            genericError = null
             try {
                 isReadingFile = true
+                var fileName = "statement"
+                // Try query filename from content resolver
+                try {
+                    context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                        val nameIndex = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                        if (nameIndex != -1 && cursor.moveToFirst()) {
+                            fileName = cursor.getString(nameIndex)
+                        }
+                    }
+                } catch (_: Exception) {
+                    fileName = uri.lastPathSegment ?: "statement.pdf"
+                }
+
+                currentImportFileName = fileName
+                currentProcessingFile = fileName
+
                 val inputStream = context.contentResolver.openInputStream(uri)
                 if (inputStream != null) {
-                    val reader = BufferedReader(InputStreamReader(inputStream))
-                    val lines = reader.readLines()
+                    val parsed = viewModel.parseStatementStream(inputStream, fileName)
                     inputStream.close()
-
-                    val fileName = uri.lastPathSegment ?: "statement.csv"
-                    currentImportFileName = fileName
-                    val parsed = viewModel.parseCsvStatement(lines, fileName)
                     parseResultToPreview = parsed
+                } else {
+                    genericError = "Could not open file stream."
                 }
+            } catch (e: com.wnoicew.expensetracker.data.engine.StatementParsingException) {
+                parsingError = e
             } catch (e: Exception) {
-                Toast.makeText(context, "Failed to parse statement: ${e.message}", Toast.LENGTH_LONG).show()
+                genericError = e.message ?: "Failed to process statement file."
             } finally {
                 isReadingFile = false
             }
@@ -104,7 +126,7 @@ fun UploadScreen(
                 color = MaterialTheme.colorScheme.onBackground
             )
             Text(
-                text = "Universal offline bank & UPI statement ingestion",
+                text = "Universal offline bank, UPI & credit card statement ingestion",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -116,7 +138,7 @@ fun UploadScreen(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(12.dp),
+                        .padding(14.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Box(
@@ -137,38 +159,54 @@ fun UploadScreen(
                     Spacer(modifier = Modifier.height(12.dp))
 
                     Text(
-                        text = "Upload Statement or UPI History",
+                        text = "Upload PDF, CSV or Excel Statement",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurface
                     )
 
                     Text(
-                        text = "Select your CSV or bank export. All parsing runs 100% locally in on-device memory — nothing is ever uploaded to any server.",
+                        text = "Upload PDF bank statements, UPI history & credit card bills. Parsed 100% offline in on-device memory.",
                         fontSize = 13.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = TextAlign.Center,
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
                     )
 
-                    Spacer(modifier = Modifier.height(10.dp))
+                    Spacer(modifier = Modifier.height(8.dp))
 
                     // Format Pills (Matching Web App)
-                    val formats = listOf("Google Pay", "PhonePe", "Paytm", "CRED Card", "HDFC / SBI / ICICI", "CSV")
+                    val formats = listOf(
+                        "PDF (All Banks)" to PrimaryBlue,
+                        "Navi UPI" to PrimaryBlue.copy(alpha = 0.7f),
+                        "PhonePe" to PrimaryBlue.copy(alpha = 0.7f),
+                        "Paytm" to PrimaryBlue.copy(alpha = 0.7f),
+                        "Google Pay" to PrimaryBlue.copy(alpha = 0.7f),
+                        "SBI Bank" to IncomeGreen,
+                        "HDFC Bank" to IncomeGreen,
+                        "ICICI Bank" to IncomeGreen,
+                        "Axis Bank" to IncomeGreen,
+                        "Kotak Bank" to IncomeGreen,
+                        "Credit Cards ✦" to ExpenseRose,
+                        "Excel (.xlsx)" to MaterialTheme.colorScheme.outline,
+                        "CSV" to MaterialTheme.colorScheme.outline
+                    )
+
                     LazyRow(
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        modifier = Modifier.padding(vertical = 6.dp)
+                        modifier = Modifier.padding(vertical = 4.dp)
                     ) {
-                        items(formats) { fmt ->
+                        items(formats) { (fmt, color) ->
                             Surface(
                                 shape = RoundedCornerShape(8.dp),
-                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)
+                                color = color.copy(alpha = 0.15f),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, color.copy(alpha = 0.3f))
                             ) {
                                 Text(
                                     text = fmt,
                                     fontSize = 11.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = if (color == MaterialTheme.colorScheme.outline) MaterialTheme.colorScheme.onSurfaceVariant else color,
                                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                                 )
                             }
@@ -177,21 +215,137 @@ fun UploadScreen(
 
                     Spacer(modifier = Modifier.height(16.dp))
 
-                    Button(
-                        onClick = { csvPickerLauncher.launch("text/*") },
-                        shape = RoundedCornerShape(14.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = PrimaryBlue),
-                        modifier = Modifier.fillMaxWidth().height(50.dp)
-                    ) {
-                        Icon(Icons.Default.UploadFile, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Select Statement File", fontWeight = FontWeight.Bold)
+                    if (isReadingFile) {
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = PrimaryBlue.copy(alpha = 0.1f),
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(12.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(24.dp),
+                                    color = PrimaryBlue,
+                                    strokeWidth = 2.dp
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(
+                                    text = "Parsing ${currentProcessingFile ?: "statement"} offline...",
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = 13.sp,
+                                    color = PrimaryBlue
+                                )
+                                Text(
+                                    text = "① Extracting text → ② Auto-detecting format → ③ Categorising",
+                                    fontSize = 10.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    } else {
+                        Button(
+                            onClick = { statementPickerLauncher.launch("*/*") },
+                            shape = RoundedCornerShape(14.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = PrimaryBlue),
+                            modifier = Modifier.fillMaxWidth().height(50.dp)
+                        ) {
+                            Icon(Icons.Default.UploadFile, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Select PDF or CSV Statement", fontWeight = FontWeight.Bold)
+                        }
                     }
                 }
             }
         }
 
-        // 2. Three Feature Cards (Matching Web App)
+        // Detection Error State Card (if error occurred)
+        if (parsingError != null || genericError != null) {
+            item {
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = ExpenseRose.copy(alpha = 0.08f),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, ExpenseRose.copy(alpha = 0.3f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text("⚠️", fontSize = 20.sp)
+                            Text(
+                                text = parsingError?.title ?: "Failed to process statement",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp,
+                                color = ExpenseRose
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = parsingError?.detail ?: genericError ?: "",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            lineHeight = 18.sp
+                        )
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = WarningAmber.copy(alpha = 0.12f),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, WarningAmber.copy(alpha = 0.3f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(10.dp)) {
+                                Text(
+                                    text = "💡 Helpful Tips",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = WarningAmber
+                                )
+                                Text(
+                                    text = "• If password-protected: open in viewer, save without password & upload.\n• Scanned image PDFs without text layer cannot be parsed offline.\n• Supports official statements from SBI, HDFC, ICICI, Axis, Kotak, Navi, PhonePe, Paytm & Credit Cards.",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    lineHeight = 16.sp
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Button(
+                                onClick = { statementPickerLauncher.launch("*/*") },
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = PrimaryBlue),
+                                modifier = Modifier.height(36.dp)
+                            ) {
+                                Text("Try Another File", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            }
+
+                            OutlinedButton(
+                                onClick = {
+                                    parsingError = null
+                                    genericError = null
+                                },
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.height(36.dp)
+                            ) {
+                                Text("Dismiss", fontSize = 12.sp)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 2. Feature Cards (Matching Web App)
         item {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -199,27 +353,35 @@ fun UploadScreen(
             ) {
                 FeaturePillCard(
                     title = "Auto-Classifier",
-                    subtitle = "Learns UPI IDs forever",
+                    subtitle = "Learns UPI IDs",
                     icon = Icons.Default.Bolt,
                     color = PrimaryBlue,
                     modifier = Modifier.weight(1f)
                 )
                 FeaturePillCard(
-                    title = "Major Banks",
-                    subtitle = "HDFC, SBI, ICICI, Axis",
+                    title = "15+ Banks & Apps",
+                    subtitle = "SBI, HDFC, Navi…",
                     icon = Icons.Default.AccountBalance,
                     color = IncomeGreen,
                     modifier = Modifier.weight(1f)
                 )
                 FeaturePillCard(
-                    title = "Smart Deduplication",
-                    subtitle = "Eliminates double counts",
+                    title = "Credit Cards",
+                    subtitle = "All major cards",
+                    icon = Icons.Default.CreditCard,
+                    color = WarningAmber,
+                    modifier = Modifier.weight(1f)
+                )
+                FeaturePillCard(
+                    title = "Smart PDF Engine",
+                    subtitle = "Multi-line support",
                     icon = Icons.Default.ContentCopy,
                     color = ExpenseRose,
                     modifier = Modifier.weight(1f)
                 )
             }
         }
+
 
         // 3. Uploaded Statement History
         item {
