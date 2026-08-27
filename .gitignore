@@ -6,3 +6,14 @@ Thumbs.db
 scratch/
 *.log
 *.tmp
+
+# Gradle & Android build caches
+.gradle/
+**/build/
+android/.gradle/
+android/.kotlin/
+android/app/build/
+android/local.properties
+.idea/
+*.iml
+

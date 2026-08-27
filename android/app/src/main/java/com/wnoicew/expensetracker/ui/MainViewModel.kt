@@ -1,6 +1,7 @@
 package com.wnoicew.expensetracker.ui
 
 import android.app.Application
+import androidx.compose.runtime.snapshotFlow
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.wnoicew.expensetracker.data.ProfileManager
@@ -21,8 +22,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     // Dynamic Database DAO based on active profile
     @OptIn(ExperimentalCoroutinesApi::class)
-    private val activeDb = snapshotFlow { profileManager.activeProfile.value }
-        .map { profile ->
+    private val activeDb: Flow<ExpenseTrackerDatabase?> = snapshotFlow { profileManager.activeProfile.value }
+        .map { profile: UserProfile? ->
             if (profile != null) {
                 ExpenseTrackerDatabase.getDatabase(application, profile.id)
             } else null
@@ -30,15 +31,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     @OptIn(ExperimentalCoroutinesApi::class)
     val transactions: StateFlow<List<TransactionEntity>> = activeDb
-        .flatMapLatest { db ->
-            db?.transactionDao()?.getAllTransactions() ?: flowOf(emptyList())
+        .flatMapLatest { db: ExpenseTrackerDatabase? ->
+            if (db != null) db.transactionDao().getAllTransactions() else flowOf(emptyList<TransactionEntity>())
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     @OptIn(ExperimentalCoroutinesApi::class)
     val accounts: StateFlow<List<AccountEntity>> = activeDb
-        .flatMapLatest { db ->
-            db?.accountDao()?.getAllAccounts() ?: flowOf(emptyList())
+        .flatMapLatest { db: ExpenseTrackerDatabase? ->
+            if (db != null) db.accountDao().getAllAccounts() else flowOf(emptyList<AccountEntity>())
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
