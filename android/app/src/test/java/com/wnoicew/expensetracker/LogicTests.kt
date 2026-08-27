@@ -235,9 +235,6 @@ class LogicTests {
         val accs = listOf(
             AccountEntity(id = "a1", name = "HDFC Bank", balance = 50000.0, type = "Bank Account")
         )
-        val budgets = listOf(
-            BudgetEntity(id = "b1", categoryName = "Food & Dining", monthlyBudget = 8000.0)
-        )
         val rules = listOf(
             RuleEntity(id = "r1", pattern = "chai", category = "Food & Dining", type = TransactionType.EXPENSE)
         )
@@ -249,14 +246,13 @@ class LogicTests {
         assertTrue(csv.contains("Subscriptions & OTT"))
 
         // JSON Backup Test
-        val jsonString = ExportEngine.generateJsonBackup("Personal Profile", txns, accs, budgets, rules)
+        val jsonString = ExportEngine.generateJsonBackup("Personal Profile", txns, accs, rules)
         assertTrue(jsonString.contains("Personal Profile"))
         assertTrue(jsonString.contains("transactions"))
 
         val restored = ExportEngine.parseJsonBackup(jsonString)
         assertEquals(1, restored.transactions.size)
         assertEquals(1, restored.accounts.size)
-        assertEquals(1, restored.budgets.size)
         assertEquals(1, restored.rules.size)
         assertEquals("Netflix", restored.transactions[0].description)
         assertEquals("HDFC Bank", restored.accounts[0].name)

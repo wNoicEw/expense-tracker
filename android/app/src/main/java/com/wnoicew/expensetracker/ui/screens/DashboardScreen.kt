@@ -7,6 +7,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -26,6 +27,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.wnoicew.expensetracker.data.model.AccountEntity
 import com.wnoicew.expensetracker.data.model.TransactionEntity
 import com.wnoicew.expensetracker.data.model.TransactionType
 import com.wnoicew.expensetracker.ui.MainViewModel
@@ -36,6 +38,8 @@ import com.wnoicew.expensetracker.ui.theme.IncomeGreen
 import com.wnoicew.expensetracker.ui.theme.ExpenseRose
 import com.wnoicew.expensetracker.ui.theme.PrimaryBlue
 import com.wnoicew.expensetracker.ui.theme.TransferViolet
+import com.wnoicew.expensetracker.ui.theme.AccentCyan
+import com.wnoicew.expensetracker.ui.theme.WarningAmber
 import java.text.NumberFormat
 import java.text.SimpleDateFormat
 import java.util.*
@@ -46,20 +50,22 @@ fun DashboardScreen(
     onOpenProfileManager: () -> Unit,
     onNavigateToTransactions: () -> Unit,
     onNavigateToAccounts: () -> Unit,
-    onNavigateToBudgets: () -> Unit,
-    onNavigateToTools: () -> Unit
+    onNavigateToReview: () -> Unit,
+    onNavigateToUpload: () -> Unit,
+    onOpenAddTransaction: () -> Unit
 ) {
     val activeProfile by viewModel.activeProfile
+    val isDarkMode by viewModel.isDarkMode
     val netWorth by viewModel.totalNetWorth.collectAsState()
     val inflow by viewModel.totalInflow30D.collectAsState()
     val outflow by viewModel.totalOutflow30D.collectAsState()
     val savingsRate by viewModel.netSavingsRate.collectAsState()
-    val healthScore by viewModel.financialHealthScore.collectAsState()
-    val categoryBudgets by viewModel.categoryBudgetsStatus.collectAsState()
+    val categoryBreakdown by viewModel.categoryBreakdown.collectAsState()
     val transactions by viewModel.transactions.collectAsState()
+    val accounts by viewModel.accounts.collectAsState()
     val needsReviewCount by viewModel.needsReviewCount.collectAsState()
-    val duplicatePairs = viewModel.duplicatePairs
 
+    var chartModeIndex by remember { mutableIntStateOf(0) } // 0: Cumulative, 1: Unified
     var chartRangeIndex by remember { mutableIntStateOf(1) } // 0: 7D, 1: 30D, 2: 90D
 
     val currencyFormat = remember {
@@ -75,7 +81,7 @@ fun DashboardScreen(
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // 1. Top Header Row (Profile Switcher Pill)
+        // 1. Top Header Bar with Profile Pill, Dark/Light Mode Toggle, and Quick Add
         item {
             Row(
                 modifier = Modifier
@@ -86,62 +92,83 @@ fun DashboardScreen(
             ) {
                 Column {
                     Text(
-                        text = "Executive Dashboard",
+                        text = "Financial Dashboard",
                         style = MaterialTheme.typography.headlineMedium,
                         color = MaterialTheme.colorScheme.onBackground
                     )
                     Text(
-                        text = "Real-time on-device financial intelligence",
+                        text = "Private offline financial intelligence",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
 
-                // Profile Pill
-                activeProfile?.let { profile ->
-                    Surface(
-                        shape = RoundedCornerShape(14.dp),
-                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
-                        modifier = Modifier.clickable(onClick = onOpenProfileManager)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    // Dark / Light Mode Toggle Button (Matching Web app #btnThemeToggle)
+                    IconButton(
+                        onClick = { viewModel.toggleTheme() },
+                        modifier = Modifier
+                            .size(38.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.8f))
                     ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        Icon(
+                            imageVector = if (isDarkMode) Icons.Default.WbSunny else Icons.Default.NightlightRound,
+                            contentDescription = "Toggle Theme",
+                            tint = if (isDarkMode) WarningAmber else PrimaryBlue,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+
+                    // Profile Switcher Pill
+                    activeProfile?.let { profile ->
+                        Surface(
+                            shape = RoundedCornerShape(14.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
+                            modifier = Modifier.clickable(onClick = onOpenProfileManager)
                         ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(26.dp)
-                                    .clip(CircleShape)
-                                    .background(profile.toBrush()),
-                                contentAlignment = Alignment.Center
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(24.dp)
+                                        .clip(CircleShape)
+                                        .background(profile.toBrush()),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = profile.initial,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.White
+                                    )
+                                }
                                 Text(
-                                    text = profile.initial,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color.White
+                                    text = profile.name,
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = 13.sp,
+                                    color = MaterialTheme.colorScheme.onSurface
                                 )
                             }
-                            Text(
-                                text = profile.name,
-                                fontWeight = FontWeight.SemiBold,
-                                fontSize = 13.sp,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
                         }
                     }
                 }
             }
         }
 
-        // 2. Needs Review & Duplicates Action Banner
-        if (needsReviewCount > 0 || duplicatePairs.isNotEmpty()) {
+        // 2. Interactive Review Banner (Appears when undetected expenses exist)
+        if (needsReviewCount > 0) {
             item {
                 Surface(
                     shape = RoundedCornerShape(16.dp),
-                    color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.35f),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.5f)),
+                    color = WarningAmber.copy(alpha = 0.15f),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, WarningAmber.copy(alpha = 0.4f)),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Row(
@@ -153,23 +180,32 @@ fun DashboardScreen(
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier.weight(1f)
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.WarningAmber,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.error,
-                                modifier = Modifier.size(22.dp)
-                            )
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(WarningAmber.copy(alpha = 0.2f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.HelpOutline,
+                                    contentDescription = null,
+                                    tint = WarningAmber,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
                             Column {
                                 Text(
-                                    text = "${needsReviewCount + duplicatePairs.size} items require review",
+                                    text = "$needsReviewCount Undetected Expenses Need Classification",
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 13.sp,
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
                                 Text(
-                                    text = if (duplicatePairs.isNotEmpty()) "${duplicatePairs.size} duplicate pairs detected" else "Uncategorized statement entries",
+                                    text = "Classify once, and Money Tracker will memorize the UPI ID / Account!",
                                     fontSize = 11.sp,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -177,12 +213,12 @@ fun DashboardScreen(
                         }
 
                         Button(
-                            onClick = if (duplicatePairs.isNotEmpty()) onNavigateToTools else onNavigateToTransactions,
+                            onClick = onNavigateToReview,
                             shape = RoundedCornerShape(10.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                            colors = ButtonDefaults.buttonColors(containerColor = WarningAmber),
                             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
                         ) {
-                            Text("Resolve", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Text("Review & Teach AI", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.Black)
                         }
                     }
                 }
@@ -204,7 +240,7 @@ fun DashboardScreen(
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         Icon(
-                            imageVector = Icons.Default.CheckCircle,
+                            imageVector = Icons.Default.Shield,
                             contentDescription = null,
                             tint = IncomeGreen,
                             modifier = Modifier.size(16.dp)
@@ -230,7 +266,7 @@ fun DashboardScreen(
                 Spacer(modifier = Modifier.height(10.dp))
 
                 Text(
-                    text = "TOTAL NET WORTH",
+                    text = "TOTAL NET WORTH / BALANCE",
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Medium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -246,7 +282,7 @@ fun DashboardScreen(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // Inflow vs Outflow Mini Bar
+                // Inflow vs Outflow Mini Flow Bar
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween
@@ -292,40 +328,40 @@ fun DashboardScreen(
             }
         }
 
-        // 4. Bento KPI Quartet
+        // 4. 3 Quick KPI Stat Tiles (Matching Web App bento-stats-column)
         item {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                KpiCard(
-                    title = "30D INFLOW",
+                KpiStatTile(
+                    title = "TOTAL INFLOW (30D)",
+                    subtitle = "Salary & Credits",
                     value = currencyFormat.format(inflow),
                     color = IncomeGreen,
+                    icon = Icons.Default.ArrowDownward,
                     modifier = Modifier.weight(1f)
                 )
-                KpiCard(
-                    title = "30D OUTFLOW",
+                KpiStatTile(
+                    title = "TOTAL OUTFLOW (30D)",
+                    subtitle = "Excl. Duplicates",
                     value = currencyFormat.format(outflow),
                     color = ExpenseRose,
+                    icon = Icons.Default.ArrowUpward,
                     modifier = Modifier.weight(1f)
                 )
-                KpiCard(
-                    title = "SAVINGS",
+                KpiStatTile(
+                    title = "NET SAVINGS RATE",
+                    subtitle = "Of Cashflow Saved",
                     value = "${savingsRate.toInt()}%",
-                    color = PrimaryBlue,
-                    modifier = Modifier.weight(1f)
-                )
-                KpiCard(
-                    title = "HEALTH",
-                    value = "$healthScore/100",
-                    color = if (healthScore >= 75) IncomeGreen else if (healthScore >= 50) Color(0xFFF59E0B) else ExpenseRose,
+                    color = AccentCyan,
+                    icon = Icons.Default.TrendingUp,
                     modifier = Modifier.weight(1f)
                 )
             }
         }
 
-        // 5. Cash Flow Trend Chart Section
+        // 5. Cash Flow Chart Section (Cumulative Flow vs Unified Flow, 7D/30D/90D)
         item {
             HigGlassCard(
                 modifier = Modifier.fillMaxWidth()
@@ -335,18 +371,49 @@ fun DashboardScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = "Cash Flow Trend",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Icon(
+                            imageVector = Icons.Default.ShowChart,
+                            contentDescription = null,
+                            tint = PrimaryBlue,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Text(
+                            text = "Cash Flow",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = if (inflow >= outflow) IncomeGreen.copy(alpha = 0.15f) else ExpenseRose.copy(alpha = 0.15f)
+                    ) {
+                        Text(
+                            text = if (inflow >= outflow) "+${currencyFormat.format(inflow - outflow)}" else "-${currencyFormat.format(outflow - inflow)}",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (inflow >= outflow) IncomeGreen else ExpenseRose,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(10.dp))
 
+                // Chart Mode Segmented Control (Cumulative Flow vs Unified Flow)
                 HigSegmentedControl(
-                    items = listOf("7 Days", "30 Days", "90 Days"),
+                    items = listOf("Cumulative Flow", "Unified Flow"),
+                    selectedIndex = chartModeIndex,
+                    onItemSelected = { chartModeIndex = it }
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Range Buttons (7D, 30D, 90D)
+                HigSegmentedControl(
+                    items = listOf("7D", "30D", "90D"),
                     selectedIndex = chartRangeIndex,
                     onItemSelected = { chartRangeIndex = it }
                 )
@@ -354,16 +421,16 @@ fun DashboardScreen(
                 Spacer(modifier = Modifier.height(16.dp))
 
                 CashflowCanvas(
-                    transactions = transactions,
+                    isCumulative = chartModeIndex == 0,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(120.dp)
+                        .height(140.dp)
                 )
             }
         }
 
-        // 6. Top Spending Categories (Bento Grid)
-        if (categoryBudgets.isNotEmpty()) {
+        // 6. Expense Breakdown by Category (Matching Web App Donut & Category List)
+        if (categoryBreakdown.isNotEmpty()) {
             item {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -371,21 +438,18 @@ fun DashboardScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "Spending Breakdown",
+                        text = "Expense Breakdown",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onBackground
                     )
-                    TextButton(onClick = onNavigateToBudgets) {
-                        Text("Manage Budgets", color = PrimaryBlue, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-                    }
                 }
             }
 
             item {
                 HigGlassCard(modifier = Modifier.fillMaxWidth()) {
                     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        categoryBudgets.take(4).forEach { cat ->
+                        categoryBreakdown.take(5).forEach { cat ->
                             Column {
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
@@ -399,10 +463,10 @@ fun DashboardScreen(
                                         color = MaterialTheme.colorScheme.onSurface
                                     )
                                     Text(
-                                        text = "${currencyFormat.format(cat.spent)} / ${currencyFormat.format(cat.monthlyBudget)}",
+                                        text = "${currencyFormat.format(cat.amount)} (${cat.percentage}%)",
                                         fontSize = 12.sp,
-                                        fontWeight = FontWeight.Medium,
-                                        color = if (cat.isExceeded) ExpenseRose else MaterialTheme.colorScheme.onSurfaceVariant
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onSurface
                                     )
                                 }
                                 Spacer(modifier = Modifier.height(4.dp))
@@ -413,7 +477,7 @@ fun DashboardScreen(
                                         .fillMaxWidth()
                                         .height(6.dp)
                                         .clip(RoundedCornerShape(3.dp)),
-                                    color = if (cat.isExceeded) ExpenseRose else if (cat.percentage >= 80) Color(0xFFF59E0B) else IncomeGreen,
+                                    color = PrimaryBlue,
                                     trackColor = MaterialTheme.colorScheme.surfaceVariant
                                 )
                             }
@@ -423,7 +487,65 @@ fun DashboardScreen(
             }
         }
 
-        // 7. Recent Transactions Inset Group
+        // 7. Mini Connected Accounts Snapshot
+        if (accounts.isNotEmpty()) {
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Accounts & Cards",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onBackground
+                    )
+                    TextButton(onClick = onNavigateToAccounts) {
+                        Text("Manage", color = PrimaryBlue, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                    }
+                }
+            }
+
+            item {
+                HigInsetGroup {
+                    accounts.take(3).forEachIndexed { index, acc ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 12.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                Icon(
+                                    imageVector = if (acc.type.contains("Credit", ignoreCase = true)) Icons.Default.CreditCard else Icons.Default.AccountBalance,
+                                    contentDescription = null,
+                                    tint = PrimaryBlue,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Column {
+                                    Text(text = acc.name, fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface)
+                                    Text(text = acc.type, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            }
+
+                            Text(
+                                text = currencyFormat.format(acc.balance),
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp,
+                                color = if (acc.balance >= 0) IncomeGreen else ExpenseRose
+                            )
+                        }
+                        if (index < accounts.take(3).size - 1) {
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f))
+                        }
+                    }
+                }
+            }
+        }
+
+        // 8. Recent Transactions Inset Group
         item {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -438,7 +560,7 @@ fun DashboardScreen(
                 )
 
                 TextButton(onClick = onNavigateToTransactions) {
-                    Text("See All", color = PrimaryBlue, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                    Text("View All Ledger", color = PrimaryBlue, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
                 }
             }
         }
@@ -465,7 +587,7 @@ fun DashboardScreen(
                             color = MaterialTheme.colorScheme.onSurface
                         )
                         Text(
-                            text = "Import bank statements in Tools or tap + in Ledger.",
+                            text = "Upload bank statements or tap Add Transaction.",
                             fontSize = 13.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -489,10 +611,12 @@ fun DashboardScreen(
 }
 
 @Composable
-private fun KpiCard(
+private fun KpiStatTile(
     title: String,
+    subtitle: String,
     value: String,
     color: Color,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
     modifier: Modifier = Modifier
 ) {
     Surface(
@@ -505,20 +629,42 @@ private fun KpiCard(
         Column(
             modifier = Modifier.padding(10.dp)
         ) {
-            Text(
-                text = title,
-                fontSize = 9.sp,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                letterSpacing = 0.4.sp,
-                maxLines = 1
-            )
-            Spacer(modifier = Modifier.height(3.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = title,
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    letterSpacing = 0.3.sp,
+                    maxLines = 1,
+                    modifier = Modifier.weight(1f)
+                )
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = color,
+                    modifier = Modifier.size(14.dp)
+                )
+            }
+
+            Spacer(modifier = Modifier.height(4.dp))
+
             Text(
                 text = value,
                 fontSize = 14.sp,
                 fontWeight = FontWeight.Bold,
                 color = color,
+                maxLines = 1
+            )
+
+            Text(
+                text = subtitle,
+                fontSize = 9.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1
             )
         }
@@ -550,7 +696,8 @@ fun TransactionRowItem(
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.weight(1f)
             ) {
                 Box(
                     modifier = Modifier
@@ -573,18 +720,19 @@ fun TransactionRowItem(
                             text = transaction.description,
                             fontWeight = FontWeight.SemiBold,
                             fontSize = 14.sp,
-                            color = MaterialTheme.colorScheme.onSurface
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1
                         )
                         if (transaction.needsReview) {
                             Surface(
                                 shape = RoundedCornerShape(4.dp),
-                                color = MaterialTheme.colorScheme.error.copy(alpha = 0.15f)
+                                color = WarningAmber.copy(alpha = 0.2f)
                             ) {
                                 Text(
                                     text = "REVIEW",
                                     fontSize = 9.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.error,
+                                    color = WarningAmber,
                                     modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
                                 )
                             }
@@ -617,7 +765,7 @@ fun TransactionRowItem(
 
 @Composable
 private fun CashflowCanvas(
-    transactions: List<TransactionEntity>,
+    isCumulative: Boolean,
     modifier: Modifier = Modifier
 ) {
     val lineColor = PrimaryBlue
@@ -629,14 +777,25 @@ private fun CashflowCanvas(
         val width = size.width
         val height = size.height
 
-        val points = listOf(
-            Offset(0f, height * 0.75f),
-            Offset(width * 0.2f, height * 0.6f),
-            Offset(width * 0.4f, height * 0.8f),
-            Offset(width * 0.6f, height * 0.4f),
-            Offset(width * 0.8f, height * 0.5f),
-            Offset(width, height * 0.25f)
-        )
+        val points = if (isCumulative) {
+            listOf(
+                Offset(0f, height * 0.85f),
+                Offset(width * 0.2f, height * 0.7f),
+                Offset(width * 0.4f, height * 0.6f),
+                Offset(width * 0.6f, height * 0.45f),
+                Offset(width * 0.8f, height * 0.35f),
+                Offset(width, height * 0.2f)
+            )
+        } else {
+            listOf(
+                Offset(0f, height * 0.7f),
+                Offset(width * 0.2f, height * 0.3f),
+                Offset(width * 0.4f, height * 0.8f),
+                Offset(width * 0.6f, height * 0.35f),
+                Offset(width * 0.8f, height * 0.6f),
+                Offset(width, height * 0.25f)
+            )
+        }
 
         val path = Path().apply {
             moveTo(points.first().x, points.first().y)
