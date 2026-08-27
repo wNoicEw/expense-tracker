@@ -3,6 +3,9 @@ package com.wnoicew.expensetracker.data.engine
 import com.wnoicew.expensetracker.data.model.DuplicatePair
 import com.wnoicew.expensetracker.data.model.TransactionEntity
 import com.wnoicew.expensetracker.data.model.TransactionType
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import kotlin.math.abs
 
 object DuplicateDetectorEngine {
@@ -75,59 +78,61 @@ object DuplicateDetectorEngine {
     fun compareTransactions(t1: TransactionEntity, t2: TransactionEntity): MatchResult {
         if (t1.id == t2.id) return MatchResult(false, 0, "")
 
-        // 1. Amount Check
+        // 1. Date Check: MUST be on the exact same calendar day
+        if (!isSameDay(t1.date, t2.date)) {
+            return MatchResult(false, 0, "")
+        }
+
+        // 2. Amount Check: MUST have identical amount
         if (abs(t1.amount - t2.amount) > 0.01) {
             return MatchResult(false, 0, "")
         }
 
-        // 2. Exact Reference / UTR Match (High Confidence)
+        // 3. Merchant / Payee Check: MUST match merchant or UTR reference
         val ref1 = t1.referenceNo.trim().lowercase()
         val ref2 = t2.referenceNo.trim().lowercase()
-
-        if (ref1.length > 6 && ref2.length > 6 && (ref1 == ref2 || ref1.contains(ref2) || ref2.contains(ref1))) {
-            return MatchResult(true, 99, "Identical UTR / Reference: ${t1.referenceNo}")
-        }
-
         val narr1 = (t1.rawNarration + " " + t1.description).lowercase()
         val narr2 = (t2.rawNarration + " " + t2.description).lowercase()
 
-        if (ref1.length > 6 && narr2.contains(ref1)) {
-            return MatchResult(true, 98, "Statement contains UTR reference: $ref1")
+        val isUtrMatch = (ref1.length > 6 && ref2.length > 6 && (ref1 == ref2 || ref1.contains(ref2) || ref2.contains(ref1))) ||
+                (ref1.length > 6 && narr2.contains(ref1)) ||
+                (ref2.length > 6 && narr1.contains(ref2))
+
+        val isMerchantMatch = isSameMerchant(t1, t2)
+
+        if (isUtrMatch) {
+            return MatchResult(true, 99, "Identical UTR / Reference on same date: ${t1.referenceNo}")
         }
-        if (ref2.length > 6 && narr1.contains(ref2)) {
-            return MatchResult(true, 98, "Statement contains UTR reference: $ref2")
-        }
 
-        // 3. Date Proximity Check (Within ±24 hours / 1 day)
-        val diffMs = abs(t1.date - t2.date)
-        val diffDays = diffMs / (1000 * 60 * 60 * 24)
-
-        if (diffDays <= 1) {
-            val tokens1 = tokenizeText(narr1)
-            val tokens2 = tokenizeText(narr2)
-
-            val commonTokens = tokens1.intersect(tokens2)
-            val ignoreWords = setOf("bank", "transfer", "payment", "paid", "imps", "upi", "neft", "dr", "cr", "online")
-            val hasSignificantMatch = commonTokens.any { it.length > 3 && !ignoreWords.contains(it) }
-
-            if (hasSignificantMatch) {
-                return MatchResult(
-                    true,
-                    90,
-                    "Exact amount on same date with matching merchant: ${commonTokens.filter { !ignoreWords.contains(it) }.joinToString(", ")}"
-                )
-            }
-
-            if (t1.sourceFile.isNotBlank() && t2.sourceFile.isNotBlank() && t1.sourceFile != t2.sourceFile && diffDays == 0L) {
-                return MatchResult(
-                    true,
-                    80,
-                    "Cross-statement match between ${t1.sourceFile} and ${t2.sourceFile}"
-                )
-            }
+        if (isMerchantMatch) {
+            return MatchResult(
+                true,
+                95,
+                "Exact match: Same Date, Amount (₹${t1.amount}), and Merchant: ${t1.description}"
+            )
         }
 
         return MatchResult(false, 0, "")
+    }
+
+    private fun isSameDay(t1Ms: Long, t2Ms: Long): Boolean {
+        val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.ENGLISH)
+        return sdf.format(Date(t1Ms)) == sdf.format(Date(t2Ms))
+    }
+
+    private fun isSameMerchant(t1: TransactionEntity, t2: TransactionEntity): Boolean {
+        val desc1 = t1.description.trim().lowercase()
+        val desc2 = t2.description.trim().lowercase()
+        if (desc1.isNotBlank() && desc2.isNotBlank() && desc1 == desc2) return true
+
+        val narr1 = (t1.rawNarration + " " + t1.description).lowercase()
+        val narr2 = (t2.rawNarration + " " + t2.description).lowercase()
+        val tokens1 = tokenizeText(narr1)
+        val tokens2 = tokenizeText(narr2)
+
+        val commonTokens = tokens1.intersect(tokens2)
+        val ignoreWords = setOf("bank", "transfer", "payment", "paid", "imps", "upi", "neft", "dr", "cr", "online", "transaction", "statement", "account")
+        return commonTokens.any { it.length >= 3 && !ignoreWords.contains(it) }
     }
 
     private fun tokenizeText(text: String): Set<String> {
@@ -137,6 +142,7 @@ object DuplicateDetectorEngine {
             .filter { it.length >= 3 }
             .toSet()
     }
+
 
     fun mergeTransactions(primary: TransactionEntity, duplicate: TransactionEntity): Pair<TransactionEntity, TransactionEntity> {
         val bestDesc = if (primary.description.length >= duplicate.description.length) primary.description else duplicate.description
