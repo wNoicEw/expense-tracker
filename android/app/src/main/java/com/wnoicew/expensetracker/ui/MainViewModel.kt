@@ -328,16 +328,99 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
 
-    fun commitBatchTransactions(fileName: String, detectedBank: String, transactionsToInsert: List<TransactionEntity>) {
+    fun commitBatchTransactions(
+        fileName: String,
+        detectedBank: String,
+        accountMetadata: AccountMetadata?,
+        transactionsToInsert: List<TransactionEntity>
+    ) {
         val profile = activeProfile.value ?: return
         viewModelScope.launch {
             val db = ExpenseTrackerDatabase.getDatabase(getApplication(), profile.id)
-            db.transactionDao().insertTransactions(transactionsToInsert)
+            val existingAccounts = db.accountDao().getAllAccountsSnapshot().toMutableList()
+
+            // Helper function to dynamically resolve or create an account
+            suspend fun getOrCreateAccount(meta: AccountMetadata): AccountEntity {
+                // 1. Match by last 4 digits and matching type
+                var match = existingAccounts.find { a ->
+                    a.type.equals(meta.type, ignoreCase = true) &&
+                    a.lastFour.isNotBlank() &&
+                    meta.lastFour.isNotBlank() &&
+                    a.lastFour.equals(meta.lastFour, ignoreCase = true) &&
+                    meta.lastFour != "0000" && meta.lastFour != "UPI"
+                }
+
+                // 2. Match by exact bank name and type
+                if (match == null) {
+                    match = existingAccounts.find { a ->
+                        a.bankName.isNotBlank() &&
+                        meta.bankName.isNotBlank() &&
+                        a.bankName.equals(meta.bankName, ignoreCase = true) &&
+                        a.type.equals(meta.type, ignoreCase = true)
+                    }
+                }
+
+                // 3. Match by name
+                if (match == null) {
+                    match = existingAccounts.find { a ->
+                        a.name.equals(meta.name, ignoreCase = true)
+                    }
+                }
+
+                if (match != null) {
+                    return match
+                }
+
+                // Auto-create new Account from Statement metadata
+                val newAcc = AccountEntity(
+                    id = "acc_" + System.currentTimeMillis() + "_" + java.util.UUID.randomUUID().toString().take(6),
+                    name = meta.name,
+                    type = meta.type,
+                    balance = 0.0,
+                    creditLimit = meta.creditLimit,
+                    gradientIndex = meta.gradientIndex,
+                    lastFour = meta.lastFour,
+                    bankName = meta.bankName
+                )
+                db.accountDao().insertAccount(newAcc)
+                existingAccounts.add(newAcc)
+                return newAcc
+            }
+
+            // Resolve main account
+            val mainAccount = if (accountMetadata != null) {
+                getOrCreateAccount(accountMetadata)
+            } else {
+                existingAccounts.firstOrNull() ?: getOrCreateAccount(
+                    AccountMetadata(
+                        bankName = detectedBank,
+                        type = "Bank Account",
+                        lastFour = "0000",
+                        name = "$detectedBank Account"
+                    )
+                )
+            }
+
+            // Link all transactions to their respective account (including per-row RuPay credit cards)
+            val resolvedTransactions = transactionsToInsert.map { txn ->
+                var targetAcc = mainAccount
+                val ruPayMeta = StatementParserEngine.detectRuPayCC(txn.rawNarration)
+                if (ruPayMeta != null) {
+                    targetAcc = getOrCreateAccount(ruPayMeta)
+                }
+
+                txn.copy(
+                    accountId = targetAcc.id,
+                    accountName = targetAcc.name
+                )
+            }
+
+            db.transactionDao().insertTransactions(resolvedTransactions)
             db.statementUploadDao().insertUpload(
                 StatementUploadEntity(
                     fileName = fileName,
                     detectedBank = detectedBank,
-                    transactionCount = transactionsToInsert.size
+                    transactionCount = resolvedTransactions.size
                 )
             )
         }

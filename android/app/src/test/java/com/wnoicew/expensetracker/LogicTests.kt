@@ -274,4 +274,51 @@ class LogicTests {
         assertEquals("Netflix", restored.transactions[0].description)
         assertEquals("HDFC Bank", restored.accounts[0].name)
     }
+
+    // ==========================================
+    // 6. AUTO-DETECTION OF CARDS & ACCOUNTS TESTS
+    // ==========================================
+
+    @Test
+    fun testAccountAndCardAutoDetection() {
+        // Test SBI Account Detection
+        val sbiMeta = StatementParserEngine.extractAccountMetadata(
+            "State Bank of India Account No: 12345678901234 Statement of Account",
+            "SBI_Statement.pdf"
+        )
+        assertEquals("State Bank of India (SBI)", sbiMeta.bankName)
+        assertEquals("Bank Account", sbiMeta.type)
+        assertEquals("1234", sbiMeta.lastFour)
+        assertEquals("State Bank of India (SBI) Account (•••• 1234)", sbiMeta.name)
+        assertEquals(1, sbiMeta.gradientIndex)
+
+        // Test HDFC Credit Card Detection
+        val hdfcCCMeta = StatementParserEngine.extractAccountMetadata(
+            "HDFC Bank Credit Card Statement Card ending in 4589 Credit Limit: 1,50,000 Total Amount Due: 24,500",
+            "HDFC_CC_AUG.pdf"
+        )
+        assertEquals("HDFC Bank", hdfcCCMeta.bankName)
+        assertEquals("Credit Card", hdfcCCMeta.type)
+        assertEquals("4589", hdfcCCMeta.lastFour)
+        assertEquals("HDFC Bank Credit Card (•••• 4589)", hdfcCCMeta.name)
+        assertEquals(150000.0, hdfcCCMeta.creditLimit, 0.01)
+
+        // Test PhonePe Digital Wallet Detection
+        val phonePeMeta = StatementParserEngine.extractAccountMetadata(
+            "PhonePe Statement Transaction History for 9876543210",
+            "PhonePe_2025.pdf"
+        )
+        assertEquals("PhonePe", phonePeMeta.bankName)
+        assertEquals("Digital Wallet", phonePeMeta.type)
+        assertEquals("PhonePe UPI Wallet", phonePeMeta.name)
+
+        // Test RuPay Credit Card on UPI Detection
+        val rupayMeta = StatementParserEngine.detectRuPayCC("Paid to Swiggy via HDFC Bank RuPay Credit Card **7788")
+        assertNotNull(rupayMeta)
+        assertEquals("HDFC Bank", rupayMeta!!.bankName)
+        assertEquals("Credit Card", rupayMeta.type)
+        assertEquals("7788", rupayMeta.lastFour)
+        assertEquals("HDFC Bank RuPay Credit Card (•••• 7788)", rupayMeta.name)
+        assertTrue(rupayMeta.isRuPay)
+    }
 }

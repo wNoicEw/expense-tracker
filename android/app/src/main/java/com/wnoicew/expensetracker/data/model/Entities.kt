@@ -83,9 +83,20 @@ data class DuplicatePair(
     val reason: String
 )
 
+data class AccountMetadata(
+    val bankName: String,
+    val type: String = "Bank Account", // "Bank Account", "Credit Card", "Digital Wallet", "Cash"
+    val lastFour: String = "",
+    val name: String,
+    val creditLimit: Double = 100000.0,
+    val gradientIndex: Int = 0,
+    val isRuPay: Boolean = false
+)
+
 data class StatementParseResult(
     val detectedProfile: String,
     val transactions: List<TransactionEntity>,
     val totalInflow: Double,
-    val totalOutflow: Double
+    val totalOutflow: Double,
+    val accountMetadata: AccountMetadata? = null
 )

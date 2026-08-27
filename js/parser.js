@@ -1344,7 +1344,7 @@ class StatementParser {
     let bankName = 'Primary Bank';
     let color = '#1e3a8a';
     
-    if (fn.includes('sbi') || fn.includes('state bank') || header.includes('state bank of india') || header.includes('sbin') || header.includes('wdl tfr') || header.includes('dep tfr')) {
+    if (fn.includes('sbi') || fn.includes('state bank') || header.includes('state bank of india') || /\bsbin\b/i.test(header) || header.includes('wdl tfr') || header.includes('dep tfr')) {
       bankName = 'State Bank of India (SBI)';
       color = '#065f46';
     } else if (fn.includes('navi') || header.includes('paid via navi') || header.includes('navi technologies')) {
@@ -1356,28 +1356,25 @@ class StatementParser {
     } else if (fn.includes('paytm') || header.includes('paytm')) {
       bankName = 'Paytm';
       color = '#0369a1';
-    } else if (fn.includes('gpay') || fn.includes('google pay') || header.includes('google pay') || header.includes('gpay')) {
+    } else if (fn.includes('gpay') || fn.includes('google pay') || header.includes('google pay') || /\bgpay\b/i.test(header)) {
       bankName = 'Google Pay';
       color = '#4338ca';
-    } else if (fn.includes('cred') || header.includes('cred')) {
-      bankName = 'CRED';
-      color = '#171717';
-    } else if (fn.includes('hdfc') || header.includes('hdfc bank') || header.includes('www.hdfcbank.com')) {
+    } else if (fn.includes('hdfc') || header.includes('hdfc bank') || header.includes('www.hdfcbank.com') || header.includes('hdfc card')) {
       bankName = 'HDFC Bank';
       color = '#1e3a8a';
-    } else if (fn.includes('icici') || header.includes('icici bank')) {
+    } else if (fn.includes('icici') || header.includes('icici bank') || header.includes('icici card')) {
       bankName = 'ICICI Bank';
       color = '#9a3412';
-    } else if (fn.includes('axis') || header.includes('axis bank')) {
+    } else if (fn.includes('axis') || header.includes('axis bank') || header.includes('axis card')) {
       bankName = 'Axis Bank';
       color = '#831843';
-    } else if (fn.includes('kotak') || header.includes('kotak mahindra')) {
+    } else if (fn.includes('kotak') || header.includes('kotak mahindra') || header.includes('kotak card')) {
       bankName = 'Kotak Mahindra Bank';
       color = '#b91c1c';
-    } else if (fn.includes('pnb') || fn.includes('punjab national') || header.includes('punjab national')) {
+    } else if (fn.includes('pnb') || fn.includes('punjab national') || header.includes('punjab national') || /\bpnb\b/i.test(header)) {
       bankName = 'Punjab National Bank (PNB)';
       color = '#7c2d12';
-    } else if (fn.includes('bob') || fn.includes('baroda') || header.includes('bank of baroda')) {
+    } else if (fn.includes('baroda') || header.includes('bank of baroda') || /\bbob\b/i.test(fn)) {
       bankName = 'Bank of Baroda';
       color = '#ea580c';
     } else if (fn.includes('canara') || header.includes('canara bank')) {
@@ -1386,6 +1383,9 @@ class StatementParser {
     } else if (fn.includes('union') || header.includes('union bank')) {
       bankName = 'Union Bank of India';
       color = '#0d9488';
+    } else if (/\bcred\b/i.test(fn) || /\bcred\b/i.test(header)) {
+      bankName = 'CRED';
+      color = '#171717';
     } else if (header.includes('amazon pay')) {
       bankName = 'Amazon Pay';
       color = '#c2410c';
