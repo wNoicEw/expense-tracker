@@ -1,6 +1,7 @@
 package com.wnoicew.expensetracker
 
 import android.os.Bundle
+import androidx.activity.compose.BackHandler
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -81,9 +82,40 @@ fun MainAppRoot(viewModel: MainViewModel) {
     val activeProfile by viewModel.activeProfile
     val isDarkMode by viewModel.isDarkMode
     var selectedTab by remember { mutableStateOf(BottomTab.DASHBOARD) }
+    val tabBackStack = remember { mutableStateListOf(BottomTab.DASHBOARD) }
     var activeSubScreen by remember { mutableStateOf(SubScreen.NONE) }
     var showProfileManagerSheet by remember { mutableStateOf(false) }
     var showAddTxnSheet by remember { mutableStateOf(false) }
+
+    fun navigateToTab(tab: BottomTab) {
+        activeSubScreen = SubScreen.NONE
+        if (selectedTab != tab) {
+            selectedTab = tab
+            if (tabBackStack.isEmpty() || tabBackStack.last() != tab) {
+                tabBackStack.add(tab)
+            }
+        }
+    }
+
+    // Native Back Button Handling
+    val canHandleBack = showAddTxnSheet || showProfileManagerSheet || activeSubScreen != SubScreen.NONE || tabBackStack.size > 1 || selectedTab != BottomTab.DASHBOARD
+
+    BackHandler(enabled = canHandleBack) {
+        when {
+            showAddTxnSheet -> showAddTxnSheet = false
+            showProfileManagerSheet -> showProfileManagerSheet = false
+            activeSubScreen != SubScreen.NONE -> activeSubScreen = SubScreen.NONE
+            tabBackStack.size > 1 -> {
+                tabBackStack.removeAt(tabBackStack.lastIndex)
+                selectedTab = tabBackStack.last()
+            }
+            selectedTab != BottomTab.DASHBOARD -> {
+                selectedTab = BottomTab.DASHBOARD
+                tabBackStack.clear()
+                tabBackStack.add(BottomTab.DASHBOARD)
+            }
+        }
+    }
 
     val needsReviewCount by viewModel.needsReviewCount.collectAsState()
     val duplicatePairs = viewModel.duplicatePairs
@@ -115,8 +147,7 @@ fun MainAppRoot(viewModel: MainViewModel) {
                             NavigationBarItem(
                                 selected = selected,
                                 onClick = {
-                                    activeSubScreen = SubScreen.NONE
-                                    selectedTab = tab
+                                    navigateToTab(tab)
                                 },
                                 icon = {
                                     BadgedBox(
@@ -193,10 +224,10 @@ fun MainAppRoot(viewModel: MainViewModel) {
                             BottomTab.DASHBOARD -> DashboardScreen(
                                 viewModel = viewModel,
                                 onOpenProfileManager = { showProfileManagerSheet = true },
-                                onNavigateToTransactions = { selectedTab = BottomTab.TRANSACTIONS },
+                                onNavigateToTransactions = { navigateToTab(BottomTab.TRANSACTIONS) },
                                 onNavigateToAccounts = { activeSubScreen = SubScreen.ACCOUNTS },
-                                onNavigateToReview = { selectedTab = BottomTab.REVIEW },
-                                onNavigateToUpload = { selectedTab = BottomTab.UPLOAD },
+                                onNavigateToReview = { navigateToTab(BottomTab.REVIEW) },
+                                onNavigateToUpload = { navigateToTab(BottomTab.UPLOAD) },
                                 onOpenAddTransaction = { showAddTxnSheet = true }
                             )
                             BottomTab.TRANSACTIONS -> TransactionsScreen(
