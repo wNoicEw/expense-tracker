@@ -25,9 +25,15 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlin.math.roundToInt
 import com.wnoicew.expensetracker.data.model.AccountEntity
 import com.wnoicew.expensetracker.data.model.CategoryBreakdownItem
 import com.wnoicew.expensetracker.data.model.TransactionEntity
@@ -436,11 +442,18 @@ fun DashboardScreen(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                CashflowCanvas(
+                val daysRange = when (chartRangeIndex) {
+                    0 -> 7
+                    1 -> 30
+                    else -> 90
+                }
+
+                InteractiveCashflowGraph(
+                    transactions = transactions,
+                    daysRange = daysRange,
                     isCumulative = chartModeIndex == 0,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(140.dp)
+                    currencyFormat = currencyFormat,
+                    modifier = Modifier.fillMaxWidth()
                 )
             }
         }
@@ -904,58 +917,407 @@ fun TransactionRowItem(
     }
 }
 
+data class DailyCashflowPoint(
+    val dateStr: String,
+    val displayLabel: String,
+    val income: Double,
+    val expense: Double,
+    val net: Double,
+    val cumulative: Double
+)
+
 @Composable
-private fun CashflowCanvas(
+private fun InteractiveCashflowGraph(
+    transactions: List<TransactionEntity>,
+    daysRange: Int,
     isCumulative: Boolean,
+    currencyFormat: NumberFormat,
     modifier: Modifier = Modifier
 ) {
-    val lineColor = PrimaryBlue
-    val gradientFill = Brush.verticalGradient(
-        listOf(PrimaryBlue.copy(alpha = 0.35f), Color.Transparent)
-    )
+    var selectedIndex by remember { mutableStateOf<Int?>(null) }
 
-    Canvas(modifier = modifier) {
-        val width = size.width
-        val height = size.height
+    // 1. Group transactions into last N days
+    val points = remember(transactions, daysRange) {
+        val sdfDate = SimpleDateFormat("yyyy-MM-dd", Locale.ENGLISH)
+        val sdfDisplay = SimpleDateFormat("d MMM", Locale.ENGLISH)
 
-        val points = if (isCumulative) {
-            listOf(
-                Offset(0f, height * 0.85f),
-                Offset(width * 0.2f, height * 0.7f),
-                Offset(width * 0.4f, height * 0.6f),
-                Offset(width * 0.6f, height * 0.45f),
-                Offset(width * 0.8f, height * 0.35f),
-                Offset(width, height * 0.2f)
-            )
-        } else {
-            listOf(
-                Offset(0f, height * 0.7f),
-                Offset(width * 0.2f, height * 0.3f),
-                Offset(width * 0.4f, height * 0.8f),
-                Offset(width * 0.6f, height * 0.35f),
-                Offset(width * 0.8f, height * 0.6f),
-                Offset(width, height * 0.25f)
-            )
+        val dateList = mutableListOf<DailyCashflowPoint>()
+        val dateMap = mutableMapOf<String, Pair<Double, Double>>() // dateStr -> (income, expense)
+
+        for (i in (daysRange - 1) downTo 0) {
+            val cal = Calendar.getInstance().apply {
+                add(Calendar.DAY_OF_YEAR, -i)
+            }
+            val dStr = sdfDate.format(cal.time)
+            dateMap[dStr] = Pair(0.0, 0.0)
         }
 
-        val path = Path().apply {
-            moveTo(points.first().x, points.first().y)
-            for (i in 1 until points.size) {
-                val p0 = points[i - 1]
-                val p1 = points[i]
-                val midX = (p0.x + p1.x) / 2
-                cubicTo(midX, p0.y, midX, p1.y, p1.x, p1.y)
+        // Aggregate valid transactions (exclude merged duplicates)
+        val validTxns = transactions.filter { it.duplicateStatus != "merged" }
+        for (t in validTxns) {
+            val dStr = sdfDate.format(Date(t.date))
+            if (dateMap.containsKey(dStr)) {
+                val current = dateMap[dStr] ?: Pair(0.0, 0.0)
+                if (t.type == TransactionType.INCOME) {
+                    dateMap[dStr] = Pair(current.first + t.amount, current.second)
+                } else if (t.type == TransactionType.EXPENSE) {
+                    dateMap[dStr] = Pair(current.first, current.second + t.amount)
+                }
             }
         }
 
-        val fillPath = Path().apply {
-            addPath(path)
-            lineTo(width, height)
-            lineTo(0f, height)
-            close()
+        var runningTotal = 0.0
+        for (i in (daysRange - 1) downTo 0) {
+            val cal = Calendar.getInstance().apply {
+                add(Calendar.DAY_OF_YEAR, -i)
+            }
+            val dStr = sdfDate.format(cal.time)
+            val (inc, exp) = dateMap[dStr] ?: Pair(0.0, 0.0)
+            val net = inc - exp
+            runningTotal += net
+            dateList.add(
+                DailyCashflowPoint(
+                    dateStr = dStr,
+                    displayLabel = sdfDisplay.format(cal.time),
+                    income = inc,
+                    expense = exp,
+                    net = net,
+                    cumulative = runningTotal
+                )
+            )
+        }
+        dateList
+    }
+
+    val activePoint = selectedIndex?.let { points.getOrNull(it) }
+    val totalInflow = remember(points) { points.sumOf { it.income } }
+    val totalOutflow = remember(points) { points.sumOf { it.expense } }
+    val totalNet = remember(points) { totalInflow - totalOutflow }
+
+    Column(modifier = modifier) {
+        // Dynamic Inspector / Tooltip Banner
+        Surface(
+            shape = RoundedCornerShape(10.dp),
+            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            if (activePoint != null) {
+                // Active Touch Info
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "📅 ${activePoint.displayLabel}",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (isCumulative) {
+                            Text(
+                                text = "Net: ${if (activePoint.cumulative >= 0) "+" else ""}${currencyFormat.format(activePoint.cumulative)}",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (activePoint.cumulative >= 0) IncomeGreen else ExpenseRose
+                            )
+                        } else {
+                            Text(
+                                text = "+${currencyFormat.format(activePoint.income)}",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = IncomeGreen
+                            )
+                            Text(
+                                text = "-${currencyFormat.format(activePoint.expense)}",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = ExpenseRose
+                            )
+                        }
+                    }
+                }
+            } else {
+                // Default Range Overview
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Touch graph to inspect daily breakdown",
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = "Net: ${if (totalNet >= 0) "+" else ""}${currencyFormat.format(totalNet)}",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (totalNet >= 0) IncomeGreen else ExpenseRose
+                    )
+                }
+            }
         }
 
-        drawPath(fillPath, brush = gradientFill)
-        drawPath(path, color = lineColor, style = Stroke(width = 3.dp.toPx()))
+        Spacer(modifier = Modifier.height(10.dp))
+
+        // Interactive Canvas
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(160.dp)
+                .pointerInput(points) {
+                    detectTapGestures(
+                        onPress = { offset ->
+                            if (points.isNotEmpty()) {
+                                val xRatio = (offset.x / size.width).coerceIn(0f, 1f)
+                                val idx = (xRatio * (points.size - 1)).roundToInt()
+                                selectedIndex = idx
+                                tryAwaitRelease()
+                                selectedIndex = null
+                            }
+                        }
+                    )
+                }
+                .pointerInput(points) {
+                    detectDragGestures(
+                        onDragStart = { offset ->
+                            if (points.isNotEmpty()) {
+                                val xRatio = (offset.x / size.width).coerceIn(0f, 1f)
+                                val idx = (xRatio * (points.size - 1)).roundToInt()
+                                selectedIndex = idx
+                            }
+                        },
+                        onDrag = { change, _ ->
+                            if (points.isNotEmpty()) {
+                                val xRatio = (change.position.x / size.width).coerceIn(0f, 1f)
+                                val idx = (xRatio * (points.size - 1)).roundToInt()
+                                selectedIndex = idx
+                            }
+                        },
+                        onDragEnd = { selectedIndex = null },
+                        onDragCancel = { selectedIndex = null }
+                    )
+                }
+        ) {
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                if (points.isEmpty()) return@Canvas
+                val width = size.width
+                val height = size.height
+
+                if (isCumulative) {
+                    // Cumulative Flow Mode
+                    val values = points.map { it.cumulative }
+                    val maxVal = maxOf(values.maxOrNull() ?: 0.0, 100.0)
+                    val minVal = minOf(values.minOrNull() ?: 0.0, 0.0)
+                    val range = maxOf(maxVal - minVal, 100.0)
+
+                    val zeroY = (height * (maxVal / range)).toFloat().coerceIn(10f, height - 10f)
+
+                    // Draw Zero Baseline
+                    drawLine(
+                        color = Color.Gray.copy(alpha = 0.35f),
+                        start = Offset(0f, zeroY),
+                        end = Offset(width, zeroY),
+                        strokeWidth = 1.dp.toPx(),
+                        pathEffect = PathEffect.dashPathEffect(floatArrayOf(8f, 8f), 0f)
+                    )
+
+                    val coords = points.mapIndexed { index, p ->
+                        val x = if (points.size > 1) (index.toFloat() / (points.size - 1)) * width else width / 2
+                        val y = (height * ((maxVal - p.cumulative) / range)).toFloat().coerceIn(4f, height - 4f)
+                        Offset(x, y)
+                    }
+
+                    if (coords.size >= 2) {
+                        val path = Path().apply {
+                            moveTo(coords.first().x, coords.first().y)
+                            for (i in 1 until coords.size) {
+                                val p0 = coords[i - 1]
+                                val p1 = coords[i]
+                                val midX = (p0.x + p1.x) / 2
+                                cubicTo(midX, p0.y, midX, p1.y, p1.x, p1.y)
+                            }
+                        }
+
+                        val fillPath = Path().apply {
+                            addPath(path)
+                            lineTo(width, zeroY)
+                            lineTo(0f, zeroY)
+                            close()
+                        }
+
+                        val isSurplus = totalNet >= 0
+                        val curveColor = if (isSurplus) IncomeGreen else ExpenseRose
+                        val gradFill = Brush.verticalGradient(
+                            listOf(curveColor.copy(alpha = 0.35f), curveColor.copy(alpha = 0.05f), Color.Transparent),
+                            startY = if (isSurplus) 0f else zeroY,
+                            endY = if (isSurplus) zeroY else height
+                        )
+
+                        drawPath(fillPath, brush = gradFill)
+                        drawPath(path, color = curveColor, style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round))
+                    }
+
+                    // Draw Active Cursor & Dot
+                    selectedIndex?.let { idx ->
+                        if (idx in coords.indices) {
+                            val activeCoord = coords[idx]
+                            drawLine(
+                                color = Color.White.copy(alpha = 0.5f),
+                                start = Offset(activeCoord.x, 0f),
+                                end = Offset(activeCoord.x, height),
+                                strokeWidth = 1.5.dp.toPx(),
+                                pathEffect = PathEffect.dashPathEffect(floatArrayOf(6f, 6f), 0f)
+                            )
+                            drawCircle(
+                                color = Color.White,
+                                radius = 6.dp.toPx(),
+                                center = activeCoord
+                            )
+                            drawCircle(
+                                color = if (points[idx].cumulative >= 0) IncomeGreen else ExpenseRose,
+                                radius = 4.dp.toPx(),
+                                center = activeCoord
+                            )
+                        }
+                    }
+
+                } else {
+                    // Unified Flow Mode (Income above 0, Expense below 0)
+                    val maxVal = maxOf(
+                        points.maxOfOrNull { it.income } ?: 0.0,
+                        points.maxOfOrNull { it.expense } ?: 0.0,
+                        100.0
+                    )
+
+                    val zeroY = height * 0.5f // Zero Baseline in the middle
+
+                    // Draw Zero Baseline
+                    drawLine(
+                        color = Color.Gray.copy(alpha = 0.4f),
+                        start = Offset(0f, zeroY),
+                        end = Offset(width, zeroY),
+                        strokeWidth = 1.2.dp.toPx(),
+                        pathEffect = PathEffect.dashPathEffect(floatArrayOf(8f, 8f), 0f)
+                    )
+
+                    // Income Coords (above 0 line)
+                    val incCoords = points.mapIndexed { index, p ->
+                        val x = if (points.size > 1) (index.toFloat() / (points.size - 1)) * width else width / 2
+                        val y = zeroY - ((p.income / maxVal) * (zeroY - 10f)).toFloat()
+                        Offset(x, y)
+                    }
+
+                    // Expense Coords (below 0 line)
+                    val expCoords = points.mapIndexed { index, p ->
+                        val x = if (points.size > 1) (index.toFloat() / (points.size - 1)) * width else width / 2
+                        val y = zeroY + ((p.expense / maxVal) * (height - zeroY - 10f)).toFloat()
+                        Offset(x, y)
+                    }
+
+                    // Draw Income Curve (+ve)
+                    if (incCoords.size >= 2) {
+                        val incPath = Path().apply {
+                            moveTo(incCoords.first().x, incCoords.first().y)
+                            for (i in 1 until incCoords.size) {
+                                val p0 = incCoords[i - 1]
+                                val p1 = incCoords[i]
+                                val midX = (p0.x + p1.x) / 2
+                                cubicTo(midX, p0.y, midX, p1.y, p1.x, p1.y)
+                            }
+                        }
+                        val incFill = Path().apply {
+                            addPath(incPath)
+                            lineTo(width, zeroY)
+                            lineTo(0f, zeroY)
+                            close()
+                        }
+                        drawPath(
+                            incFill,
+                            brush = Brush.verticalGradient(
+                                listOf(IncomeGreen.copy(alpha = 0.35f), Color.Transparent),
+                                startY = 0f,
+                                endY = zeroY
+                            )
+                        )
+                        drawPath(incPath, color = IncomeGreen, style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round))
+                    }
+
+                    // Draw Expense Curve (-ve)
+                    if (expCoords.size >= 2) {
+                        val expPath = Path().apply {
+                            moveTo(expCoords.first().x, expCoords.first().y)
+                            for (i in 1 until expCoords.size) {
+                                val p0 = expCoords[i - 1]
+                                val p1 = expCoords[i]
+                                val midX = (p0.x + p1.x) / 2
+                                cubicTo(midX, p0.y, midX, p1.y, p1.x, p1.y)
+                            }
+                        }
+                        val expFill = Path().apply {
+                            addPath(expPath)
+                            lineTo(width, zeroY)
+                            lineTo(0f, zeroY)
+                            close()
+                        }
+                        drawPath(
+                            expFill,
+                            brush = Brush.verticalGradient(
+                                listOf(Color.Transparent, ExpenseRose.copy(alpha = 0.35f)),
+                                startY = zeroY,
+                                endY = height
+                            )
+                        )
+                        drawPath(expPath, color = ExpenseRose, style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round))
+                    }
+
+                    // Active Cursor
+                    selectedIndex?.let { idx ->
+                        if (idx in incCoords.indices) {
+                            val activeInc = incCoords[idx]
+                            val activeExp = expCoords[idx]
+                            drawLine(
+                                color = Color.White.copy(alpha = 0.5f),
+                                start = Offset(activeInc.x, 0f),
+                                end = Offset(activeInc.x, height),
+                                strokeWidth = 1.5.dp.toPx(),
+                                pathEffect = PathEffect.dashPathEffect(floatArrayOf(6f, 6f), 0f)
+                            )
+                            if (points[idx].income > 0) {
+                                drawCircle(color = Color.White, radius = 5.dp.toPx(), center = activeInc)
+                                drawCircle(color = IncomeGreen, radius = 3.5.dp.toPx(), center = activeInc)
+                            }
+                            if (points[idx].expense > 0) {
+                                drawCircle(color = Color.White, radius = 5.dp.toPx(), center = activeExp)
+                                drawCircle(color = ExpenseRose, radius = 3.5.dp.toPx(), center = activeExp)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(6.dp))
+
+        // Date Axis Labels (Start, Mid, End)
+        if (points.isNotEmpty()) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(text = points.first().displayLabel, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (points.size >= 5) {
+                    Text(text = points[points.size / 2].displayLabel, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Text(text = points.last().displayLabel, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
     }
 }
+
