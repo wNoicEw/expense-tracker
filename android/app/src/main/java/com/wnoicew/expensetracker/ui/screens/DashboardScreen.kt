@@ -433,9 +433,9 @@ fun DashboardScreen(
 
                 Spacer(modifier = Modifier.height(8.dp))
 
-                // Range Buttons (7D, 30D, 90D)
+                // Range Buttons (7D, 30D, 3M, 6M, 1Y, ALL)
                 HigSegmentedControl(
-                    items = listOf("7D", "30D", "90D"),
+                    items = listOf("7D", "30D", "3M", "6M", "1Y", "ALL"),
                     selectedIndex = chartRangeIndex,
                     onItemSelected = { chartRangeIndex = it }
                 )
@@ -445,7 +445,10 @@ fun DashboardScreen(
                 val daysRange = when (chartRangeIndex) {
                     0 -> 7
                     1 -> 30
-                    else -> 90
+                    2 -> 90
+                    3 -> 180
+                    4 -> 365
+                    else -> -1 // -1 represents ALL available range
                 }
 
                 InteractiveCashflowGraph(
@@ -936,15 +939,29 @@ private fun InteractiveCashflowGraph(
 ) {
     var selectedIndex by remember { mutableStateOf<Int?>(null) }
 
-    // 1. Group transactions into last N days
+    // 1. Group transactions into last N days (7D, 30D, 3M, 6M, 1Y, ALL)
     val points = remember(transactions, daysRange) {
         val sdfDate = SimpleDateFormat("yyyy-MM-dd", Locale.ENGLISH)
         val sdfDisplay = SimpleDateFormat("d MMM", Locale.ENGLISH)
+        val validTxns = transactions.filter { it.duplicateStatus != "merged" }
+
+        val actualDays = if (daysRange <= 0) {
+            if (validTxns.isNotEmpty()) {
+                val earliestDate = validTxns.minOf { it.date }
+                val diffMs = System.currentTimeMillis() - earliestDate
+                val diffDays = (diffMs / (1000L * 60 * 60 * 24)).toInt() + 1
+                maxOf(7, diffDays)
+            } else {
+                30
+            }
+        } else {
+            daysRange
+        }
 
         val dateList = mutableListOf<DailyCashflowPoint>()
         val dateMap = mutableMapOf<String, Pair<Double, Double>>() // dateStr -> (income, expense)
 
-        for (i in (daysRange - 1) downTo 0) {
+        for (i in (actualDays - 1) downTo 0) {
             val cal = Calendar.getInstance().apply {
                 add(Calendar.DAY_OF_YEAR, -i)
             }
@@ -953,7 +970,6 @@ private fun InteractiveCashflowGraph(
         }
 
         // Aggregate valid transactions (exclude merged duplicates)
-        val validTxns = transactions.filter { it.duplicateStatus != "merged" }
         for (t in validTxns) {
             val dStr = sdfDate.format(Date(t.date))
             if (dateMap.containsKey(dStr)) {
@@ -967,7 +983,7 @@ private fun InteractiveCashflowGraph(
         }
 
         var runningTotal = 0.0
-        for (i in (daysRange - 1) downTo 0) {
+        for (i in (actualDays - 1) downTo 0) {
             val cal = Calendar.getInstance().apply {
                 add(Calendar.DAY_OF_YEAR, -i)
             }

@@ -137,7 +137,8 @@ class App {
         rangeBtns.forEach(b => b.classList.add('btn-secondary'));
         btn.classList.remove('btn-secondary');
         btn.classList.add('btn-primary');
-        this.currentDaysRange = parseInt(btn.getAttribute('data-range')) || 30;
+        const rangeVal = btn.getAttribute('data-range');
+        this.currentDaysRange = rangeVal === 'all' ? 'all' : (parseInt(rangeVal) || 30);
         this.renderDashboardCharts();
       });
     });

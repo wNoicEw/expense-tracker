@@ -44,12 +44,26 @@ class ChartsEngine {
     }
 
     const validTxns = transactions.filter(t => t.duplicateStatus !== 'merged');
+    const now = new Date();
+
+    // Determine actual days to display (7D, 30D, 90D/3M, 180D/6M, 365D/1Y, ALL)
+    let numDays = 30;
+    if (daysRange === 'all' || daysRange === 'ALL') {
+      if (validTxns.length > 0) {
+        const validDates = validTxns.map(t => new Date(t.date).getTime()).filter(ts => !isNaN(ts));
+        if (validDates.length > 0) {
+          const earliest = new Date(Math.min(...validDates));
+          const diffMs = now.getTime() - earliest.getTime();
+          numDays = Math.max(7, Math.ceil(diffMs / (1000 * 60 * 60 * 24)) + 1);
+        }
+      }
+    } else {
+      numDays = parseInt(daysRange) || 30;
+    }
 
     // Group by date
     const dateMap = {};
-    const now = new Date();
-    
-    for (let i = daysRange - 1; i >= 0; i--) {
+    for (let i = numDays - 1; i >= 0; i--) {
       const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i);
       const dateStr = d.toISOString().split('T')[0];
       dateMap[dateStr] = { 
