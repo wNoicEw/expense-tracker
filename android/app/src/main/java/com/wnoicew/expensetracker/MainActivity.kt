@@ -18,9 +18,11 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.wnoicew.expensetracker.ui.MainViewModel
 import com.wnoicew.expensetracker.ui.screens.*
 import com.wnoicew.expensetracker.ui.theme.MoneyTrackerTheme
+import com.wnoicew.expensetracker.ui.theme.PrimaryBlue
 
 enum class BottomTab(
     val title: String,
@@ -28,8 +30,10 @@ enum class BottomTab(
     val unselectedIcon: ImageVector
 ) {
     DASHBOARD("Dashboard", Icons.Filled.Dashboard, Icons.Outlined.Dashboard),
-    TRANSACTIONS("Transactions", Icons.Filled.ReceiptLong, Icons.Outlined.ReceiptLong),
-    ACCOUNTS("Accounts", Icons.Filled.CreditCard, Icons.Outlined.CreditCard)
+    TRANSACTIONS("Ledger", Icons.Filled.Receipt, Icons.Outlined.Receipt),
+    BUDGETS("Budgets", Icons.Filled.PieChart, Icons.Outlined.PieChart),
+    ACCOUNTS("Cards", Icons.Filled.CreditCard, Icons.Outlined.CreditCard),
+    TOOLS("Tools", Icons.Filled.Tune, Icons.Outlined.Tune)
 }
 
 class MainActivity : ComponentActivity() {
@@ -47,11 +51,14 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainAppRoot(viewModel: MainViewModel) {
     val activeProfile by viewModel.activeProfile
     var selectedTab by remember { mutableStateOf(BottomTab.DASHBOARD) }
     var showProfileManagerSheet by remember { mutableStateOf(false) }
+    val needsReviewCount by viewModel.needsReviewCount.collectAsState()
+    val duplicatePairs = viewModel.duplicatePairs
 
     AnimatedContent(
         targetState = activeProfile != null,
@@ -72,7 +79,7 @@ fun MainAppRoot(viewModel: MainViewModel) {
                 bottomBar = {
                     NavigationBar(
                         containerColor = MaterialTheme.colorScheme.surface,
-                        tonalElevation = 8.dp
+                        tonalElevation = 6.dp
                     ) {
                         BottomTab.values().forEach { tab ->
                             val selected = selectedTab == tab
@@ -80,16 +87,30 @@ fun MainAppRoot(viewModel: MainViewModel) {
                                 selected = selected,
                                 onClick = { selectedTab = tab },
                                 icon = {
-                                    Icon(
-                                        imageVector = if (selected) tab.selectedIcon else tab.unselectedIcon,
-                                        contentDescription = tab.title
-                                    )
+                                    BadgedBox(
+                                        badge = {
+                                            if (tab == BottomTab.TRANSACTIONS && needsReviewCount > 0) {
+                                                Badge(containerColor = MaterialTheme.colorScheme.error) {
+                                                    Text(needsReviewCount.toString())
+                                                }
+                                            } else if (tab == BottomTab.TOOLS && duplicatePairs.isNotEmpty()) {
+                                                Badge(containerColor = PrimaryBlue) {
+                                                    Text(duplicatePairs.size.toString())
+                                                }
+                                            }
+                                        }
+                                    ) {
+                                        Icon(
+                                            imageVector = if (selected) tab.selectedIcon else tab.unselectedIcon,
+                                            contentDescription = tab.title
+                                        )
+                                    }
                                 },
-                                label = { Text(tab.title) },
+                                label = { Text(tab.title, fontSize = 11.sp) },
                                 colors = NavigationBarItemDefaults.colors(
-                                    selectedIconColor = MaterialTheme.colorScheme.primary,
-                                    selectedTextColor = MaterialTheme.colorScheme.primary,
-                                    indicatorColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                                    selectedIconColor = PrimaryBlue,
+                                    selectedTextColor = PrimaryBlue,
+                                    indicatorColor = PrimaryBlue.copy(alpha = 0.12f)
                                 )
                             )
                         }
@@ -107,12 +128,20 @@ fun MainAppRoot(viewModel: MainViewModel) {
                             viewModel = viewModel,
                             onOpenProfileManager = { showProfileManagerSheet = true },
                             onNavigateToTransactions = { selectedTab = BottomTab.TRANSACTIONS },
-                            onNavigateToAccounts = { selectedTab = BottomTab.ACCOUNTS }
+                            onNavigateToAccounts = { selectedTab = BottomTab.ACCOUNTS },
+                            onNavigateToBudgets = { selectedTab = BottomTab.BUDGETS },
+                            onNavigateToTools = { selectedTab = BottomTab.TOOLS }
                         )
                         BottomTab.TRANSACTIONS -> TransactionsScreen(
                             viewModel = viewModel
                         )
+                        BottomTab.BUDGETS -> BudgetsScreen(
+                            viewModel = viewModel
+                        )
                         BottomTab.ACCOUNTS -> AccountsScreen(
+                            viewModel = viewModel
+                        )
+                        BottomTab.TOOLS -> ToolsScreen(
                             viewModel = viewModel
                         )
                     }
