@@ -38,6 +38,47 @@ android {
     buildFeatures {
         compose = true
     }
+
+    applicationVariants.all {
+        val variant = this
+        val vName = variant.versionName ?: "1.0.0"
+        val capitalizedVariantName = variant.name.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
+        val taskName = "copyApk$capitalizedVariantName"
+
+        val copyTask = tasks.register(taskName) {
+            doLast {
+                variant.outputs.all {
+                    val output = this as? com.android.build.gradle.internal.api.BaseVariantOutputImpl
+                    val apkFile = output?.outputFile
+                    if (apkFile != null && apkFile.exists()) {
+                        val rootDir = rootProject.projectDir.parentFile
+                        val apksFolder = File(rootDir, "apks")
+                        if (!apksFolder.exists()) {
+                            apksFolder.mkdirs()
+                        }
+
+                        // 1. Current version outside in the main folder
+                        val rootApk = File(rootDir, "ExpenseTracker.apk")
+                        apkFile.copyTo(rootApk, overwrite = true)
+
+                        // 2. Keep all versions in the apks folder
+                        val versionedApk = File(apksFolder, "ExpenseTracker-v${vName}.apk")
+                        apkFile.copyTo(versionedApk, overwrite = true)
+
+                        println("--------------------------------------------------")
+                        println("APK Distribution updated successfully:")
+                        println("  [Main Folder] Current APK: ${rootApk.name}")
+                        println("  [APKs Folder] Archive APK: ${versionedApk.name}")
+                        println("--------------------------------------------------")
+                    }
+                }
+            }
+        }
+
+        variant.assembleProvider.configure {
+            finalizedBy(copyTask)
+        }
+    }
 }
 
 dependencies {
