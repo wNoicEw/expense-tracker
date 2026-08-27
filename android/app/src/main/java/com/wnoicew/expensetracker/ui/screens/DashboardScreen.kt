@@ -1,16 +1,17 @@
 package com.wnoicew.expensetracker.ui.screens
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -44,14 +45,20 @@ fun DashboardScreen(
     viewModel: MainViewModel,
     onOpenProfileManager: () -> Unit,
     onNavigateToTransactions: () -> Unit,
-    onNavigateToAccounts: () -> Unit
+    onNavigateToAccounts: () -> Unit,
+    onNavigateToBudgets: () -> Unit,
+    onNavigateToTools: () -> Unit
 ) {
     val activeProfile by viewModel.activeProfile
     val netWorth by viewModel.totalNetWorth.collectAsState()
     val inflow by viewModel.totalInflow30D.collectAsState()
     val outflow by viewModel.totalOutflow30D.collectAsState()
     val savingsRate by viewModel.netSavingsRate.collectAsState()
+    val healthScore by viewModel.financialHealthScore.collectAsState()
+    val categoryBudgets by viewModel.categoryBudgetsStatus.collectAsState()
     val transactions by viewModel.transactions.collectAsState()
+    val needsReviewCount by viewModel.needsReviewCount.collectAsState()
+    val duplicatePairs = viewModel.duplicatePairs
 
     var chartRangeIndex by remember { mutableIntStateOf(1) } // 0: 7D, 1: 30D, 2: 90D
 
@@ -84,7 +91,7 @@ fun DashboardScreen(
                         color = MaterialTheme.colorScheme.onBackground
                     )
                     Text(
-                        text = "Real-time on-device portfolio",
+                        text = "Real-time on-device financial intelligence",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -128,7 +135,61 @@ fun DashboardScreen(
             }
         }
 
-        // 2. Bento Hero Net Worth Card
+        // 2. Needs Review & Duplicates Action Banner
+        if (needsReviewCount > 0 || duplicatePairs.isNotEmpty()) {
+            item {
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.35f),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.5f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(14.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.WarningAmber,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.size(22.dp)
+                            )
+                            Column {
+                                Text(
+                                    text = "${needsReviewCount + duplicatePairs.size} items require review",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = if (duplicatePairs.isNotEmpty()) "${duplicatePairs.size} duplicate pairs detected" else "Uncategorized statement entries",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+
+                        Button(
+                            onClick = if (duplicatePairs.isNotEmpty()) onNavigateToTools else onNavigateToTransactions,
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                        ) {
+                            Text("Resolve", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+        }
+
+        // 3. Bento Hero Net Worth Card
         item {
             HigGlassCard(
                 modifier = Modifier.fillMaxWidth()
@@ -166,7 +227,7 @@ fun DashboardScreen(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(10.dp))
 
                 Text(
                     text = "TOTAL NET WORTH",
@@ -231,11 +292,11 @@ fun DashboardScreen(
             }
         }
 
-        // 3. KPI Trio Row
+        // 4. Bento KPI Quartet
         item {
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 KpiCard(
                     title = "30D INFLOW",
@@ -250,15 +311,21 @@ fun DashboardScreen(
                     modifier = Modifier.weight(1f)
                 )
                 KpiCard(
-                    title = "SAVINGS RATE",
+                    title = "SAVINGS",
                     value = "${savingsRate.toInt()}%",
-                    color = TransferViolet,
+                    color = PrimaryBlue,
+                    modifier = Modifier.weight(1f)
+                )
+                KpiCard(
+                    title = "HEALTH",
+                    value = "$healthScore/100",
+                    color = if (healthScore >= 75) IncomeGreen else if (healthScore >= 50) Color(0xFFF59E0B) else ExpenseRose,
                     modifier = Modifier.weight(1f)
                 )
             }
         }
 
-        // 4. Cash Flow Chart Section
+        // 5. Cash Flow Trend Chart Section
         item {
             HigGlassCard(
                 modifier = Modifier.fillMaxWidth()
@@ -286,7 +353,6 @@ fun DashboardScreen(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // Custom Cashflow Curve Canvas
                 CashflowCanvas(
                     transactions = transactions,
                     modifier = Modifier
@@ -296,7 +362,68 @@ fun DashboardScreen(
             }
         }
 
-        // 5. Recent Activity Inset Group
+        // 6. Top Spending Categories (Bento Grid)
+        if (categoryBudgets.isNotEmpty()) {
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Spending Breakdown",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onBackground
+                    )
+                    TextButton(onClick = onNavigateToBudgets) {
+                        Text("Manage Budgets", color = PrimaryBlue, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                    }
+                }
+            }
+
+            item {
+                HigGlassCard(modifier = Modifier.fillMaxWidth()) {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        categoryBudgets.take(4).forEach { cat ->
+                            Column {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = cat.categoryName,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Text(
+                                        text = "${currencyFormat.format(cat.spent)} / ${currencyFormat.format(cat.monthlyBudget)}",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = if (cat.isExceeded) ExpenseRose else MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(4.dp))
+                                val progress = (cat.percentage / 100f).coerceIn(0f, 1f)
+                                LinearProgressIndicator(
+                                    progress = { progress },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(6.dp)
+                                        .clip(RoundedCornerShape(3.dp)),
+                                    color = if (cat.isExceeded) ExpenseRose else if (cat.percentage >= 80) Color(0xFFF59E0B) else IncomeGreen,
+                                    trackColor = MaterialTheme.colorScheme.surfaceVariant
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 7. Recent Transactions Inset Group
         item {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -311,7 +438,7 @@ fun DashboardScreen(
                 )
 
                 TextButton(onClick = onNavigateToTransactions) {
-                    Text("See All", color = PrimaryBlue, fontWeight = FontWeight.SemiBold)
+                    Text("See All", color = PrimaryBlue, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
                 }
             }
         }
@@ -326,7 +453,7 @@ fun DashboardScreen(
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         Icon(
-                            imageVector = Icons.Default.ReceiptLong,
+                            imageVector = Icons.Default.Receipt,
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
                             modifier = Modifier.size(40.dp)
@@ -338,7 +465,7 @@ fun DashboardScreen(
                             color = MaterialTheme.colorScheme.onSurface
                         )
                         Text(
-                            text = "Tap + on Transactions tab to record an entry.",
+                            text = "Import bank statements in Tools or tap + in Ledger.",
                             fontSize = 13.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -370,27 +497,29 @@ private fun KpiCard(
 ) {
     Surface(
         modifier = modifier
-            .shadow(2.dp, RoundedCornerShape(16.dp))
-            .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(16.dp)),
-        shape = RoundedCornerShape(16.dp),
+            .shadow(2.dp, RoundedCornerShape(14.dp))
+            .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(14.dp)),
+        shape = RoundedCornerShape(14.dp),
         color = MaterialTheme.colorScheme.surface
     ) {
         Column(
-            modifier = Modifier.padding(12.dp)
+            modifier = Modifier.padding(10.dp)
         ) {
             Text(
                 text = title,
-                fontSize = 10.sp,
+                fontSize = 9.sp,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                letterSpacing = 0.5.sp
+                letterSpacing = 0.4.sp,
+                maxLines = 1
             )
-            Spacer(modifier = Modifier.height(4.dp))
+            Spacer(modifier = Modifier.height(3.dp))
             Text(
                 text = value,
-                fontSize = 16.sp,
+                fontSize = 14.sp,
                 fontWeight = FontWeight.Bold,
-                color = color
+                color = color,
+                maxLines = 1
             )
         }
     }
@@ -403,8 +532,9 @@ fun TransactionRowItem(
     showDivider: Boolean = true
 ) {
     val isIncome = transaction.type == TransactionType.INCOME
-    val amountColor = if (isIncome) IncomeGreen else ExpenseRose
-    val prefix = if (isIncome) "+" else "-"
+    val isTransfer = transaction.type == TransactionType.TRANSFER
+    val amountColor = if (isIncome) IncomeGreen else if (isTransfer) TransferViolet else ExpenseRose
+    val prefix = if (isIncome) "+" else if (isTransfer) "" else "-"
 
     val dateFormat = remember { SimpleDateFormat("MMM dd", Locale.getDefault()) }
 
@@ -430,7 +560,7 @@ fun TransactionRowItem(
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
-                        imageVector = if (isIncome) Icons.Default.ArrowDownward else Icons.Default.ArrowUpward,
+                        imageVector = if (isIncome) Icons.Default.ArrowDownward else if (isTransfer) Icons.Default.SyncAlt else Icons.Default.ArrowUpward,
                         contentDescription = null,
                         tint = amountColor,
                         modifier = Modifier.size(18.dp)
@@ -438,15 +568,31 @@ fun TransactionRowItem(
                 }
 
                 Column {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(
+                            text = transaction.description,
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 14.sp,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        if (transaction.needsReview) {
+                            Surface(
+                                shape = RoundedCornerShape(4.dp),
+                                color = MaterialTheme.colorScheme.error.copy(alpha = 0.15f)
+                            ) {
+                                Text(
+                                    text = "REVIEW",
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.error,
+                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                )
+                            }
+                        }
+                    }
                     Text(
-                        text = transaction.description,
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 14.sp,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Text(
-                        text = "${dateFormat.format(Date(transaction.date))} · ${transaction.category}",
-                        fontSize = 12.sp,
+                        text = "${dateFormat.format(Date(transaction.date))} · ${transaction.category} · ${transaction.paymentMode}",
+                        fontSize = 11.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }

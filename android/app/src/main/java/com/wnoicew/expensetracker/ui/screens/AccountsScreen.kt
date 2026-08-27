@@ -12,6 +12,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -24,11 +25,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.wnoicew.expensetracker.data.PRESET_GRADIENTS
 import com.wnoicew.expensetracker.data.model.AccountEntity
 import com.wnoicew.expensetracker.ui.MainViewModel
 import com.wnoicew.expensetracker.ui.components.HigGlassCard
 import com.wnoicew.expensetracker.ui.components.HigInsetGroup
+import com.wnoicew.expensetracker.ui.theme.IncomeGreen
+import com.wnoicew.expensetracker.ui.theme.ExpenseRose
 import com.wnoicew.expensetracker.ui.theme.PrimaryBlue
 import java.text.NumberFormat
 import java.util.*
@@ -82,13 +84,13 @@ fun AccountsScreen(
                     color = MaterialTheme.colorScheme.onBackground
                 )
                 Text(
-                    text = "Manage your linked bank accounts and credit cards",
+                    text = "Manage your linked bank accounts, credit cards, and wallets",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
 
-            // Cards Carousel
+            // Cards Carousel (Apple Wallet style)
             if (accounts.isNotEmpty()) {
                 item {
                     LazyRow(
@@ -138,7 +140,7 @@ fun AccountsScreen(
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
-                                text = "Tap the + button below to add your first account.",
+                                text = "Tap the + button below to link your first account.",
                                 fontSize = 13.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.padding(top = 4.dp)
@@ -165,8 +167,8 @@ fun AccountsScreen(
         if (showAddAccountSheet) {
             AddAccountBottomSheet(
                 onDismiss = { showAddAccountSheet = false },
-                onAdd = { name, type, balance, limit, gradIdx, lastFour ->
-                    viewModel.addAccount(name, type, balance, limit, gradIdx, lastFour)
+                onAdd = { name, type, balance, limit, gradIdx, lastFour, bankName ->
+                    viewModel.addAccount(name, type, balance, limit, gradIdx, lastFour, bankName)
                     showAddAccountSheet = false
                 }
             )
@@ -184,7 +186,7 @@ private fun LuxuryCardItem(
     Box(
         modifier = Modifier
             .width(260.dp)
-            .height(150.dp)
+            .height(154.dp)
             .shadow(12.dp, RoundedCornerShape(22.dp))
             .clip(RoundedCornerShape(22.dp))
             .background(Brush.linearGradient(gradColors))
@@ -207,17 +209,17 @@ private fun LuxuryCardItem(
                 )
 
                 Text(
-                    text = account.type,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Medium,
+                    text = account.type.uppercase(),
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
                     color = Color.White.copy(alpha = 0.8f)
                 )
             }
 
             Column {
                 Text(
-                    text = "BALANCE",
-                    fontSize = 10.sp,
+                    text = "BALANCE / OUTSTANDING",
+                    fontSize = 9.sp,
                     fontWeight = FontWeight.Bold,
                     color = Color.White.copy(alpha = 0.7f),
                     letterSpacing = 0.5.sp
@@ -272,7 +274,7 @@ private fun AccountRowItem(
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
-                        imageVector = Icons.Default.AccountBalance,
+                        imageVector = if (account.type.contains("Credit", ignoreCase = true)) Icons.Default.CreditCard else Icons.Default.AccountBalance,
                         contentDescription = null,
                         tint = PrimaryBlue,
                         modifier = Modifier.size(20.dp)
@@ -287,7 +289,7 @@ private fun AccountRowItem(
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     Text(
-                        text = account.type,
+                        text = "${account.type}${if (account.lastFour.isNotBlank()) " · •••• ${account.lastFour}" else ""}",
                         fontSize = 12.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -299,7 +301,7 @@ private fun AccountRowItem(
                     text = currencyFormat.format(account.balance),
                     fontWeight = FontWeight.Bold,
                     fontSize = 15.sp,
-                    color = MaterialTheme.colorScheme.onSurface
+                    color = if (account.balance >= 0) IncomeGreen else ExpenseRose
                 )
 
                 IconButton(onClick = onDelete, modifier = Modifier.size(32.dp)) {
@@ -326,13 +328,14 @@ private fun AccountRowItem(
 @Composable
 fun AddAccountBottomSheet(
     onDismiss: () -> Unit,
-    onAdd: (String, String, Double, Double, Int, String) -> Unit
+    onAdd: (String, String, Double, Double, Int, String, String) -> Unit
 ) {
     var name by remember { mutableStateOf("") }
     var type by remember { mutableStateOf("Bank Account") }
     var balanceText by remember { mutableStateOf("") }
     var limitText by remember { mutableStateOf("") }
     var lastFour by remember { mutableStateOf("") }
+    var bankName by remember { mutableStateOf("") }
     var selectedGradIndex by remember { mutableIntStateOf(0) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
@@ -349,7 +352,7 @@ fun AddAccountBottomSheet(
                 .fillMaxWidth()
                 .padding(horizontal = 20.dp, vertical = 8.dp)
                 .safeDrawingPadding(),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Text(
                 text = "Add Account or Card",
@@ -380,7 +383,7 @@ fun AddAccountBottomSheet(
                     label = { Text("Account Type") },
                     trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = typeExpanded) },
                     shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.menuAnchor().fillMaxWidth()
+                    modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable).fillMaxWidth()
                 )
                 ExposedDropdownMenu(
                     expanded = typeExpanded,
@@ -405,7 +408,7 @@ fun AddAccountBottomSheet(
                 OutlinedTextField(
                     value = balanceText,
                     onValueChange = { balanceText = it },
-                    label = { Text("Current Balance (₹)") },
+                    label = { Text("Balance (₹)") },
                     placeholder = { Text("0.00") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     singleLine = true,
@@ -466,7 +469,7 @@ fun AddAccountBottomSheet(
                     }
                     val balance = balanceText.toDoubleOrNull() ?: 0.0
                     val limit = limitText.toDoubleOrNull() ?: 0.0
-                    onAdd(name.trim(), type, balance, limit, selectedGradIndex, lastFour.trim())
+                    onAdd(name.trim(), type, balance, limit, selectedGradIndex, lastFour.trim(), bankName.trim())
                 },
                 shape = RoundedCornerShape(14.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = PrimaryBlue),

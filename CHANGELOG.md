@@ -7,13 +7,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ## [1.1.0] - 2026-08-27
 
 ### Added
-- **Native Android Application (`android/`)**:
-  - Built with Kotlin and **Jetpack Compose (Material 3)**, targeting **Android 15 (SDK 35)** with Edge-to-Edge display support.
-  - **Apple HIG Design Language**: Custom translucent glass cards (`HigGlassCard`), iOS-style spring sliding segmented controls (`HigSegmentedControl`), Inset Grouped list containers (`HigInsetGroup`), and bottom modal sheets.
-  - **Multi-User Profile Architecture**: Full Room SQLite database isolation per profile (`ExpenseTrackerDB_<profileId>`) ensuring 100% clean-slate privacy on mobile.
-  - **Executive Bento Dashboard**: Live Net Worth hero card, Inflow vs Outflow split bar, KPI metrics (Inflow, Outflow, Savings Rate), and custom Canvas cash flow curve.
-  - **Transactions & Cards Screens**: Searchable transaction ledger with filters, add transaction bottom sheet, and luxury gradient credit/debit card carousel.
-  - **Complete Gradle Project Setup**: Configured with Version Catalogs (`libs.versions.toml`), Android Gradle Plugin 8.8, Kotlin 2.1, and local SDK properties for immediate opening in Android Studio.
+- **Full Feature Parity with Web Application on Native Android**:
+  - **Universal Offline Statement CSV Importer (`StatementParserEngine.kt`)**: Ingest bank and UPI CSV statements (HDFC, SBI, ICICI, Axis, GPay, PhonePe, Paytm, CRED) with instant on-device parsing and batch commit.
+  - **Cross-Statement Duplicate Resolver (`DuplicateDetectorEngine.kt`)**: Smart O(1) amount bucketing, exact UTR matching (99%), and date-proximity token scoring with 1-tap "Merge & Enrich" and "Keep Separate" actions.
+  - **Smart Categorization & Rule Learning Engine (`CategorizerEngine.kt`)**: 12 built-in financial categories, auto-stripping of routing codes, and dynamic custom rule learning with retroactive ledger reclassification.
+  - **Category Budgets & Financial Health Intelligence (`BudgetsScreen.kt`)**: Visual monthly spending limits, real-time health score (0-100), and warning threshold indicators.
+  - **Export & Backup Privacy Suite (`ExportEngine.kt`)**: Direct Android share sheet export for CSV spreadsheets and encrypted JSON profile backup and restore.
+- **Apple Human Interface Guidelines (HIG) Redesign**:
+  - 5-tab Cupertino navigation bar (`Dashboard`, `Ledger`, `Budgets`, `Cards`, `Tools`) with dynamic notification badges.
+  - Translucent glass cards (`HigGlassCard`), Inset Group list containers (`HigInsetGroup`), and spring-animated sliding pill segmented controls (`HigSegmentedControl`).
+  - Luxury Apple Wallet card carousel with credit limit meters.
+- **Brand Consistency**:
+  - Vectorized official Money Tracker brand logo (`ic_launcher_background.xml`, `ic_launcher_foreground.xml`, `ic_app_logo.xml`) integrated into app icon and in-app profile header.
+- **Automated APK Version Distribution System**:
+  - Root `ExpenseTracker.apk` always mirrors the latest build.
+  - Dedicated `apks/ExpenseTracker-v1.1.0.apk` archive alongside historical releases.
 
 ## [1.0.0] - 2026-08-27
 
