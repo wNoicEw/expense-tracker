@@ -99,81 +99,82 @@ class DuplicateDetector {
 
   /**
    * Compare two transactions and calculate duplicate probability
+   * Strict Rule: Only detect as duplicate if Amount, Merchant, and Date ALL 3 MATCH.
    */
   compareTransactions(t1, t2) {
     if (t1.id === t2.id) return { isMatch: false, confidence: 0 };
 
-    // 1. Amount Check: Must have identical amount
+    // 1. Date Check: MUST be on the exact same calendar day (YYYY-MM-DD)
+    if (!this.isSameDate(t1.date, t2.date)) {
+      return { isMatch: false, confidence: 0 };
+    }
+
+    // 2. Amount Check: MUST have identical amount
     const amt1 = Math.abs(parseFloat(t1.amount) || 0);
     const amt2 = Math.abs(parseFloat(t2.amount) || 0);
     if (Math.abs(amt1 - amt2) > 0.01) {
       return { isMatch: false, confidence: 0 };
     }
 
-    // 2. Exact Reference / UTR Match (High Confidence)
+    // 3. Merchant / Payee Check: MUST match merchant or UTR reference
     const ref1 = (t1.referenceNo || '').trim().toLowerCase();
     const ref2 = (t2.referenceNo || '').trim().toLowerCase();
-    
-    // Check if reference numbers are non-trivial (> 6 chars) and match
-    if (ref1 && ref2 && ref1.length > 6 && (ref1 === ref2 || ref1.includes(ref2) || ref2.includes(ref1))) {
+    const narr1 = (t1.rawNarration || '').toLowerCase();
+    const narr2 = (t2.rawNarration || '').toLowerCase();
+
+    const isUtrMatch = (ref1 && ref2 && ref1.length > 6 && (ref1 === ref2 || ref1.includes(ref2) || ref2.includes(ref1))) ||
+                       (ref1 && ref1.length > 6 && narr2.includes(ref1)) ||
+                       (ref2 && ref2.length > 6 && narr1.includes(ref2));
+
+    const isMerchantMatch = this.isSameMerchant(t1, t2);
+
+    if (isUtrMatch) {
       return {
         isMatch: true,
         confidence: 99,
-        reason: `Identical UTR / Reference No: ${t1.referenceNo}`
+        reason: `Identical UTR / Reference No on same date: ${t1.referenceNo}`
       };
     }
 
-    // Also check if t1's narration contains t2's reference number or vice-versa
-    const narr1 = (t1.rawNarration || '').toLowerCase();
-    const narr2 = (t2.rawNarration || '').toLowerCase();
-    if (ref1 && ref1.length > 6 && narr2.includes(ref1)) {
+    if (isMerchantMatch) {
       return {
         isMatch: true,
-        confidence: 98,
-        reason: `Bank statement contains UPI UTR reference: ${ref1}`
+        confidence: 95,
+        reason: `Exact match: Same Date (${t1.date}), Amount (₹${amt1.toFixed(2)}), and Merchant (${t1.description})`
       };
-    }
-    if (ref2 && ref2.length > 6 && narr1.includes(ref2)) {
-      return {
-        isMatch: true,
-        confidence: 98,
-        reason: `UPI statement contains Bank UTR reference: ${ref2}`
-      };
-    }
-
-    // 3. Date Proximity Check (Within ±24 hours / 1 day)
-    const d1 = new Date(t1.date);
-    const d2 = new Date(t2.date);
-    const diffDays = Math.abs((d1 - d2) / (1000 * 60 * 60 * 24));
-
-    if (diffDays <= 1) {
-      // Check Merchant Similarity or Shared Brand Tokens
-      const tokens1 = this.tokenizeText(t1.description + ' ' + narr1);
-      const tokens2 = this.tokenizeText(t2.description + ' ' + narr2);
-      
-      const commonTokens = tokens1.filter(token => tokens2.includes(token));
-      const hasSignificantMerchantMatch = commonTokens.some(tok => tok.length > 3 && !['bank', 'transfer', 'payment', 'paid', 'imps', 'upi', 'neft'].includes(tok));
-
-      if (hasSignificantMerchantMatch) {
-        return {
-          isMatch: true,
-          confidence: 90,
-          reason: `Exact amount (₹${amt1}) on ${t1.date} with matching merchant (${commonTokens.join(', ')})`
-        };
-      }
-
-      // If from different source files (e.g. Bank PDF vs UPI PDF) with exact amount on same date
-      if (t1.sourceFile && t2.sourceFile && t1.sourceFile !== t2.sourceFile && diffDays === 0) {
-        return {
-          isMatch: true,
-          confidence: 80,
-          reason: `Cross-file match: ₹${amt1} on ${t1.date} between ${t1.sourceFile} and ${t2.sourceFile}`
-        };
-      }
     }
 
     return { isMatch: false, confidence: 0 };
   }
+
+  isSameDate(d1Str, d2Str) {
+    if (!d1Str || !d2Str) return false;
+    // Normalize to YYYY-MM-DD
+    const normalize = (s) => {
+      if (typeof s === 'string' && /^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+      const d = new Date(s);
+      if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10);
+      return String(s).trim();
+    };
+    return normalize(d1Str) === normalize(d2Str);
+  }
+
+  isSameMerchant(t1, t2) {
+    const desc1 = (t1.description || '').trim().toLowerCase();
+    const desc2 = (t2.description || '').trim().toLowerCase();
+    if (desc1 && desc2 && desc1 === desc2) return true;
+
+    const narr1 = (t1.rawNarration || '').toLowerCase();
+    const narr2 = (t2.rawNarration || '').toLowerCase();
+    const tokens1 = this.tokenizeText(desc1 + ' ' + narr1);
+    const tokens2 = this.tokenizeText(desc2 + ' ' + narr2);
+
+    const commonTokens = tokens1.filter(token => tokens2.includes(token));
+    const ignoreWords = ['bank', 'transfer', 'payment', 'paid', 'imps', 'upi', 'neft', 'dr', 'cr', 'online', 'transaction', 'statement', 'account'];
+    const significant = commonTokens.filter(tok => tok.length >= 3 && !ignoreWords.includes(tok));
+    return significant.length > 0;
+  }
+
 
   tokenizeText(text) {
     return (text || '')

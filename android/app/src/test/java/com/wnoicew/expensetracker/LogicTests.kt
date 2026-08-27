@@ -9,6 +9,8 @@ import com.wnoicew.expensetracker.data.engine.StatementParserEngine
 import com.wnoicew.expensetracker.data.model.*
 import org.junit.Assert.*
 import org.junit.Test
+import java.text.SimpleDateFormat
+import java.util.Locale
 import java.util.UUID
 
 class LogicTests {
@@ -150,18 +152,21 @@ class LogicTests {
     }
 
     @Test
-    fun testDuplicateDetectorTimeProximityFuzzyMatch() {
-        val now = System.currentTimeMillis()
+    fun testDuplicateDetectorSameDateAmountAndMerchantMatch() {
+        val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.ENGLISH)
+        val t1Time = sdf.parse("2026-08-20 12:00:00")!!.time
+        val t2Time = sdf.parse("2026-08-20 14:00:00")!!.time // Same day, 2 hours later
+
         val t1 = TransactionEntity(
             id = "t1",
-            date = now,
+            date = t1Time,
             description = "Swiggy Order Food",
             amount = 320.0,
             sourceFile = "PhonePe.csv"
         )
         val t2 = TransactionEntity(
             id = "t2",
-            date = now + (2 * 60 * 60 * 1000), // 2 hours later
+            date = t2Time,
             description = "SWIGGY BANGALORE",
             amount = 320.0,
             sourceFile = "ICICI_Statement.csv"
@@ -169,11 +174,22 @@ class LogicTests {
 
         val duplicates = DuplicateDetectorEngine.scanDuplicates(listOf(t1, t2))
         assertEquals(1, duplicates.size)
-        assertEquals(90, duplicates[0].confidence)
+        assertEquals(95, duplicates[0].confidence)
 
         val (kept1, kept2) = DuplicateDetectorEngine.markSeparate(t1, t2)
         assertEquals("dismissed", kept1.duplicateStatus)
         assertEquals("dismissed", kept2.duplicateStatus)
+    }
+
+    @Test
+    fun testDuplicateDetectorDifferentDateIgnored() {
+        val now = System.currentTimeMillis()
+        val oneDayLater = now + (24 * 60 * 60 * 1000) // 1 day later
+        val t1 = TransactionEntity(id = "t1", date = now, description = "Swiggy Food", amount = 320.0)
+        val t2 = TransactionEntity(id = "t2", date = oneDayLater, description = "Swiggy Food", amount = 320.0)
+
+        val duplicates = DuplicateDetectorEngine.scanDuplicates(listOf(t1, t2))
+        assertTrue(duplicates.isEmpty())
     }
 
     @Test
@@ -184,6 +200,7 @@ class LogicTests {
         val duplicates = DuplicateDetectorEngine.scanDuplicates(listOf(t1, t2))
         assertTrue(duplicates.isEmpty())
     }
+
 
     // ==========================================
     // 4. STATEMENT CSV PARSER TESTS
