@@ -532,6 +532,65 @@ fun UploadScreen(
                     }
                 }
 
+                // Auto-detected Account / Card Banner
+                parsed.accountMetadata?.let { meta ->
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .border(1.dp, PrimaryBlue.copy(alpha = 0.3f), RoundedCornerShape(12.dp)),
+                        shape = RoundedCornerShape(12.dp),
+                        color = PrimaryBlue.copy(alpha = 0.08f)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Icon(
+                                imageVector = if (meta.type == "Credit Card") Icons.Default.CreditCard else if (meta.type == "Digital Wallet") Icons.Default.AccountBalanceWallet else Icons.Default.AccountBalance,
+                                contentDescription = null,
+                                tint = PrimaryBlue,
+                                modifier = Modifier.size(24.dp)
+                            )
+                            Column(modifier = Modifier.weight(1f)) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Text(
+                                        text = "Auto-Detected ${meta.type}",
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = PrimaryBlue
+                                    )
+                                    if (meta.lastFour.isNotBlank() && meta.lastFour != "0000" && meta.lastFour != "UPI") {
+                                        Surface(
+                                            shape = RoundedCornerShape(6.dp),
+                                            color = PrimaryBlue.copy(alpha = 0.15f)
+                                        ) {
+                                            Text(
+                                                text = "•••• ${meta.lastFour}",
+                                                fontSize = 9.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = PrimaryBlue,
+                                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                                Text(
+                                    text = meta.name,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                        }
+                    }
+                }
+
                 Text("Sample Entries (First 5):", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
 
                 HigInsetGroup {
@@ -546,8 +605,13 @@ fun UploadScreen(
 
                 Button(
                     onClick = {
-                        viewModel.commitBatchTransactions(currentImportFileName, parsed.detectedProfile, parsed.transactions)
-                        Toast.makeText(context, "Successfully imported ${parsed.transactions.size} transactions!", Toast.LENGTH_SHORT).show()
+                        viewModel.commitBatchTransactions(
+                            fileName = currentImportFileName,
+                            detectedBank = parsed.detectedProfile,
+                            accountMetadata = parsed.accountMetadata,
+                            transactionsToInsert = parsed.transactions
+                        )
+                        Toast.makeText(context, "Successfully imported ${parsed.transactions.size} transactions to ${parsed.accountMetadata?.name ?: "account"}!", Toast.LENGTH_SHORT).show()
                         parseResultToPreview = null
                     },
                     shape = RoundedCornerShape(12.dp),

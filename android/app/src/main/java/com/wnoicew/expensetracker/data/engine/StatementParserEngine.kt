@@ -2,6 +2,7 @@ package com.wnoicew.expensetracker.data.engine
 
 import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.text.PDFTextStripper
+import com.wnoicew.expensetracker.data.model.AccountMetadata
 import com.wnoicew.expensetracker.data.model.RuleEntity
 import com.wnoicew.expensetracker.data.model.StatementParseResult
 import com.wnoicew.expensetracker.data.model.TransactionEntity
@@ -126,35 +127,36 @@ object StatementParserEngine {
         val ft = fullText.lowercase()
         val fname = fileName.lowercase()
 
-        val detectedBank = detectBankFromText(fullText, fileName)
+        val accountMetadata = extractAccountMetadata(fullText, fileName)
+        val detectedBank = accountMetadata.bankName
+        val effectiveAccountName = accountName.ifBlank { accountMetadata.name }
 
         // Route to specialized parsers (SBI and UPI apps prioritized over generic matching)
-        val result = when {
+        val baseResult = when {
             ft.contains("paid via navi") || (ft.contains("upi txn id") && (ft.contains("navi") || fname.contains("navi"))) -> {
-                parseNaviPdf(lines, fileName, accountId, accountName, customRules)
+                parseNaviPdf(lines, fileName, accountId, effectiveAccountName, customRules)
             }
             ft.contains("state bank of india") || ft.contains("sbi") || fname.contains("sbi") || ft.contains("wdl tfr") || ft.contains("dep tfr") || detectedBank.contains("sbi", ignoreCase = true) -> {
-                parseSbiPdf(lines, fileName, accountId, accountName, customRules)
+                parseSbiPdf(lines, fileName, accountId, effectiveAccountName, customRules)
             }
             ft.contains("phonepe") || fname.contains("phonepe") -> {
-                parsePhonePePdf(lines, fileName, accountId, accountName, customRules)
+                parsePhonePePdf(lines, fileName, accountId, effectiveAccountName, customRules)
             }
             ft.contains("paytm") || fname.contains("paytm") -> {
-                parsePaytmPdf(lines, fileName, accountId, accountName, customRules)
+                parsePaytmPdf(lines, fileName, accountId, effectiveAccountName, customRules)
             }
-            (ft.contains("credit card statement") || ft.contains("total amount due") || ft.contains("minimum amount due") || ft.contains("card statement")) && !ft.contains("wdl tfr") && !ft.contains("dep tfr") -> {
-                parseCreditCardPdf(lines, fileName, detectedBank, accountId, accountName, customRules)
+            (accountMetadata.type == "Credit Card" || ft.contains("credit card statement") || ft.contains("total amount due") || ft.contains("minimum amount due") || ft.contains("card statement")) && !ft.contains("wdl tfr") && !ft.contains("dep tfr") -> {
+                parseCreditCardPdf(lines, fileName, detectedBank, accountId, effectiveAccountName, customRules)
             }
             else -> {
-                val generic = parseGenericTablePdf(lines, fileName, detectedBank, accountId, accountName, customRules)
+                val generic = parseGenericTablePdf(lines, fileName, detectedBank, accountId, effectiveAccountName, customRules)
                 if (generic.transactions.isNotEmpty()) generic else {
-                    parseFallbackLines(lines, fileName, detectedBank, accountId, accountName, customRules)
+                    parseFallbackLines(lines, fileName, detectedBank, accountId, effectiveAccountName, customRules)
                 }
             }
         }
 
-
-        if (result.transactions.isEmpty()) {
+        if (baseResult.transactions.isEmpty()) {
             throw StatementParsingException(
                 title = if (detectedBank != "Generic Statement") "Detected: \"$detectedBank\" — but no transactions found" else "Failed to detect statement format",
                 detail = if (detectedBank != "Generic Statement") "The PDF format was recognized as $detectedBank, but no transactions could be extracted. The statement may be in an unsupported layout or password-locked." else "Could not identify financial transactions in this document. Please ensure it is an official bank, UPI, or credit card PDF.",
@@ -163,7 +165,10 @@ object StatementParserEngine {
             )
         }
 
-        return result
+        return baseResult.copy(
+            detectedProfile = detectedBank + (if (accountMetadata.type == "Credit Card") " Card" else " Statement"),
+            accountMetadata = accountMetadata
+        )
     }
 
     // --- NAVI UPI PDF PARSER ---
@@ -601,7 +606,10 @@ object StatementParserEngine {
         val refIdx = headerCols.indexOfFirst { it.contains("ref") || it.contains("utr") || it.contains("chq") || it.contains("reference") }
         val typeIdx = headerCols.indexOfFirst { it == "type" || it.contains("txn type") || it.contains("cr/dr") }
 
-        val detectedProfile = detectBankFromText(lines.take(10).joinToString(" "), fileName)
+        val fullText = lines.joinToString(" ")
+        val accountMetadata = extractAccountMetadata(fullText, fileName)
+        val detectedProfile = accountMetadata.bankName + (if (accountMetadata.type == "Credit Card") " Card CSV" else " Statement CSV")
+        val effectiveAccountName = accountName.ifBlank { accountMetadata.name }
         val parsedList = mutableListOf<TransactionEntity>()
         var totalInflow = 0.0
         var totalOutflow = 0.0
@@ -652,6 +660,10 @@ object StatementParserEngine {
             val catResult = CategorizerEngine.categorize(rawDesc, amount, customRules)
             val finalType = explicitType ?: catResult.type
 
+            val ruPayMeta = detectRuPayCC(rawDesc)
+            val txnAccountName = ruPayMeta?.name ?: effectiveAccountName
+            val paymentMode = if (ruPayMeta != null) "UPI (RuPay Credit Card)" else if (rawDesc.contains("upi", ignoreCase = true)) "UPI" else if (accountMetadata.type == "Credit Card") "Credit Card" else "Bank Transfer / Online"
+
             val entity = TransactionEntity(
                 date = timestamp,
                 description = catResult.cleanTitle,
@@ -659,9 +671,9 @@ object StatementParserEngine {
                 type = finalType,
                 category = catResult.category,
                 accountId = accountId,
-                accountName = accountName.ifBlank { detectedProfile },
+                accountName = txnAccountName,
                 referenceNo = rawRef.trim(),
-                paymentMode = if (rawDesc.contains("upi", ignoreCase = true)) "UPI" else "Online / Card",
+                paymentMode = paymentMode,
                 sourceFile = fileName,
                 rawNarration = rawDesc,
                 needsReview = catResult.needsReview,
@@ -685,33 +697,198 @@ object StatementParserEngine {
             detectedProfile = detectedProfile,
             transactions = parsedList,
             totalInflow = totalInflow,
-            totalOutflow = totalOutflow
+            totalOutflow = totalOutflow,
+            accountMetadata = accountMetadata
+        )
+    }
+
+    fun extractAccountMetadata(fullText: String, fileName: String): AccountMetadata {
+        val fn = fileName.lowercase()
+        val header = fullText.take(1500).lowercase()
+        val text = (fullText + " " + fileName).lowercase()
+
+        // 1. Bank Issuer Name & Color Theme Gradient Index
+        // 0: Royal Navy, 1: Emerald Green, 2: Crimson Burgundy, 3: Stealth Black, 4: Amber Gold
+        var bankName = "Primary Bank"
+        var gradientIndex = 0
+
+        if (fn.contains("sbi") || fn.contains("state bank") || header.contains("state bank of india") || Regex("""\bsbin\b""", RegexOption.IGNORE_CASE).containsMatchIn(header) || header.contains("wdl tfr") || header.contains("dep tfr")) {
+            bankName = "State Bank of India (SBI)"
+            gradientIndex = 1
+        } else if (fn.contains("navi") || header.contains("paid via navi") || header.contains("navi technologies")) {
+            bankName = "Navi UPI"
+            gradientIndex = 0
+        } else if (fn.contains("phonepe") || header.contains("phonepe")) {
+            bankName = "PhonePe"
+            gradientIndex = 2
+        } else if (fn.contains("paytm") || header.contains("paytm")) {
+            bankName = "Paytm"
+            gradientIndex = 0
+        } else if (fn.contains("google pay") || fn.contains("gpay") || header.contains("google pay") || Regex("""\bgpay\b""", RegexOption.IGNORE_CASE).containsMatchIn(header)) {
+            bankName = "Google Pay"
+            gradientIndex = 0
+        } else if (fn.contains("hdfc") || header.contains("hdfc bank") || header.contains("www.hdfcbank.com") || header.contains("hdfc card")) {
+            bankName = "HDFC Bank"
+            gradientIndex = 0
+        } else if (fn.contains("icici") || header.contains("icici bank") || header.contains("icici card")) {
+            bankName = "ICICI Bank"
+            gradientIndex = 4
+        } else if (fn.contains("axis") || header.contains("axis bank") || header.contains("axis card")) {
+            bankName = "Axis Bank"
+            gradientIndex = 2
+        } else if (fn.contains("kotak") || header.contains("kotak mahindra") || header.contains("kotak card")) {
+            bankName = "Kotak Mahindra Bank"
+            gradientIndex = 2
+        } else if (fn.contains("pnb") || fn.contains("punjab national") || header.contains("punjab national") || Regex("""\bpnb\b""", RegexOption.IGNORE_CASE).containsMatchIn(header)) {
+            bankName = "Punjab National Bank (PNB)"
+            gradientIndex = 4
+        } else if (fn.contains("baroda") || header.contains("bank of baroda") || Regex("""\bbob\b""", RegexOption.IGNORE_CASE).containsMatchIn(fn)) {
+            bankName = "Bank of Baroda"
+            gradientIndex = 4
+        } else if (fn.contains("canara") || header.contains("canara bank")) {
+            bankName = "Canara Bank"
+            gradientIndex = 0
+        } else if (fn.contains("union") || header.contains("union bank")) {
+            bankName = "Union Bank of India"
+            gradientIndex = 1
+        } else if (Regex("""\bcred\b""", RegexOption.IGNORE_CASE).containsMatchIn(fn) || Regex("""\bcred\b""", RegexOption.IGNORE_CASE).containsMatchIn(header)) {
+            bankName = "CRED"
+            gradientIndex = 3
+        } else if (header.contains("amazon pay")) {
+            bankName = "Amazon Pay"
+            gradientIndex = 4
+        } else if (text.contains("hdfc bank") && !text.contains("wdl tfr")) {
+            bankName = "HDFC Bank"
+            gradientIndex = 0
+        } else if (text.contains("state bank") || text.contains("sbi")) {
+            bankName = "State Bank of India (SBI)"
+            gradientIndex = 1
+        } else {
+            val cleanName = fileName.substringBeforeLast('.').replace(Regex("""[_-]"""), " ").trim()
+            bankName = if (cleanName.length > 2) cleanName else "Personal Account"
+            gradientIndex = 0
+        }
+
+        // 2. Detect Instrument Type
+        val isBankStatement = text.contains("wdl tfr") || text.contains("dep tfr") || text.contains("savings account") || text.contains("current account") || text.contains("clear balance")
+        val type = when {
+            !isBankStatement && (text.contains("credit card statement") || text.contains("minimum amount due") || text.contains("total amount due") || text.contains("card statement") || text.contains("card ending in")) -> "Credit Card"
+            text.contains("google pay") || text.contains("gpay") || text.contains("phonepe") || text.contains("paytm wallet") || text.contains("amazon pay wallet") || text.contains("upi history") || text.contains("upi statement") || text.contains("navi upi") -> "Digital Wallet"
+            text.contains("cash in hand") || text.contains("cash statement") -> "Cash"
+            else -> "Bank Account"
+        }
+
+        // 3. Detect Account / Card Number Last 4 digits
+        var last4 = ""
+        val keywordMatch = Regex("""(?:account(?:\s*no\.?)?|a/c(?:\s*no\.?)?|acct|card(?:\s*no\.?)?|ending in|ending with|xx|[*X]{4,12})[\s#:-]*([0-9]{4,18})""", RegexOption.IGNORE_CASE).find(fullText)
+        if (keywordMatch != null) {
+            val numStr = keywordMatch.groupValues[1].trim()
+            if (numStr.length >= 4) {
+                last4 = numStr.takeLast(4)
+            }
+        }
+
+        if (last4.isEmpty()) {
+            val cardPattern = Regex("""\b\d{4}\s*\d{4}\s*\d{4}\s*(\d{4})\b""").find(fullText)
+            if (cardPattern != null) last4 = cardPattern.groupValues[1]
+        }
+
+        if (last4.isEmpty()) {
+            val maskedPattern = Regex("""\b[X*]{4,12}\s*(\d{4})\b""").find(fullText)
+            if (maskedPattern != null) last4 = maskedPattern.groupValues[1]
+        }
+
+        if (last4.isEmpty()) {
+            val fnDigits = Regex("""\b(\d{4})\b""").find(fileName)
+            if (fnDigits != null) {
+                val num = fnDigits.groupValues[1].toIntOrNull() ?: 0
+                if (num < 2020 || num > 2035) {
+                    last4 = fnDigits.groupValues[1]
+                }
+            }
+        }
+
+        // 4. Generate user-friendly Account Name
+        val name = when (type) {
+            "Credit Card" -> "$bankName Credit Card" + (if (last4.isNotBlank()) " (•••• $last4)" else "")
+            "Digital Wallet" -> "$bankName UPI Wallet"
+            "Cash" -> "Cash in Hand"
+            else -> "$bankName Account" + (if (last4.isNotBlank()) " (•••• $last4)" else "")
+        }
+
+        // 5. Credit limit detection
+        var creditLimit = 100000.0
+        if (type == "Credit Card") {
+            val limitMatch = Regex("""credit\s*limit[:\s]*(?:₹|rs\.?|inr)?\s*([0-9,]+)""", RegexOption.IGNORE_CASE).find(fullText)
+            if (limitMatch != null) {
+                val parsedLimit = limitMatch.groupValues[1].replace(",", "").toDoubleOrNull()
+                if (parsedLimit != null && parsedLimit > 0) creditLimit = parsedLimit
+            }
+        }
+
+        return AccountMetadata(
+            bankName = bankName,
+            type = type,
+            lastFour = last4.ifBlank { if (type == "Digital Wallet") "UPI" else "0000" },
+            name = name,
+            creditLimit = creditLimit,
+            gradientIndex = gradientIndex,
+            isRuPay = false
+        )
+    }
+
+    fun detectRuPayCC(text: String): AccountMetadata? {
+        if (text.isBlank()) return null
+        val lower = text.lowercase()
+
+        val hasRuPay = Regex("""\b(rupay|rupay\s*cc|rupay\s*credit\s*card|rupay\s*card|upi-rupay|rupay-cc)\b""", RegexOption.IGNORE_CASE).containsMatchIn(lower)
+        val hasCreditCardUPI = Regex("""\b(credit\s*card|linked\s*card|cc\s*on\s*upi|card\s*ending)\b""", RegexOption.IGNORE_CASE).containsMatchIn(lower) &&
+                Regex("""\b(upi|paid\s*via|debited\s*from|instrument|gpay|phonepe|paytm|cred)\b""", RegexOption.IGNORE_CASE).containsMatchIn(lower)
+
+        if (!hasRuPay && !hasCreditCardUPI) return null
+
+        var bankName = "RuPay"
+        var gradientIndex = 1
+
+        if (text.contains("hdfc", ignoreCase = true)) { bankName = "HDFC Bank"; gradientIndex = 0 }
+        else if (text.contains("icici", ignoreCase = true)) { bankName = "ICICI Bank"; gradientIndex = 4 }
+        else if (text.contains("sbi", ignoreCase = true) || text.contains("state bank", ignoreCase = true)) { bankName = "SBI Card"; gradientIndex = 1 }
+        else if (text.contains("axis", ignoreCase = true)) { bankName = "Axis Bank"; gradientIndex = 2 }
+        else if (text.contains("kotak", ignoreCase = true)) { bankName = "Kotak Bank"; gradientIndex = 2 }
+        else if (text.contains("pnb", ignoreCase = true) || text.contains("punjab", ignoreCase = true)) { bankName = "PNB"; gradientIndex = 4 }
+        else if (text.contains("baroda", ignoreCase = true)) { bankName = "Bank of Baroda"; gradientIndex = 4 }
+        else if (text.contains("canara", ignoreCase = true)) { bankName = "Canara Bank"; gradientIndex = 0 }
+        else if (text.contains("union", ignoreCase = true)) { bankName = "Union Bank"; gradientIndex = 1 }
+
+        var last4 = ""
+        val numMatch = Regex("""(?:card|rupay|cc|ending(?:\s*in)?|xx|[*X]{2,12}|a/c)[\s#:-]*([0-9]{4})\b""", RegexOption.IGNORE_CASE).find(text)
+        if (numMatch != null) {
+            last4 = numMatch.groupValues[1]
+        } else {
+            val standAlone4 = Regex("""\b([0-9]{4})\b""").find(text)
+            if (standAlone4 != null) {
+                val num = standAlone4.groupValues[1].toIntOrNull() ?: 0
+                if (num < 2020 || num > 2035) {
+                    last4 = standAlone4.groupValues[1]
+                }
+            }
+        }
+
+        val cardName = "$bankName RuPay Credit Card" + (if (last4.isNotBlank()) " (•••• $last4)" else "")
+
+        return AccountMetadata(
+            bankName = bankName,
+            type = "Credit Card",
+            lastFour = last4.ifBlank { "0000" },
+            name = cardName,
+            creditLimit = 100000.0,
+            gradientIndex = gradientIndex,
+            isRuPay = true
         )
     }
 
     private fun detectBankFromText(text: String, fileName: String): String {
-        val f = fileName.lowercase()
-        val header = text.take(1500).lowercase()
-        val t = text.lowercase()
-        return when {
-            f.contains("sbi") || f.contains("state bank") || header.contains("state bank of india") || header.contains("sbin") || header.contains("wdl tfr") || header.contains("dep tfr") -> "State Bank of India (SBI)"
-            f.contains("navi") || header.contains("paid via navi") || header.contains("navi technologies") -> "Navi UPI"
-            f.contains("phonepe") || header.contains("phonepe") -> "PhonePe"
-            f.contains("paytm") || header.contains("paytm") -> "Paytm"
-            f.contains("google pay") || f.contains("gpay") || header.contains("google pay") -> "Google Pay"
-            f.contains("hdfc") || header.contains("hdfc bank") || header.contains("www.hdfcbank.com") -> "HDFC Bank"
-            f.contains("icici") || header.contains("icici bank") -> "ICICI Bank"
-            f.contains("axis") || header.contains("axis bank") -> "Axis Bank"
-            f.contains("kotak") || header.contains("kotak mahindra") -> "Kotak Mahindra Bank"
-            f.contains("punjab national") || f.contains("pnb") -> "Punjab National Bank (PNB)"
-            f.contains("bank of baroda") || f.contains("bob") -> "Bank of Baroda"
-            f.contains("canara") -> "Canara Bank"
-            f.contains("cred") || header.contains("cred") -> "CRED"
-            header.contains("amazon pay") -> "Amazon Pay"
-            t.contains("state bank of india") || t.contains("sbi") -> "State Bank of India (SBI)"
-            t.contains("hdfc bank") -> "HDFC Bank"
-            else -> "Generic Statement"
-        }
+        return extractAccountMetadata(text, fileName).bankName
     }
 
 
