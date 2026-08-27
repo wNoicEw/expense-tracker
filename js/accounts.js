@@ -15,8 +15,15 @@ class AccountsManager {
     const transactions = await window.db.getAll('transactions');
 
     return accounts.map(acc => {
-      // Filter transactions for this account (ignore merged duplicates)
-      const accTxns = transactions.filter(t => t.accountId === acc.id && t.duplicateStatus !== 'merged');
+      // Filter transactions for this account (support direct accountId or smart fallback matching)
+      const accTxns = transactions.filter(t => 
+        t.duplicateStatus !== 'merged' && (
+          (t.accountId && t.accountId === acc.id) ||
+          (!t.accountId && t.accountName && t.accountName.toLowerCase() === acc.name.toLowerCase()) ||
+          (!t.accountId && acc.bankName && t.accountName && t.accountName.toLowerCase().includes(acc.bankName.toLowerCase())) ||
+          (!t.accountId && acc.bankName && t.rawNarration && t.rawNarration.toLowerCase().includes(acc.bankName.toLowerCase()))
+        )
+      );
       
       let totalIncome = 0;
       let totalExpense = 0;
@@ -28,10 +35,7 @@ class AccountsManager {
         if (t.type === 'income') totalIncome += amt;
         else if (t.type === 'expense') totalExpense += amt;
         else if (t.type === 'transfer') {
-          // For transfers: credits are payments IN, debits are payments OUT
-          // In a CC statement, a "credit card payment received" appears as income/transfer credit
-          // In a bank statement, a "CC bill payment" appears as a transfer debit
-          if (t.explicitType === 'income' || (t.rawNarration && /\b(cr|credit|received|payment received)\b/i.test(t.rawNarration))) {
+          if (t.explicitType === 'income' || (t.rawNarration && /\b(cr|credit|received|payment received|deposit)\b/i.test(t.rawNarration))) {
             totalTransfersIn += amt;
           } else {
             totalTransfersOut += amt;
@@ -46,20 +50,20 @@ class AccountsManager {
       let outstandingDues = 0;
 
       if (acc.type === 'credit_card') {
-        // Credit Card Balance Logic:
-        // Outstanding = Expenses charged to card − Payments received (income + transfer credits)
-        // This prevents double-counting when both CC statement and bank CC bill payment are imported.
         const totalPaymentsReceived = totalIncome + totalTransfersIn;
         outstandingDues = Math.max(0, totalExpense - totalPaymentsReceived);
         const limit = acc.creditLimit || 100000;
-        calculatedBalance = -outstandingDues;
+        calculatedBalance = outstandingDues > 0 ? outstandingDues : totalExpense;
         availableCredit = Math.max(0, limit - outstandingDues);
         utilizationPercent = Math.min(100, Math.round((outstandingDues / limit) * 100));
       } else {
-        // Bank / Wallet / Cash Balance Logic:
-        // Transfers OUT (like CC bill payments) reduce balance but are NOT expenses
-        // This way, spending ₹5k on CC + paying ₹5k CC bill from bank = only ₹5k expense total
-        calculatedBalance = (acc.balance || 0) + totalIncome - totalExpense - totalTransfersOut + totalTransfersIn;
+        if (acc.balance && acc.balance !== 0) {
+          calculatedBalance = (acc.balance || 0) + totalIncome - totalExpense - totalTransfersOut + totalTransfersIn;
+        } else if (totalIncome > 0) {
+          calculatedBalance = totalIncome - totalExpense - totalTransfersOut + totalTransfersIn;
+        } else {
+          calculatedBalance = totalExpense; // total spent via this account/wallet
+        }
       }
 
       return {

@@ -100,3 +100,12 @@ data class StatementParseResult(
     val totalOutflow: Double,
     val accountMetadata: AccountMetadata? = null
 )
+
+data class AccountWithMetrics(
+    val account: AccountEntity,
+    val computedBalance: Double,
+    val totalIncome: Double,
+    val totalExpense: Double,
+    val outstandingDues: Double,
+    val transactionCount: Int
+)
