@@ -17,3 +17,8 @@ android/local.properties
 .idea/
 *.iml
 
+# User & Agent specific folders
+Dont upload/
+.agents/
+.agent/
+
