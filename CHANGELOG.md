@@ -7,16 +7,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ## [1.1.0] - 2026-08-27
 
 ### Added
-- **Full Feature Parity with Web Application on Native Android**:
-  - **Universal Offline Statement CSV Importer (`StatementParserEngine.kt`)**: Ingest bank and UPI CSV statements (HDFC, SBI, ICICI, Axis, GPay, PhonePe, Paytm, CRED) with instant on-device parsing and batch commit.
-  - **Cross-Statement Duplicate Resolver (`DuplicateDetectorEngine.kt`)**: Smart O(1) amount bucketing, exact UTR matching (99%), and date-proximity token scoring with 1-tap "Merge & Enrich" and "Keep Separate" actions.
-  - **Smart Categorization & Rule Learning Engine (`CategorizerEngine.kt`)**: 12 built-in financial categories, auto-stripping of routing codes, and dynamic custom rule learning with retroactive ledger reclassification.
-  - **Category Budgets & Financial Health Intelligence (`BudgetsScreen.kt`)**: Visual monthly spending limits, real-time health score (0-100), and warning threshold indicators.
-  - **Export & Backup Privacy Suite (`ExportEngine.kt`)**: Direct Android share sheet export for CSV spreadsheets and encrypted JSON profile backup and restore.
+- **Exact 1:1 Feature Parity with Web Application on Native Android**:
+  - **Dynamic Dark / Light Mode Theme Toggle**: Instant switching between OLED Dark Mode and Crisp Light Mode with persistent preference storage and live system bar adaptation.
+  - **Universal Offline Statement CSV Importer (`UploadScreen.kt`)**: Ingest bank and UPI CSV statements (HDFC, SBI, ICICI, Axis, GPay, PhonePe, Paytm, CRED) with on-device parsing, batch preview, and statement history tracking.
+  - **Dedicated Needs Review Screen (`NeedsReviewScreen.kt`)**: Review unclassified expenses with live badge counter and 1-tap "Teach AI & Classify" to memorize merchant/UPI IDs retroactively.
+  - **Cross-Statement Duplicate Resolver (`DuplicateResolverScreen.kt`)**: Smart O(1) amount bucketing, exact UTR matching (99%), and date-proximity token scoring with 1-tap "Merge & Enrich" and "Keep Separate" actions.
+  - **Smart Categorization & AI Memory (`LearnedRulesScreen.kt`)**: 12 built-in financial categories, auto-stripping of routing codes, and memorized merchant keyword rule manager.
+  - **Cards & Accounts (`AccountsScreen.kt`)**: Connected bank accounts, luxury Apple Wallet card carousel with custom theme gradients, and credit limit utilization meters.
+  - **Reports & Multi-Format Export Center (`ReportsScreen.kt`)**: Current reconciled snapshot metrics (Inflow, Outflow, Net Retained Savings), raw CSV exports, and full JSON profile backup & restore.
 - **Apple Human Interface Guidelines (HIG) Redesign**:
-  - 5-tab Cupertino navigation bar (`Dashboard`, `Ledger`, `Budgets`, `Cards`, `Tools`) with dynamic notification badges.
-  - Translucent glass cards (`HigGlassCard`), Inset Group list containers (`HigInsetGroup`), and spring-animated sliding pill segmented controls (`HigSegmentedControl`).
-  - Luxury Apple Wallet card carousel with credit limit meters.
+  - 5-tab Cupertino navigation bar (`Dashboard`, `Ledger`, `Upload`, `Review`, `More`) with live badge counters.
+  - Translucent glass cards (`HigGlassCard`), Inset Group list containers (`HigInsetGroup`), and spring-animated sliding segmented controls (`HigSegmentedControl`).
 - **Brand Consistency**:
   - Vectorized official Money Tracker brand logo (`ic_launcher_background.xml`, `ic_launcher_foreground.xml`, `ic_app_logo.xml`) integrated into app icon and in-app profile header.
 - **Automated APK Version Distribution System**:

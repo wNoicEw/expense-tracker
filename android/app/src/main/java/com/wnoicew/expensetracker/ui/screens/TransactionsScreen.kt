@@ -1,5 +1,6 @@
 package com.wnoicew.expensetracker.ui.screens
 
+import android.content.Intent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -19,6 +20,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -33,6 +35,7 @@ import com.wnoicew.expensetracker.ui.components.HigSegmentedControl
 import com.wnoicew.expensetracker.ui.theme.IncomeGreen
 import com.wnoicew.expensetracker.ui.theme.ExpenseRose
 import com.wnoicew.expensetracker.ui.theme.PrimaryBlue
+import kotlinx.coroutines.launch
 import java.text.NumberFormat
 import java.text.SimpleDateFormat
 import java.util.*
@@ -42,13 +45,17 @@ import java.util.*
 fun TransactionsScreen(
     viewModel: MainViewModel
 ) {
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+
     val transactions by viewModel.transactions.collectAsState()
     val accounts by viewModel.accounts.collectAsState()
     val needsReviewCount by viewModel.needsReviewCount.collectAsState()
 
     var searchQuery by remember { mutableStateOf("") }
-    var filterTypeIndex by remember { mutableIntStateOf(0) } // 0: All, 1: Expenses, 2: Income, 3: Review
+    var filterTypeIndex by remember { mutableIntStateOf(0) } // 0: All, 1: Expenses, 2: Income, 3: Transfers, 4: Review
     var selectedCategoryFilter by remember { mutableStateOf<String?>(null) }
+    var selectedAccountFilter by remember { mutableStateOf<String?>(null) }
 
     var showAddSheet by remember { mutableStateOf(false) }
     var selectedTxnForDetail by remember { mutableStateOf<TransactionEntity?>(null) }
@@ -59,7 +66,7 @@ fun TransactionsScreen(
         }
     }
 
-    val filteredList = remember(transactions, searchQuery, filterTypeIndex, selectedCategoryFilter) {
+    val filteredList = remember(transactions, searchQuery, filterTypeIndex, selectedCategoryFilter, selectedAccountFilter) {
         transactions.filter { txn ->
             val matchesSearch = txn.description.contains(searchQuery, ignoreCase = true) ||
                     txn.category.contains(searchQuery, ignoreCase = true) ||
@@ -68,11 +75,13 @@ fun TransactionsScreen(
             val matchesType = when (filterTypeIndex) {
                 1 -> txn.type == TransactionType.EXPENSE
                 2 -> txn.type == TransactionType.INCOME
-                3 -> txn.needsReview || txn.category == "Uncategorized" || txn.duplicateStatus == "pending_review"
+                3 -> txn.type == TransactionType.TRANSFER
+                4 -> txn.needsReview || txn.category == "Uncategorized" || txn.duplicateStatus == "pending_review"
                 else -> true
             }
             val matchesCat = if (selectedCategoryFilter != null) txn.category == selectedCategoryFilter else true
-            matchesSearch && matchesType && matchesCat
+            val matchesAcc = if (selectedAccountFilter != null) txn.accountName == selectedAccountFilter || txn.accountId == selectedAccountFilter else true
+            matchesSearch && matchesType && matchesCat && matchesAcc
         }
     }
 
@@ -97,16 +106,41 @@ fun TransactionsScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             item {
-                Text(
-                    text = "Financial Ledger",
-                    style = MaterialTheme.typography.headlineMedium,
-                    color = MaterialTheme.colorScheme.onBackground
-                )
-                Text(
-                    text = "Complete record of categorized transactions",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text(
+                            text = "Financial Ledger",
+                            style = MaterialTheme.typography.headlineMedium,
+                            color = MaterialTheme.colorScheme.onBackground
+                        )
+                        Text(
+                            text = "Complete record of categorized transactions (${filteredList.size})",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    // Export CSV Button (Matching Web App)
+                    IconButton(
+                        onClick = {
+                            coroutineScope.launch {
+                                val csv = viewModel.exportCsvString()
+                                val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                                    putExtra(Intent.EXTRA_TEXT, csv)
+                                    putExtra(Intent.EXTRA_TITLE, "Money_Tracker_Ledger.csv")
+                                    type = "text/csv"
+                                }
+                                context.startActivity(Intent.createChooser(sendIntent, "Export CSV"))
+                            }
+                        }
+                    ) {
+                        Icon(Icons.Default.FileDownload, contentDescription = "Export CSV", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
             }
 
             // Search Bar
@@ -114,7 +148,7 @@ fun TransactionsScreen(
                 OutlinedTextField(
                     value = searchQuery,
                     onValueChange = { searchQuery = it },
-                    placeholder = { Text("Search merchant, UPI ID, reference...", fontSize = 14.sp) },
+                    placeholder = { Text("Search by merchant, UTR, narration, notes...", fontSize = 14.sp) },
                     leadingIcon = {
                         Icon(Icons.Default.Search, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     },
@@ -131,10 +165,10 @@ fun TransactionsScreen(
                 )
             }
 
-            // Segmented Control Filters (All, Expenses, Income, Needs Review)
+            // Type Filter Segmented Control (All, Expenses, Income, Transfers, Review)
             item {
                 HigSegmentedControl(
-                    items = listOf("All", "Expenses", "Income", "Review (${needsReviewCount})"),
+                    items = listOf("All", "Expenses", "Income", "Transfers", "Review (${needsReviewCount})"),
                     selectedIndex = filterTypeIndex,
                     onItemSelected = { filterTypeIndex = it }
                 )
@@ -144,7 +178,7 @@ fun TransactionsScreen(
             item {
                 LazyRow(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    contentPadding = PaddingValues(vertical = 4.dp)
+                    contentPadding = PaddingValues(vertical = 2.dp)
                 ) {
                     item {
                         FilterChip(
@@ -159,6 +193,31 @@ fun TransactionsScreen(
                             onClick = { selectedCategoryFilter = if (selectedCategoryFilter == cat) null else cat },
                             label = { Text(cat) }
                         )
+                    }
+                }
+            }
+
+            // Account Filter Chips (if accounts exist)
+            if (accounts.isNotEmpty()) {
+                item {
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        contentPadding = PaddingValues(vertical = 2.dp)
+                    ) {
+                        item {
+                            FilterChip(
+                                selected = selectedAccountFilter == null,
+                                onClick = { selectedAccountFilter = null },
+                                label = { Text("All Accounts") }
+                            )
+                        }
+                        items(accounts) { acc ->
+                            FilterChip(
+                                selected = selectedAccountFilter == acc.name,
+                                onClick = { selectedAccountFilter = if (selectedAccountFilter == acc.name) null else acc.name },
+                                label = { Text(acc.name) }
+                            )
+                        }
                     }
                 }
             }
@@ -185,7 +244,7 @@ fun TransactionsScreen(
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
-                                text = "Import statements in Tools or tap + to record manually.",
+                                text = "Upload statements in Upload tab or tap + to record manually.",
                                 fontSize = 13.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.padding(top = 4.dp)
@@ -262,7 +321,7 @@ fun AddTransactionBottomSheet(
 ) {
     var description by remember { mutableStateOf("") }
     var amountText by remember { mutableStateOf("") }
-    var selectedTypeIndex by remember { mutableIntStateOf(0) } // 0: Expense, 1: Income
+    var selectedTypeIndex by remember { mutableIntStateOf(0) } // 0: Expense, 1: Income, 2: Transfer
     var selectedCategory by remember { mutableStateOf(ALL_CATEGORIES.first()) }
     var selectedAccount by remember { mutableStateOf(accounts.firstOrNull() ?: "Main Account") }
     var paymentMode by remember { mutableStateOf("UPI") }
@@ -283,13 +342,13 @@ fun AddTransactionBottomSheet(
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Text(
-                text = "New Transaction",
+                text = "Record Transaction",
                 style = MaterialTheme.typography.titleLarge,
                 color = MaterialTheme.colorScheme.onSurface
             )
 
             HigSegmentedControl(
-                items = listOf("Expense", "Income"),
+                items = listOf("Expense", "Income", "Transfer"),
                 selectedIndex = selectedTypeIndex,
                 onItemSelected = { selectedTypeIndex = it }
             )
@@ -309,7 +368,7 @@ fun AddTransactionBottomSheet(
                 value = description,
                 onValueChange = { description = it },
                 label = { Text("Description / Merchant") },
-                placeholder = { Text("e.g. Swiggy, Starbucks, Amazon") },
+                placeholder = { Text("e.g. Swiggy, Starbucks, Salary") },
                 singleLine = true,
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier.fillMaxWidth()
@@ -365,18 +424,26 @@ fun AddTransactionBottomSheet(
                         errorMessage = "Please enter a description"
                         return@Button
                     }
-                    val type = if (selectedTypeIndex == 0) TransactionType.EXPENSE else TransactionType.INCOME
+                    val type = when (selectedTypeIndex) {
+                        0 -> TransactionType.EXPENSE
+                        1 -> TransactionType.INCOME
+                        else -> TransactionType.TRANSFER
+                    }
                     onAdd(description.trim(), amount, type, selectedCategory, selectedAccount, paymentMode, notes.trim())
                 },
                 shape = RoundedCornerShape(14.dp),
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = if (selectedTypeIndex == 0) ExpenseRose else IncomeGreen
+                    containerColor = when (selectedTypeIndex) {
+                        0 -> ExpenseRose
+                        1 -> IncomeGreen
+                        else -> PrimaryBlue
+                    }
                 ),
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(50.dp)
             ) {
-                Text("Save Entry", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                Text("Save Transaction", fontWeight = FontWeight.Bold, fontSize = 16.sp)
             }
 
             Spacer(modifier = Modifier.height(16.dp))
@@ -415,7 +482,7 @@ fun TransactionDetailBottomSheet(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column {
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = transaction.description,
                         style = MaterialTheme.typography.titleLarge,
@@ -439,7 +506,6 @@ fun TransactionDetailBottomSheet(
 
             HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f))
 
-            // Metadata grid
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 if (transaction.referenceNo.isNotBlank()) {
                     Text(text = "UTR / Ref: ${transaction.referenceNo}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -489,7 +555,7 @@ fun TransactionDetailBottomSheet(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Checkbox(checked = learnAsRule, onCheckedChange = { learnAsRule = it })
                 Text(
-                    text = "Always auto-categorize similar '${transaction.description}' entries",
+                    text = "Always auto-categorize '${transaction.description}' entries",
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurface
                 )

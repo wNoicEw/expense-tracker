@@ -2,8 +2,8 @@ package com.wnoicew.expensetracker.data.db
 
 import androidx.room.*
 import com.wnoicew.expensetracker.data.model.AccountEntity
-import com.wnoicew.expensetracker.data.model.BudgetEntity
 import com.wnoicew.expensetracker.data.model.RuleEntity
+import com.wnoicew.expensetracker.data.model.StatementUploadEntity
 import com.wnoicew.expensetracker.data.model.TransactionEntity
 import kotlinx.coroutines.flow.Flow
 
@@ -18,7 +18,7 @@ interface TransactionDao {
     @Query("SELECT * FROM transactions WHERE date >= :startDate ORDER BY date DESC")
     fun getTransactionsSince(startDate: Long): Flow<List<TransactionEntity>>
 
-    @Query("SELECT * FROM transactions WHERE needsReview = 1 ORDER BY date DESC")
+    @Query("SELECT * FROM transactions WHERE needsReview = 1 OR category = 'Uncategorized' ORDER BY date DESC")
     fun getNeedsReviewTransactions(): Flow<List<TransactionEntity>>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
@@ -68,30 +68,6 @@ interface AccountDao {
 }
 
 @Dao
-interface BudgetDao {
-    @Query("SELECT * FROM budgets")
-    fun getAllBudgets(): Flow<List<BudgetEntity>>
-
-    @Query("SELECT * FROM budgets")
-    suspend fun getAllBudgetsSnapshot(): List<BudgetEntity>
-
-    @Query("SELECT * FROM budgets WHERE categoryName = :category LIMIT 1")
-    suspend fun getBudgetByCategory(category: String): BudgetEntity?
-
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertBudget(budget: BudgetEntity)
-
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertBudgets(budgets: List<BudgetEntity>)
-
-    @Update
-    suspend fun updateBudget(budget: BudgetEntity)
-
-    @Delete
-    suspend fun deleteBudget(budget: BudgetEntity)
-}
-
-@Dao
 interface RuleDao {
     @Query("SELECT * FROM rules ORDER BY createdAt DESC")
     fun getAllRules(): Flow<List<RuleEntity>>
@@ -110,4 +86,13 @@ interface RuleDao {
 
     @Query("DELETE FROM rules WHERE id = :id")
     suspend fun deleteById(id: String)
+}
+
+@Dao
+interface StatementUploadDao {
+    @Query("SELECT * FROM statement_uploads ORDER BY importDate DESC")
+    fun getAllUploads(): Flow<List<StatementUploadEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertUpload(upload: StatementUploadEntity)
 }

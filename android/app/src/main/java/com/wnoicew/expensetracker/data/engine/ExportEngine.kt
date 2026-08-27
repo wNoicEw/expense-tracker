@@ -1,7 +1,6 @@
 package com.wnoicew.expensetracker.data.engine
 
 import com.wnoicew.expensetracker.data.model.AccountEntity
-import com.wnoicew.expensetracker.data.model.BudgetEntity
 import com.wnoicew.expensetracker.data.model.RuleEntity
 import com.wnoicew.expensetracker.data.model.TransactionEntity
 import com.wnoicew.expensetracker.data.model.TransactionType
@@ -15,7 +14,6 @@ object ExportEngine {
     data class BackupData(
         val transactions: List<TransactionEntity>,
         val accounts: List<AccountEntity>,
-        val budgets: List<BudgetEntity>,
         val rules: List<RuleEntity>
     )
 
@@ -45,16 +43,14 @@ object ExportEngine {
         profileName: String,
         transactions: List<TransactionEntity>,
         accounts: List<AccountEntity>,
-        budgets: List<BudgetEntity>,
         rules: List<RuleEntity>
     ): String {
         val root = JSONObject()
         root.put("version", "1.1.0")
-        root.put("exportedAt", System.currentTimeMillis())
         root.put("profileName", profileName)
+        root.put("exportDate", System.currentTimeMillis())
 
-        // Transactions
-        val txnArray = JSONArray()
+        val txnsArray = JSONArray()
         for (t in transactions) {
             val obj = JSONObject()
             obj.put("id", t.id)
@@ -70,13 +66,15 @@ object ExportEngine {
             obj.put("paymentMode", t.paymentMode)
             obj.put("sourceFile", t.sourceFile)
             obj.put("rawNarration", t.rawNarration)
+            obj.put("isDuplicate", t.isDuplicate)
+            obj.put("duplicateStatus", t.duplicateStatus)
             obj.put("needsReview", t.needsReview)
-            txnArray.put(obj)
+            obj.put("confidence", t.confidence)
+            txnsArray.put(obj)
         }
-        root.put("transactions", txnArray)
+        root.put("transactions", txnsArray)
 
-        // Accounts
-        val accArray = JSONArray()
+        val accsArray = JSONArray()
         for (a in accounts) {
             val obj = JSONObject()
             obj.put("id", a.id)
@@ -87,51 +85,42 @@ object ExportEngine {
             obj.put("gradientIndex", a.gradientIndex)
             obj.put("lastFour", a.lastFour)
             obj.put("bankName", a.bankName)
-            accArray.put(obj)
+            accsArray.put(obj)
         }
-        root.put("accounts", accArray)
+        root.put("accounts", accsArray)
 
-        // Budgets
-        val budgetArray = JSONArray()
-        for (b in budgets) {
-            val obj = JSONObject()
-            obj.put("id", b.id)
-            obj.put("categoryName", b.categoryName)
-            obj.put("monthlyBudget", b.monthlyBudget)
-            budgetArray.put(obj)
-        }
-        root.put("budgets", budgetArray)
-
-        // Rules
-        val ruleArray = JSONArray()
+        val rulesArray = JSONArray()
         for (r in rules) {
             val obj = JSONObject()
             obj.put("id", r.id)
             obj.put("pattern", r.pattern)
             obj.put("category", r.category)
             obj.put("type", r.type.name)
-            ruleArray.put(obj)
+            obj.put("createdAt", r.createdAt)
+            rulesArray.put(obj)
         }
-        root.put("rules", ruleArray)
+        root.put("rules", rulesArray)
 
         return root.toString(2)
     }
 
     fun parseJsonBackup(jsonStr: String): BackupData {
         val root = JSONObject(jsonStr)
+        val txnsList = mutableListOf<TransactionEntity>()
+        val accsList = mutableListOf<AccountEntity>()
+        val rulesList = mutableListOf<RuleEntity>()
 
-        val txns = mutableListOf<TransactionEntity>()
-        val txnArray = root.optJSONArray("transactions")
-        if (txnArray != null) {
-            for (i in 0 until txnArray.length()) {
-                val obj = txnArray.getJSONObject(i)
-                txns.add(
+        if (root.has("transactions")) {
+            val array = root.getJSONArray("transactions")
+            for (i in 0 until array.length()) {
+                val obj = array.getJSONObject(i)
+                txnsList.add(
                     TransactionEntity(
                         id = obj.optString("id", UUID.randomUUID().toString()),
                         date = obj.optLong("date", System.currentTimeMillis()),
-                        description = obj.optString("description", "Entry"),
+                        description = obj.optString("description", "Imported Transaction"),
                         amount = obj.optDouble("amount", 0.0),
-                        type = try { TransactionType.valueOf(obj.optString("type", "EXPENSE")) } catch (_: Exception) { TransactionType.EXPENSE },
+                        type = try { TransactionType.valueOf(obj.optString("type", "EXPENSE")) } catch (e: Exception) { TransactionType.EXPENSE },
                         category = obj.optString("category", "Uncategorized"),
                         accountId = obj.optString("accountId", ""),
                         accountName = obj.optString("accountName", ""),
@@ -140,18 +129,20 @@ object ExportEngine {
                         paymentMode = obj.optString("paymentMode", "Online"),
                         sourceFile = obj.optString("sourceFile", "Backup Restore"),
                         rawNarration = obj.optString("rawNarration", ""),
-                        needsReview = obj.optBoolean("needsReview", false)
+                        isDuplicate = obj.optBoolean("isDuplicate", false),
+                        duplicateStatus = obj.optString("duplicateStatus", "none"),
+                        needsReview = obj.optBoolean("needsReview", false),
+                        confidence = obj.optString("confidence", "high")
                     )
                 )
             }
         }
 
-        val accs = mutableListOf<AccountEntity>()
-        val accArray = root.optJSONArray("accounts")
-        if (accArray != null) {
-            for (i in 0 until accArray.length()) {
-                val obj = accArray.getJSONObject(i)
-                accs.add(
+        if (root.has("accounts")) {
+            val array = root.getJSONArray("accounts")
+            for (i in 0 until array.length()) {
+                val obj = array.getJSONObject(i)
+                accsList.add(
                     AccountEntity(
                         id = obj.optString("id", UUID.randomUUID().toString()),
                         name = obj.optString("name", "Account"),
@@ -166,37 +157,22 @@ object ExportEngine {
             }
         }
 
-        val budgets = mutableListOf<BudgetEntity>()
-        val budgetArray = root.optJSONArray("budgets")
-        if (budgetArray != null) {
-            for (i in 0 until budgetArray.length()) {
-                val obj = budgetArray.getJSONObject(i)
-                budgets.add(
-                    BudgetEntity(
-                        id = obj.optString("id", UUID.randomUUID().toString()),
-                        categoryName = obj.optString("categoryName", "General"),
-                        monthlyBudget = obj.optDouble("monthlyBudget", 5000.0)
-                    )
-                )
-            }
-        }
-
-        val rules = mutableListOf<RuleEntity>()
-        val ruleArray = root.optJSONArray("rules")
-        if (ruleArray != null) {
-            for (i in 0 until ruleArray.length()) {
-                val obj = ruleArray.getJSONObject(i)
-                rules.add(
+        if (root.has("rules")) {
+            val array = root.getJSONArray("rules")
+            for (i in 0 until array.length()) {
+                val obj = array.getJSONObject(i)
+                rulesList.add(
                     RuleEntity(
                         id = obj.optString("id", "rule_" + System.currentTimeMillis()),
                         pattern = obj.optString("pattern", ""),
-                        category = obj.optString("category", "General"),
-                        type = try { TransactionType.valueOf(obj.optString("type", "EXPENSE")) } catch (_: Exception) { TransactionType.EXPENSE }
+                        category = obj.optString("category", "Uncategorized"),
+                        type = try { TransactionType.valueOf(obj.optString("type", "EXPENSE")) } catch (e: Exception) { TransactionType.EXPENSE },
+                        createdAt = obj.optLong("createdAt", System.currentTimeMillis())
                     )
                 )
             }
         }
 
-        return BackupData(txns, accs, budgets, rules)
+        return BackupData(txnsList, accsList, rulesList)
     }
 }

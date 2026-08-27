@@ -48,15 +48,6 @@ data class AccountEntity(
     val bankName: String = ""
 )
 
-@Entity(tableName = "budgets")
-data class BudgetEntity(
-    @PrimaryKey
-    val id: String = UUID.randomUUID().toString(),
-    val categoryName: String,
-    val monthlyBudget: Double = 5000.0,
-    val createdAt: Long = System.currentTimeMillis()
-)
-
 @Entity(tableName = "rules")
 data class RuleEntity(
     @PrimaryKey
@@ -67,14 +58,22 @@ data class RuleEntity(
     val createdAt: Long = System.currentTimeMillis()
 )
 
-// UI & Analytics Presentation Models
-data class CategoryBudgetStatus(
+@Entity(tableName = "statement_uploads")
+data class StatementUploadEntity(
+    @PrimaryKey
+    val id: String = UUID.randomUUID().toString(),
+    val fileName: String,
+    val detectedBank: String,
+    val transactionCount: Int,
+    val importDate: Long = System.currentTimeMillis()
+)
+
+// UI & Presentation Models
+data class CategoryBreakdownItem(
     val categoryName: String,
-    val monthlyBudget: Double,
-    val spent: Double,
-    val remaining: Double,
+    val amount: Double,
     val percentage: Int,
-    val isExceeded: Boolean
+    val transactionCount: Int
 )
 
 data class DuplicatePair(
