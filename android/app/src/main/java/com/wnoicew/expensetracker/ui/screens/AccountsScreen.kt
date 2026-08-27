@@ -1,5 +1,6 @@
 package com.wnoicew.expensetracker.ui.screens
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -50,6 +51,10 @@ fun AccountsScreen(
 ) {
     val accounts by viewModel.accounts.collectAsState()
     var showAddAccountSheet by remember { mutableStateOf(false) }
+
+    BackHandler(enabled = showAddAccountSheet) {
+        showAddAccountSheet = false
+    }
 
     val currencyFormat = remember {
         NumberFormat.getCurrencyInstance(Locale("en", "IN")).apply {

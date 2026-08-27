@@ -1,5 +1,6 @@
 package com.wnoicew.expensetracker.ui.screens
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
@@ -29,6 +30,10 @@ fun LearnedRulesScreen(
 ) {
     val rules by viewModel.rules.collectAsState()
     var showAddRuleSheet by remember { mutableStateOf(false) }
+
+    BackHandler(enabled = showAddRuleSheet) {
+        showAddRuleSheet = false
+    }
 
     LazyColumn(
         modifier = Modifier

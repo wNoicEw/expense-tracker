@@ -2,6 +2,7 @@ package com.wnoicew.expensetracker.ui.screens
 
 import android.net.Uri
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -58,6 +59,10 @@ fun UploadScreen(
     }
 
     val dateFormat = remember { SimpleDateFormat("MMM dd, yyyy · hh:mm a", Locale.getDefault()) }
+
+    BackHandler(enabled = parseResultToPreview != null) {
+        parseResultToPreview = null
+    }
 
     // Statement CSV Picker
     val csvPickerLauncher = rememberLauncherForActivityResult(

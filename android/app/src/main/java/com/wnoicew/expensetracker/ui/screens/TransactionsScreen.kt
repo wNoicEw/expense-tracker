@@ -1,6 +1,7 @@
 package com.wnoicew.expensetracker.ui.screens
 
 import android.content.Intent
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -59,6 +60,11 @@ fun TransactionsScreen(
 
     var showAddSheet by remember { mutableStateOf(false) }
     var selectedTxnForDetail by remember { mutableStateOf<TransactionEntity?>(null) }
+
+    BackHandler(enabled = showAddSheet || selectedTxnForDetail != null) {
+        if (showAddSheet) showAddSheet = false
+        if (selectedTxnForDetail != null) selectedTxnForDetail = null
+    }
 
     val currencyFormat = remember {
         NumberFormat.getCurrencyInstance(Locale("en", "IN")).apply {
