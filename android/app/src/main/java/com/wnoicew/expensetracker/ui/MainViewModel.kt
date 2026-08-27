@@ -74,6 +74,69 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    // Enriched Accounts with live calculated metrics (balance, spend, dues, transaction count)
+    val accountsWithMetrics: StateFlow<List<AccountWithMetrics>> = combine(
+        accounts,
+        transactions
+    ) { accList, txnList ->
+        accList.map { acc ->
+            // Match transactions by account ID or fallback to account name / bank name
+            val accTxns = txnList.filter { t ->
+                t.duplicateStatus != "merged" && (
+                    (t.accountId.isNotBlank() && t.accountId == acc.id) ||
+                    (t.accountId.isBlank() && t.accountName.isNotBlank() && t.accountName.equals(acc.name, ignoreCase = true)) ||
+                    (t.accountId.isBlank() && acc.bankName.isNotBlank() && t.accountName.contains(acc.bankName, ignoreCase = true)) ||
+                    (t.accountId.isBlank() && acc.bankName.isNotBlank() && t.rawNarration.contains(acc.bankName, ignoreCase = true))
+                )
+            }
+
+            var income = 0.0
+            var expense = 0.0
+            var transfersIn = 0.0
+            var transfersOut = 0.0
+
+            accTxns.forEach { t ->
+                val amt = kotlin.math.abs(t.amount)
+                when (t.type) {
+                    TransactionType.INCOME -> income += amt
+                    TransactionType.EXPENSE -> expense += amt
+                    TransactionType.TRANSFER -> {
+                        val isIncoming = t.rawNarration.contains(Regex("""\b(cr|credit|received|deposit)\b""", RegexOption.IGNORE_CASE))
+                        if (isIncoming) transfersIn += amt else transfersOut += amt
+                    }
+                }
+            }
+
+            val isCreditCard = acc.type.equals("Credit Card", ignoreCase = true)
+            val outstandingDues = if (isCreditCard) {
+                maxOf(0.0, expense - (income + transfersIn))
+            } else {
+                0.0
+            }
+
+            val computedBalance = if (isCreditCard) {
+                if (outstandingDues > 0) outstandingDues else expense
+            } else {
+                if (acc.balance != 0.0) {
+                    acc.balance + income - expense - transfersOut + transfersIn
+                } else if (income > 0) {
+                    income - expense - transfersOut + transfersIn
+                } else {
+                    expense // if statement has only debits/expenses, show total spent
+                }
+            }
+
+            AccountWithMetrics(
+                account = acc,
+                computedBalance = computedBalance,
+                totalIncome = income,
+                totalExpense = expense,
+                outstandingDues = outstandingDues,
+                transactionCount = accTxns.size
+            )
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
     @OptIn(ExperimentalCoroutinesApi::class)
     val rules: StateFlow<List<RuleEntity>> = activeDb
         .flatMapLatest { db: ExpenseTrackerDatabase? ->
@@ -97,8 +160,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
 
     // Financial KPI calculations
-    val totalNetWorth = combine(accounts, transactions) { accs, _ ->
-        accs.sumOf { it.balance }
+    val totalNetWorth = accountsWithMetrics.map { list ->
+        list.sumOf { if (it.account.type.equals("Credit Card", ignoreCase = true)) -it.outstandingDues else it.computedBalance }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0.0)
 
     val totalInflow30D = transactions.map { list ->
