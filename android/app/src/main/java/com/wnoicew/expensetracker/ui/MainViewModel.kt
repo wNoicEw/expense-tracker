@@ -309,10 +309,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     // Statement Parser (PDF & CSV) & Batch Commit
-    fun parseStatementStream(inputStream: java.io.InputStream, fileName: String, accountId: String = "", accountName: String = ""): StatementParseResult {
+    fun parseStatementStream(
+        inputStream: java.io.InputStream,
+        fileName: String,
+        accountId: String = "",
+        accountName: String = "",
+        password: String? = null
+    ): StatementParseResult {
         val profile = activeProfile.value ?: throw IllegalStateException("No active profile")
         val customRules = rules.value
-        return StatementParserEngine.parseStatementStream(inputStream, fileName, accountId, accountName, customRules)
+        return StatementParserEngine.parseStatementStream(inputStream, fileName, accountId, accountName, customRules, password)
     }
 
     fun parseCsvStatement(lines: List<String>, fileName: String, accountId: String = "", accountName: String = ""): StatementParseResult {

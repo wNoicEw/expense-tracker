@@ -1324,7 +1324,7 @@ class App {
     }
   }
 
-  async handleFileUpload(file) {
+  async handleFileUpload(file, password = null) {
     const statusBox = document.getElementById('uploadStatusBox');
     const isPDF = file.name.toLowerCase().endsWith('.pdf');
     if (statusBox) {
@@ -1348,7 +1348,7 @@ class App {
     }
 
     try {
-      const parseResult = await window.statementParser.parseFile(file);
+      const parseResult = await window.statementParser.parseFile(file, null, password);
 
       // Save transactions to DB
       await window.db.putBatch('transactions', parseResult.transactions);
@@ -1405,7 +1405,6 @@ class App {
         `;
       }
 
-
       this.showToast(`Imported ${parseResult.count} transactions!`, 'success');
       await this.refreshAllViews();
 
@@ -1416,6 +1415,12 @@ class App {
       }
     } catch (err) {
       console.error('File parsing error:', err);
+
+      if (err.isPasswordProtected) {
+        if (statusBox) statusBox.style.display = 'none';
+        this.promptPdfPassword(file, err.isIncorrectPassword);
+        return;
+      }
 
       if (statusBox) {
         if (err.detectionFailed) {
@@ -1495,6 +1500,111 @@ class App {
         : err.message,
         'error'
       );
+    }
+  }
+
+  promptPdfPassword(file, isIncorrect = false) {
+    this.pendingPdfFile = file;
+    const modal = document.getElementById('pdfPasswordModal');
+    const nameEl = document.getElementById('pdfPasswordFileName');
+    const inputEl = document.getElementById('pdfPasswordInput');
+    const errEl = document.getElementById('pdfPasswordError');
+    const btn = document.getElementById('btnSubmitPdfPassword');
+
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = '<i data-lucide="unlock" style="width:16px; height:16px;"></i> Unlock &amp; Import';
+    }
+
+    if (nameEl) nameEl.textContent = file.name;
+    if (inputEl) {
+      inputEl.value = '';
+      inputEl.type = 'password';
+    }
+    const eyeIcon = document.getElementById('pdfPwEyeIcon');
+    if (eyeIcon) eyeIcon.setAttribute('data-lucide', 'eye');
+
+    if (errEl) {
+      if (isIncorrect) {
+        errEl.textContent = '❌ Incorrect password. Please check and try again.';
+        errEl.style.display = 'block';
+      } else {
+        errEl.textContent = '';
+        errEl.style.display = 'none';
+      }
+    }
+
+    if (modal) modal.classList.add('active');
+    if (window.lucide) window.lucide.createIcons();
+    setTimeout(() => {
+      if (inputEl) inputEl.focus();
+    }, 150);
+  }
+
+  closePdfPasswordModal() {
+    const modal = document.getElementById('pdfPasswordModal');
+    if (modal) modal.classList.remove('active');
+    this.pendingPdfFile = null;
+    const inputEl = document.getElementById('pdfPasswordInput');
+    if (inputEl) inputEl.value = '';
+    const errEl = document.getElementById('pdfPasswordError');
+    if (errEl) {
+      errEl.textContent = '';
+      errEl.style.display = 'none';
+    }
+  }
+
+  togglePdfPasswordVisibility() {
+    const inputEl = document.getElementById('pdfPasswordInput');
+    const eyeIcon = document.getElementById('pdfPwEyeIcon');
+    if (!inputEl) return;
+    if (inputEl.type === 'password') {
+      inputEl.type = 'text';
+      if (eyeIcon) eyeIcon.setAttribute('data-lucide', 'eye-off');
+    } else {
+      inputEl.type = 'password';
+      if (eyeIcon) eyeIcon.setAttribute('data-lucide', 'eye');
+    }
+    if (window.lucide) window.lucide.createIcons();
+  }
+
+  async submitPdfPassword() {
+    const file = this.pendingPdfFile;
+    const inputEl = document.getElementById('pdfPasswordInput');
+    const errEl = document.getElementById('pdfPasswordError');
+    const btn = document.getElementById('btnSubmitPdfPassword');
+    if (!file || !inputEl) return;
+
+    const password = inputEl.value.trim();
+    if (!password) {
+      if (errEl) {
+        errEl.textContent = 'Please enter the PDF password.';
+        errEl.style.display = 'block';
+      }
+      return;
+    }
+
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner" style="width:14px;height:14px;border-width:2px;display:inline-block;"></span> Unlocking...';
+    }
+
+    try {
+      await this.handleFileUpload(file, password);
+      this.closePdfPasswordModal();
+    } catch (e) {
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = '<i data-lucide="unlock" style="width:16px; height:16px;"></i> Unlock &amp; Import';
+        if (window.lucide) window.lucide.createIcons();
+      }
+      if (e && e.isPasswordProtected) {
+        if (errEl) {
+          errEl.textContent = '❌ Incorrect password. Please check and try again.';
+          errEl.style.display = 'block';
+        }
+        inputEl.select();
+      }
     }
   }
 
