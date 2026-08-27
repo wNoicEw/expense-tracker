@@ -1,9 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp"
     android:height="108dp"
-    android:viewportWidth="108"
-    android:viewportHeight="108">
-    <path
-        android:fillColor="#10B981"
-        android:pathData="M54,30 L74,54 L54,78 L34,54 Z" />
+    android:viewportWidth="512"
+    android:viewportHeight="512">
+    <group
+        android:scaleX="0.75"
+        android:scaleY="0.75"
+        android:pivotX="256"
+        android:pivotY="256">
+        <!-- Left Pillar of M -->
+        <path
+            android:pathData="M128,356 L128,176 C128,162.7 138.7,152 152,152 L180,152 C193.3,152 204,162.7 204,176 L204,356 C204,369.3 193.3,380 180,380 L152,380 C138.7,380 128,369.3 128,356 Z">
+            <aapt:attr name="android:fillColor">
+                <gradient
+                    android:startX="128"
+                    android:startY="380"
+                    android:endX="204"
+                    android:endY="152"
+                    android:type="linear">
+                    <item android:offset="0.0" android:color="#059669" />
+                    <item android:offset="1.0" android:color="#34D399" />
+                </gradient>
+            </aapt:attr>
+        </path>
+
+        <!-- Right Pillar of M / Upward Trajectory -->
+        <path
+            android:pathData="M308,356 L308,176 C308,162.7 318.7,152 332,152 L360,152 C373.3,152 384,162.7 384,176 L384,356 C384,369.3 373.3,380 360,380 L332,380 C318.7,380 308,369.3 308,356 Z">
+            <aapt:attr name="android:fillColor">
+                <gradient
+                    android:startX="308"
+                    android:startY="152"
+                    android:endX="384"
+                    android:endY="380"
+                    android:type="linear">
+                    <item android:offset="0.0" android:color="#10B981" />
+                    <item android:offset="0.5" android:color="#06B6D4" />
+                    <item android:offset="1.0" android:color="#3B82F6" />
+                </gradient>
+            </aapt:attr>
+        </path>
+
+        <!-- Central Dynamic Vertex & Ascending Arrow Peak -->
+        <path
+            android:pathData="M196,168 L256,244 L316,168 C324.5,157.2 340.5,157.2 349,168 L349,168 C358.5,180 355.8,197.8 343,206.5 L273,294 C263.6,305.8 248.4,305.8 239,294 L169,206.5 C156.2,197.8 153.5,180 163,168 L163,168 C171.5,157.2 187.5,157.2 196,168 Z"
+            android:fillColor="#38BDF8" />
+
+        <!-- Floating Wealth Node / Spark -->
+        <path
+            android:pathData="M256,122 A22,22 0 1,0 256,166 A22,22 0 1,0 256,122 Z"
+            android:fillColor="#34D399" />
+    </group>
 </vector>

@@ -1,5 +1,6 @@
 package com.wnoicew.expensetracker.ui.screens
 
+import androidx.compose.foundation.Image
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -26,11 +27,13 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.wnoicew.expensetracker.R
 import com.wnoicew.expensetracker.data.ProfileManager
 import com.wnoicew.expensetracker.data.UserProfile
 import com.wnoicew.expensetracker.ui.components.HigGlassCard
@@ -81,26 +84,15 @@ fun ProfileChooserScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
-            // Header
-            Box(
+            // Header Logo
+            Image(
+                painter = painterResource(id = R.drawable.ic_app_logo),
+                contentDescription = "Money Tracker Logo",
                 modifier = Modifier
-                    .size(68.dp)
+                    .size(72.dp)
+                    .shadow(12.dp, RoundedCornerShape(20.dp))
                     .clip(RoundedCornerShape(20.dp))
-                    .background(
-                        Brush.linearGradient(
-                            listOf(IncomeGreen.copy(alpha = 0.2f), TransferViolet.copy(alpha = 0.2f))
-                        )
-                    )
-                    .border(1.dp, IncomeGreen.copy(alpha = 0.4f), RoundedCornerShape(20.dp)),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Person,
-                    contentDescription = null,
-                    tint = IncomeGreen,
-                    modifier = Modifier.size(34.dp)
-                )
-            }
+            )
 
             Spacer(modifier = Modifier.height(16.dp))
 
