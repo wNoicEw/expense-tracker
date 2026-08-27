@@ -20,6 +20,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
@@ -28,6 +29,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.wnoicew.expensetracker.data.model.AccountEntity
+import com.wnoicew.expensetracker.data.model.CategoryBreakdownItem
 import com.wnoicew.expensetracker.data.model.TransactionEntity
 import com.wnoicew.expensetracker.data.model.TransactionType
 import com.wnoicew.expensetracker.ui.MainViewModel
@@ -43,6 +45,20 @@ import com.wnoicew.expensetracker.ui.theme.WarningAmber
 import java.text.NumberFormat
 import java.text.SimpleDateFormat
 import java.util.*
+
+val CategoryChartColors = listOf(
+    Color(0xFFF59E0B), // Amber (Food & Dining)
+    Color(0xFF10B981), // Emerald (Groceries)
+    Color(0xFFEC4899), // Pink (Shopping)
+    Color(0xFF06B6D4), // Cyan (Travel)
+    Color(0xFF8B5CF6), // Purple (Bills & Utilities)
+    Color(0xFFEF4444), // Red (Health)
+    Color(0xFF14B8A6), // Teal (Investments)
+    Color(0xFF3B82F6), // Blue (Rent)
+    Color(0xFF6366F1), // Indigo (Subscriptions)
+    Color(0xFF84CC16), // Lime (Transfers)
+    Color(0xFF64748B)  // Slate (Uncategorized / Other)
+)
 
 @Composable
 fun DashboardScreen(
@@ -429,14 +445,20 @@ fun DashboardScreen(
             }
         }
 
-        // 6. Expense Breakdown by Category (Matching Web App Donut & Category List)
-        if (categoryBreakdown.isNotEmpty()) {
-            item {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
+        // 6. Expense Breakdown by Category (Donut Pie Chart & Category List - Matching Web App #chartCategoryDonut)
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Icon(
+                        imageVector = Icons.Default.PieChart,
+                        contentDescription = null,
+                        tint = WarningAmber,
+                        modifier = Modifier.size(18.dp)
+                    )
                     Text(
                         text = "Expense Breakdown",
                         style = MaterialTheme.typography.titleMedium,
@@ -445,23 +467,70 @@ fun DashboardScreen(
                     )
                 }
             }
+        }
 
-            item {
-                HigGlassCard(modifier = Modifier.fillMaxWidth()) {
+        item {
+            HigGlassCard(modifier = Modifier.fillMaxWidth()) {
+                val totalExpense = categoryBreakdown.sumOf { it.amount }
+
+                // Category Donut / Pie Chart (72% cutout matching web app)
+                CategoryDonutChart(
+                    items = categoryBreakdown,
+                    totalExpense = totalExpense,
+                    currencyFormat = currencyFormat,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(200.dp)
+                        .padding(vertical = 8.dp)
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                if (categoryBreakdown.isEmpty()) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            text = "No expenses recorded yet",
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = "Category donut chart will populate as you add expenses.",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                } else {
                     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        categoryBreakdown.take(5).forEach { cat ->
+                        categoryBreakdown.forEachIndexed { index, cat ->
+                            val color = CategoryChartColors[index % CategoryChartColors.size]
                             Column {
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Text(
-                                        text = cat.categoryName,
-                                        fontSize = 13.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    )
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(10.dp)
+                                                .clip(CircleShape)
+                                                .background(color)
+                                        )
+                                        Text(
+                                            text = cat.categoryName,
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                    }
                                     Text(
                                         text = "${currencyFormat.format(cat.amount)} (${cat.percentage}%)",
                                         fontSize = 12.sp,
@@ -477,7 +546,7 @@ fun DashboardScreen(
                                         .fillMaxWidth()
                                         .height(6.dp)
                                         .clip(RoundedCornerShape(3.dp)),
-                                    color = PrimaryBlue,
+                                    color = color,
                                     trackColor = MaterialTheme.colorScheme.surfaceVariant
                                 )
                             }
@@ -606,6 +675,78 @@ fun DashboardScreen(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+fun CategoryDonutChart(
+    items: List<CategoryBreakdownItem>,
+    totalExpense: Double,
+    currencyFormat: NumberFormat,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier,
+        contentAlignment = Alignment.Center
+    ) {
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val strokeWidth = 26.dp.toPx()
+            val diameter = (size.minDimension - strokeWidth * 1.5f).coerceAtLeast(10f)
+            val radius = diameter / 2
+            val centerOffset = Offset(size.width / 2, size.height / 2)
+            val arcSize = Size(diameter, diameter)
+            val topLeft = Offset(centerOffset.x - radius, centerOffset.y - radius)
+
+            if (items.isEmpty() || totalExpense <= 0) {
+                drawArc(
+                    color = Color.Gray.copy(alpha = 0.2f),
+                    startAngle = 0f,
+                    sweepAngle = 360f,
+                    useCenter = false,
+                    topLeft = topLeft,
+                    size = arcSize,
+                    style = Stroke(width = strokeWidth)
+                )
+            } else {
+                var currentStartAngle = -90f
+                items.forEachIndexed { index, cat ->
+                    val sweepAngle = ((cat.amount / totalExpense) * 360f).toFloat()
+                    val color = CategoryChartColors[index % CategoryChartColors.size]
+
+                    drawArc(
+                        color = color,
+                        startAngle = currentStartAngle,
+                        sweepAngle = (sweepAngle - 2.5f).coerceAtLeast(1.5f), // subtle gap between slices
+                        useCenter = false,
+                        topLeft = topLeft,
+                        size = arcSize,
+                        style = Stroke(width = strokeWidth)
+                    )
+                    currentStartAngle += sweepAngle
+                }
+            }
+        }
+
+        // Center Donut Display
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Text(
+                text = "TOTAL EXPENSE",
+                fontSize = 9.sp,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                letterSpacing = 0.5.sp
+            )
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = currencyFormat.format(totalExpense),
+                fontSize = 17.sp,
+                fontWeight = FontWeight.ExtraBold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
         }
     }
 }
