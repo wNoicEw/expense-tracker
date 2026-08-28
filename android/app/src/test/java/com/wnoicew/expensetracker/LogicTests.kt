@@ -141,13 +141,17 @@ class LogicTests {
             sourceFile = "HDFC_Statement.csv"
         )
 
+        val match = DuplicateDetectorEngine.compareTransactions(t1, t2)
+        assertTrue(match.isMatch)
+        assertEquals(99, match.confidence)
+
+        // 99% UTR matches are 100% unequivocal and excluded from manual Duplicate Resolver review
         val duplicates = DuplicateDetectorEngine.scanDuplicates(listOf(t1, t2))
-        assertEquals(1, duplicates.size)
-        assertEquals(99, duplicates[0].confidence)
+        assertEquals(0, duplicates.size)
 
         val (merged, neutralized) = DuplicateDetectorEngine.mergeTransactions(t1, t2)
-        assertEquals("merged_primary", merged.duplicateStatus)
-        assertEquals("merged", neutralized.duplicateStatus)
+        assertEquals("none", merged.duplicateStatus)
+        assertEquals("deleted", neutralized.duplicateStatus)
         assertEquals(TransactionType.TRANSFER, neutralized.type)
     }
 
@@ -199,6 +203,28 @@ class LogicTests {
 
         val duplicates = DuplicateDetectorEngine.scanDuplicates(listOf(t1, t2))
         assertTrue(duplicates.isEmpty())
+    }
+
+    @Test
+    fun testFilterExactDuplicatesOnUpload() {
+        val now = System.currentTimeMillis()
+        val t1 = TransactionEntity(id = "t1", date = now, description = "Swiggy", amount = 350.0, referenceNo = "UTR123456789")
+        val t2 = TransactionEntity(id = "t2", date = now, description = "Amazon Pay", amount = 1200.0, referenceNo = "UTR987654321")
+        val existingDb = listOf(t1, t2)
+
+        // Incoming batch has 1 exact duplicate of t1, 1 exact duplicate within batch, and 1 fresh transaction
+        val incomingT1 = TransactionEntity(id = "inc1", date = now, description = "Swiggy", amount = 350.0, referenceNo = "UTR123456789")
+        val incomingT3 = TransactionEntity(id = "inc3", date = now, description = "Zomato", amount = 550.0, referenceNo = "UTR555555555")
+        val incomingT3Dup = TransactionEntity(id = "inc4", date = now, description = "Zomato", amount = 550.0, referenceNo = "UTR555555555")
+
+        val result = DuplicateDetectorEngine.filterExactDuplicates(
+            incoming = listOf(incomingT1, incomingT3, incomingT3Dup),
+            existing = existingDb
+        )
+
+        assertEquals(1, result.filteredTransactions.size)
+        assertEquals("Zomato", result.filteredTransactions[0].description)
+        assertEquals(2, result.exactDuplicatesCount)
     }
 
 

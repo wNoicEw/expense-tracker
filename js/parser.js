@@ -197,7 +197,7 @@ class StatementParser {
     }
 
     // Stage 1: collect all text items with x,y coordinates across all pages
-    let allItems = []; // [{text, x, y, pageH}]
+    let allItems = []; // [{text, x, y, page, localY}]
     let fullTextArr = [];
 
     for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
@@ -208,13 +208,15 @@ class StatementParser {
       const items = textContent.items;
       if (!items || items.length === 0) continue;
 
+      const pageOffsetY = (pageNum - 1) * 2000;
+
       items.forEach(item => {
         const text = (item.str || '').trim();
         if (!text) return;
         const x = item.transform[4];
-        // PDF y is bottom-up; convert to top-down for easier reading
-        const y = pageHeight - item.transform[5];
-        allItems.push({ text, x, y, page: pageNum });
+        // PDF y is bottom-up; convert to top-down for easier reading with page-offset
+        const y = pageOffsetY + (pageHeight - item.transform[5]);
+        allItems.push({ text, x, y, page: pageNum, localY: pageHeight - item.transform[5] });
         fullTextArr.push(text);
       });
     }
@@ -742,14 +744,12 @@ class StatementParser {
     const records = [];
 
     // SBI transaction type markers appear on a row slightly above the date row
-    const typeMarkerRe = /\b(WDL\s*TFR|DEP\s*TFR|WDL\s*CLG|DEP\s*CLG|DEBIT|CREDIT|ATM|NEFT|IMPS|RTGS|UPI|INT|SWP|INT\s*CREDIT|MANDATE|MANDATE\s*DEBIT)\b/i;
+    const typeMarkerRe = /\b(WDL\s*TFR|DEP\s*TFR|WDL\s*CLG|DEP\s*CLG|DEBIT|CREDIT|ATM|NEFT|IMPS|RTGS|UPI|INT|SWP|INT\s*CREDIT|MANDATE|MANDATE\s*DEBIT|CEMTEX\s*DEP|INTEREST\s*CREDIT)\b/i;
     const dateRe = /^\d{2}\/\d{2}\/\d{4}$/;
     const amountRe = /^-?[\d,]+\.\d{2}$/;
 
-    // We process rows looking for "anchor rows" that contain a date at x<80
-    // Each transaction = anchor row + continuation rows (narration at x≈138) until next anchor
-
     let pendingType = null; // 'income' or 'expense'
+    let pendingNarration = [];
     let transactions = [];
     let currentTxn = null;
 
@@ -758,78 +758,71 @@ class StatementParser {
       const words = row.words;
       if (!words || words.length === 0) continue;
 
-      // Check if this row is a type marker row (WDL TFR / DEP TFR / DEBIT CMP etc.)
       const rowText = words.map(w => w.text).join(' ');
-      const hasDate = words.some(w => dateRe.test(w.text) && w.x < 85);
-      const hasAmount = words.some(w => {
-        const cleaned = w.text.replace(/,/g, '');
-        return !isNaN(parseFloat(cleaned)) && parseFloat(cleaned) > 0 && w.x > 290;
-      });
 
-      if (typeMarkerRe.test(rowText) && !hasDate) {
-        // Type marker — look for WDL (debit) vs DEP (credit)
-        if (/WDL|DEBIT|ATM|SWP|MANDATE\s*DEBIT/i.test(rowText)) pendingType = 'expense';
-        else if (/DEP|CREDIT|INT\s*CREDIT|INTEREST\s*CREDIT/i.test(rowText)) pendingType = 'income';
+      // Ignore summary / footer / header rows
+      if (/^(Account Summary|Statement From|Statement Summary|Page no\.)/i.test(rowText.trim())) {
         continue;
       }
 
-      if (hasDate && hasAmount) {
-        // This is the primary transaction row
-        // Save previous transaction
+      const hasDate = words.some(w => dateRe.test(w.text) && w.x < 85);
+      const debitWords = words.filter(w => w.x >= 320 && w.x < 410 && w.text !== '-' && amountRe.test(w.text));
+      const creditWords = words.filter(w => w.x >= 410 && w.x < 490 && w.text !== '-' && amountRe.test(w.text));
+      const balanceWords = words.filter(w => w.x >= 490 && w.text !== '-' && amountRe.test(w.text));
+      const hasAmount = debitWords.length > 0 || creditWords.length > 0;
+
+      if ((typeMarkerRe.test(rowText) || /CEMTEX/i.test(rowText)) && !hasDate) {
+        // Type marker row
+        if (/WDL|DEBIT|ATM|SWP|MANDATE\s*DEBIT/i.test(rowText)) pendingType = 'expense';
+        else if (/DEP|CREDIT|INT\s*CREDIT|INTEREST\s*CREDIT|CEMTEX/i.test(rowText)) pendingType = 'income';
+        
+        pendingNarration = words.filter(w => w.x >= 100 && w.x < 320).map(w => w.text);
+        continue;
+      }
+
+      if (hasDate && (hasAmount || balanceWords.length > 0)) {
+        // Primary transaction row
         if (currentTxn) transactions.push(currentTxn);
 
-        // Extract date (x < 85)
         const dateWord = words.find(w => dateRe.test(w.text) && w.x < 85);
         const dateStr = dateWord ? dateWord.text : null;
 
-        // Extract narration pieces (130 ≤ x < 305)
-        const narrationWords = words.filter(w => w.x >= 130 && w.x < 305 && w.text !== '-').map(w => w.text);
+        const narrationWords = words.filter(w => w.x >= 130 && w.x < 315 && w.text !== '-').map(w => w.text);
 
-        // Extract amount (320 ≤ x < 485), ignore "-" and balance column
-        const amountWords = words.filter(w => {
-          if (w.text === '-') return false;
-          const cleaned = w.text.replace(/,/g, '');
-          const num = parseFloat(cleaned);
-          return !isNaN(num) && num > 0 && w.x >= 320 && w.x < 485;
-        });
-
-        // Balance (x ≥ 490)
-        const balanceWord = words.find(w => {
-          if (w.text === '-') return false;
-          const cleaned = w.text.replace(/,/g, '');
-          return !isNaN(parseFloat(cleaned)) && w.x >= 490;
-        });
-
-        // Determine DR/CR:
-        // In SBI: deposit column is x ≈ 430, withdrawal column is x ≈ 350
-        const isDepositCol = amountWords.some(w => w.x >= 410);
-        let explicitType = (isDepositCol || pendingType === 'income' || /DEP|CR\b|CREDIT|received|salary|interest credit/i.test(rowText)) ? 'income' : 'expense';
-
-        // Pick transaction amount
         let txnAmount = 0;
-        if (amountWords.length > 0) {
-          txnAmount = parseFloat(amountWords[0].text.replace(/,/g, '')) || 0;
+        let explicitType = 'expense';
+
+        if (creditWords.length > 0) {
+          txnAmount = parseFloat(creditWords[0].text.replace(/,/g, '')) || 0;
+          explicitType = 'income';
+        } else if (debitWords.length > 0) {
+          txnAmount = parseFloat(debitWords[0].text.replace(/,/g, '')) || 0;
+          explicitType = 'expense';
+        } else if (pendingType === 'income') {
+          explicitType = 'income';
         }
 
-        // Extract reference number from narration
-        const refMatch = rowText.match(/(?:UPI|UTR|IMPS|NEFT|REF)[\/\s:-]*([0-9A-Za-z]{8,18})/i);
+        const fullNarrationWords = [...pendingNarration, ...narrationWords];
+        let refMatch = rowText.match(/(?:UPI|UTR|IMPS|NEFT|REF)[\/\s:-]*([0-9A-Za-z]{8,18})/i);
+        if (!refMatch && pendingNarration.length > 0) {
+          refMatch = pendingNarration.join(' ').match(/(?:UPI|UTR|IMPS|NEFT|REF)[\/\s:-]*([0-9A-Za-z]{8,18})/i);
+        }
 
         currentTxn = {
           date: this.normalizeDate(dateStr),
-          narrationParts: narrationWords,
+          narrationParts: fullNarrationWords,
           amount: txnAmount,
           explicitType: explicitType,
-          referenceNo: refMatch ? refMatch[1] : this.extractRefNo(rowText),
-          pendingType: null
+          referenceNo: refMatch ? refMatch[1] : this.extractRefNo(rowText)
         };
         pendingType = null;
-
+        pendingNarration = [];
 
       } else if (currentTxn && !hasDate && !hasAmount) {
-        // Continuation row — add to narration (words at x≈138, no date/amount)
-        const continuationWords = words.filter(w => w.x >= 100 && w.x < 350);
+        // Continuation row — add to narration
+        const continuationWords = words.filter(w => w.x >= 100 && w.x < 320 && w.text !== '-').map(w => w.text);
         if (continuationWords.length > 0) {
-          currentTxn.narrationParts.push(...continuationWords.map(w => w.text));
+          currentTxn.narrationParts.push(...continuationWords);
         }
       }
     }
@@ -842,7 +835,7 @@ class StatementParser {
       const narration = txn.narrationParts
         .join(' ')
         .replace(/\s+/g, ' ')
-        .replace(/AT\s+\d+\s+\w+/gi, '') // remove branch codes
+        .replace(/AT\s+\d+.*$/gi, '') // remove branch codes
         .trim();
 
       records.push({
@@ -1419,10 +1412,16 @@ class StatementParser {
     let last4 = '';
     
     // Explicit keywords with account/card number (extracts trailing 4 digits)
-    const keywordMatch = fullText.match(/(?:account(?:\s*no\.?)?|a\/c(?:\s*no\.?)?|acct|card(?:\s*no\.?)?|ending in|ending with|xx|[*X]{4,12})[\s#:-]*([0-9]{4,18})/i);
+    // Explicit keywords with account/card number (extracts trailing 4 digits)
+    const keywordMatch = fullText.match(/(?:account(?:\s*number|\s*no\.?)?|a\/c(?:\s*number|\s*no\.?)?|acct|card(?:\s*number|\s*no\.?)?|ending in|ending with|xx|[*X]{4,12})[\s#:-]*([0-9]{4,18})/i);
     if (keywordMatch && keywordMatch[1]) {
       const numStr = keywordMatch[1].trim();
       last4 = numStr.slice(-4);
+    }
+
+    if (!last4 && (bankName.includes('SBI') || bankName.includes('State Bank'))) {
+      const sbiAccMatch = fullText.match(/\b([0-9]{11})\b/);
+      if (sbiAccMatch) last4 = sbiAccMatch[1].slice(-4);
     }
 
     if (!last4) {
