@@ -353,9 +353,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val profile = activeProfile.value ?: return
         viewModelScope.launch {
             val db = ExpenseTrackerDatabase.getDatabase(getApplication(), profile.id)
-            val (p, d) = DuplicateDetectorEngine.mergeTransactions(pair.primaryTxn, pair.candidateTxn)
+            val (p, _) = DuplicateDetectorEngine.mergeTransactions(pair.primaryTxn, pair.candidateTxn)
             db.transactionDao().updateTransaction(p)
-            db.transactionDao().updateTransaction(d)
+            // Completely delete candidate duplicate from the database
+            db.transactionDao().deleteTransaction(pair.candidateTxn)
             duplicatePairs.remove(pair)
         }
     }
@@ -478,14 +479,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 )
             }
 
-            db.transactionDao().insertTransactions(resolvedTransactions)
-            db.statementUploadDao().insertUpload(
-                StatementUploadEntity(
-                    fileName = fileName,
-                    detectedBank = detectedBank,
-                    transactionCount = resolvedTransactions.size
+            // Filter exact duplicates against database and current batch
+            val existingTxns = db.transactionDao().getAllTransactionsSnapshot()
+            val deduplication = DuplicateDetectorEngine.filterExactDuplicates(resolvedTransactions, existingTxns)
+            val toInsert = deduplication.filteredTransactions
+
+            if (toInsert.isNotEmpty()) {
+                db.transactionDao().insertTransactions(toInsert)
+                db.statementUploadDao().insertUpload(
+                    StatementUploadEntity(
+                        fileName = fileName,
+                        detectedBank = detectedBank,
+                        transactionCount = toInsert.size
+                    )
                 )
-            )
+            }
         }
     }
 

@@ -1350,26 +1350,36 @@ class App {
     try {
       const parseResult = await window.statementParser.parseFile(file, null, password);
 
-      // Save transactions to DB
-      await window.db.putBatch('transactions', parseResult.transactions);
+      // Filter exact duplicates against database and current batch
+      const existingTxns = (await window.db.getAll('transactions')) || [];
+      const { filteredTransactions, exactDuplicatesCount } = window.duplicateDetector.filterExactDuplicates(
+        parseResult.transactions,
+        existingTxns
+      );
 
-      // Record statement upload
-      await window.db.put('statements', {
-        id: 'stmt_' + Date.now(),
-        fileName: parseResult.fileName,
-        fileType: parseResult.fileType,
-        parsedDate: new Date().toISOString(),
-        transactionCount: parseResult.count,
-        bankOrApp: parseResult.detectedProfile
-      });
+      if (filteredTransactions.length > 0) {
+        // Save only non-duplicate transactions to DB
+        await window.db.putBatch('transactions', filteredTransactions);
 
-      // Run duplicate detection scan immediately
+        // Record statement upload
+        await window.db.put('statements', {
+          id: 'stmt_' + Date.now(),
+          fileName: parseResult.fileName,
+          fileType: parseResult.fileType,
+          parsedDate: new Date().toISOString(),
+          transactionCount: filteredTransactions.length,
+          bankOrApp: parseResult.detectedProfile
+        });
+      }
+
+      // Run duplicate detection scan for cross-statement fuzzy merges
       const dupScan = await window.duplicateDetector.scanDatabase();
 
-      // Count unclassified
-      const unclassified = parseResult.transactions.filter(t => t.needsReview).length;
+      // Count unclassified in newly saved transactions
+      const unclassified = filteredTransactions.filter(t => t.needsReview).length;
 
       if (statusBox) {
+        const hasImported = filteredTransactions.length > 0;
         statusBox.innerHTML = `
           <div style="
             background: linear-gradient(135deg, rgba(16,185,129,0.08), rgba(5,150,105,0.05));
@@ -1377,11 +1387,13 @@ class App {
             border-radius: 12px;
             padding: 16px 20px;
           ">
-            <div style="display:flex; align-items:center; gap:10px; margin-bottom:${unclassified > 0 || dupScan.duplicatesFound > 0 ? '10px' : '0'};">
-              <span style="font-size:1.3rem;">✅</span>
+            <div style="display:flex; align-items:center; gap:10px; margin-bottom:${unclassified > 0 || dupScan.duplicatesFound > 0 || exactDuplicatesCount > 0 ? '10px' : '0'};">
+              <span style="font-size:1.3rem;">${hasImported ? '✅' : 'ℹ️'}</span>
               <div>
-                <div style="font-weight:700; color:#10b981; font-size:0.95rem;">
-                  Imported ${parseResult.count} transaction${parseResult.count !== 1 ? 's' : ''}
+                <div style="font-weight:700; color:${hasImported ? '#10b981' : '#38bdf8'}; font-size:0.95rem;">
+                  ${hasImported 
+                    ? `Imported ${filteredTransactions.length} transaction${filteredTransactions.length !== 1 ? 's' : ''}` 
+                    : `No new transactions to import`}
                 </div>
                 <div style="font-size:0.78rem; color:var(--text-muted); margin-top:2px;">
                   Detected as <span style="
@@ -1393,19 +1405,28 @@ class App {
                 </div>
               </div>
             </div>
+            ${exactDuplicatesCount > 0 ? `
+              <div style="color:#38bdf8; font-size:0.82rem; padding:6px 10px; background:rgba(56,189,248,0.1); border-radius:6px; margin-top:6px;">
+                🔍 <strong>${exactDuplicatesCount}</strong> exact duplicate transaction(s) already existed in your database and were automatically filtered out.
+              </div>` : ''}
             ${unclassified > 0 ? `
               <div style="color:#f59e0b; font-size:0.82rem; padding:6px 10px; background:rgba(245,158,11,0.1); border-radius:6px; margin-top:6px;">
                 ⚡ <strong>${unclassified}</strong> transaction(s) need your review to teach the AI classifier.
               </div>` : ''}
             ${dupScan.duplicatesFound > 0 ? `
               <div style="color:#f97316; font-size:0.82rem; padding:6px 10px; background:rgba(249,115,22,0.1); border-radius:6px; margin-top:6px;">
-                ⚠️ <strong>${dupScan.duplicatesFound}</strong> potential duplicate transaction(s) detected.
+                ⚠️ <strong>${dupScan.duplicatesFound}</strong> potential cross-statement duplicate transaction(s) detected.
               </div>` : ''}
           </div>
         `;
       }
 
-      this.showToast(`Imported ${parseResult.count} transactions!`, 'success');
+      if (filteredTransactions.length > 0) {
+        this.showToast(`Imported ${filteredTransactions.length} transactions!${exactDuplicatesCount > 0 ? ` (${exactDuplicatesCount} duplicates skipped)` : ''}`, 'success');
+      } else {
+        this.showToast(`All ${exactDuplicatesCount} transactions already exist in database!`, 'info');
+      }
+
       await this.refreshAllViews();
 
       if (unclassified > 0) {

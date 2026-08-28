@@ -335,56 +335,86 @@ object StatementParserEngine {
         var inflow = 0.0
         var outflow = 0.0
 
+        val sbiDateRe = Regex("""^\d{2}/\d{2}/\d{4}$""")
         val sbiDateLineRe = Regex("""^(\d{2}/\d{2}/\d{4})(?:\s+\d{2}/\d{2}/\d{4})?""")
-        val sbiAmountLineRe = Regex("""(?:^|\s)-?\s*([0-9]{1,3}(?:,[0-9]{2,3})*(?:\.[0-9]{2}))\s+-?\s*([0-9]{1,3}(?:,[0-9]{2,3})*(?:\.[0-9]{2}))""")
+        val amtRe = Regex("""^-?[0-9]{1,3}(?:,[0-9]{2,3})*(?:\.[0-9]{2})$""")
 
         var i = 0
         while (i < lines.size) {
-            val line = lines[i]
+            val line = lines[i].trim()
             val dateM = sbiDateLineRe.find(line)
 
             if (dateM != null) {
                 val rawDate = dateM.groupValues[1]
-                var txnType = TransactionType.EXPENSE
-                val narrationParts = mutableListOf<String>()
-                var txnAmount = 0.0
-
-                // Scan forward to gather type, narration, and amount for this transaction
                 var j = i + 1
-                while (j < minOf(i + 8, lines.size)) {
-                    val nextLine = lines[j]
-                    if (sbiDateLineRe.containsMatchIn(nextLine) && j > i + 1) {
-                        break // Next transaction reached
-                    }
-
-                    if (nextLine.contains("WDL TFR", ignoreCase = true) || nextLine.contains("WDL CLG", ignoreCase = true) || nextLine.contains("DEBIT", ignoreCase = true)) {
-                        txnType = TransactionType.EXPENSE
-                    } else if (nextLine.contains("DEP TFR", ignoreCase = true) || nextLine.contains("DEP CLG", ignoreCase = true) || nextLine.contains("CREDIT", ignoreCase = true) || nextLine.contains("INTEREST CREDIT", ignoreCase = true)) {
-                        txnType = TransactionType.INCOME
-                    }
-
-                    // Check for amount line: "- 33,000.00 - 1,59,287.01" or "- - 400.00 1,71,775.73" or "236.00 - 1,78,119.03"
-                    val amtMatches = Regex("""([0-9]{1,3}(?:,[0-9]{2,3})*(?:\.[0-9]{2}))""").findAll(nextLine).toList()
-                    if (amtMatches.isNotEmpty()) {
-                        // The transaction amount is the first amount (last is the running balance)
-                        val candidateAmt = cleanAmount(amtMatches[0].groupValues[1])
-                        if (candidateAmt > 0) {
-                            txnAmount = candidateAmt
-                            // If the line starts with "- -", it's a deposit (credit column)
-                            if (nextLine.trim().startsWith("- -") || nextLine.contains("DEP", ignoreCase = true)) {
-                                txnType = TransactionType.INCOME
-                            }
-                        }
-                        j++
-                        break
-                    } else if (!nextLine.contains("Page no", ignoreCase = true) && !nextLine.contains("Statement Summary", ignoreCase = true)) {
-                        narrationParts.add(nextLine)
-                    }
+                // If immediately next line is Value Date (also dd/MM/yyyy), skip it
+                if (j < lines.size && sbiDateRe.matches(lines[j].trim())) {
                     j++
                 }
 
+                val chunk = mutableListOf<String>()
+                while (j < lines.size) {
+                    val nextLine = lines[j].trim()
+                    if (sbiDateLineRe.containsMatchIn(nextLine) || nextLine.contains("Statement Summary", ignoreCase = true) || nextLine.contains("Page no", ignoreCase = true)) {
+                        break
+                    }
+                    chunk.add(nextLine)
+                    j++
+                }
+
+                var typeMarker = TransactionType.EXPENSE
+                val narrationLines = mutableListOf<String>()
+                val amountTokens = mutableListOf<String>()
+
+                for (cl in chunk) {
+                    if (Regex("""\b(DEP\s*TFR|DEP\s*CLG|CREDIT|INTEREST\s*CREDIT|CEMTEX\s*DEP)\b""", RegexOption.IGNORE_CASE).containsMatchIn(cl)) {
+                        typeMarker = TransactionType.INCOME
+                    } else if (Regex("""\b(WDL\s*TFR|WDL\s*CLG|DEBIT|MANDATE\s*DEBIT)\b""", RegexOption.IGNORE_CASE).containsMatchIn(cl)) {
+                        typeMarker = TransactionType.EXPENSE
+                    }
+
+                    if (amtRe.matches(cl) || cl == "-") {
+                        amountTokens.add(cl)
+                    } else {
+                        narrationLines.add(cl)
+                    }
+                }
+
+                var txnAmount = 0.0
+                var finalType = typeMarker
+
+                if (amountTokens.size >= 3) {
+                    val creditToken = amountTokens[amountTokens.size - 2]
+                    val debitToken = amountTokens[amountTokens.size - 3]
+
+                    if (creditToken != "-" && amtRe.matches(creditToken)) {
+                        val amt = cleanAmount(creditToken)
+                        if (amt > 0) {
+                            txnAmount = amt
+                            finalType = TransactionType.INCOME
+                        }
+                    } else if (debitToken != "-" && amtRe.matches(debitToken)) {
+                        val amt = cleanAmount(debitToken)
+                        if (amt > 0) {
+                            txnAmount = amt
+                            finalType = TransactionType.EXPENSE
+                        }
+                    }
+                } else if (amountTokens.isNotEmpty()) {
+                    for (k in 0 until amountTokens.size - 1) {
+                        val tok = amountTokens[k]
+                        if (tok != "-" && amtRe.matches(tok)) {
+                            val amt = cleanAmount(tok)
+                            if (amt > 0) {
+                                txnAmount = amt
+                                break
+                            }
+                        }
+                    }
+                }
+
                 if (txnAmount > 0) {
-                    val rawNarration = (line.replace(dateM.value, "").trim() + " " + narrationParts.joinToString(" ")).trim()
+                    val rawNarration = (line.replace(dateM.value, "").trim() + " " + narrationLines.joinToString(" ")).trim()
                     val cleanNarration = rawNarration.replace(Regex("""AT\s+\d+.*""", RegexOption.IGNORE_CASE), "").replace(Regex("""\s+"""), " ").trim()
                     val ref = Regex("""(?:UPI|UTR|IMPS|NEFT|REF)[/\s:-]*([0-9A-Za-z]{8,18})""", RegexOption.IGNORE_CASE).find(rawNarration)?.groupValues?.getOrNull(1) ?: ""
                     val cat = CategorizerEngine.categorize(cleanNarration.ifBlank { "SBI Transaction" }, txnAmount, customRules)
@@ -395,7 +425,7 @@ object StatementParserEngine {
                             date = timestamp,
                             description = cat.cleanTitle,
                             amount = txnAmount,
-                            type = txnType,
+                            type = finalType,
                             category = cat.category,
                             accountId = accountId,
                             accountName = accountName.ifBlank { "State Bank of India" },
@@ -408,8 +438,9 @@ object StatementParserEngine {
                         )
                     )
 
-                    if (txnType == TransactionType.INCOME) inflow += txnAmount else outflow += txnAmount
+                    if (finalType == TransactionType.INCOME) inflow += txnAmount else outflow += txnAmount
                 }
+
                 i = j
             } else {
                 i++
