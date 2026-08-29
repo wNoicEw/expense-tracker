@@ -364,14 +364,22 @@
             
             <!-- Expense by Category Donut Chart -->
             <div class="glass-card">
-              <div class="glass-card-header">
+              <div class="glass-card-header" style="flex-wrap:wrap; gap:8px;">
                 <div class="glass-card-title">
                   <i data-lucide="pie-chart" style="width:18px; height:18px; color:#f59e0b;"></i>
                   <span>Expense Breakdown</span>
                 </div>
-                <button class="btn btn-ghost btn-sm btn-icon-only" onclick="chartsEngine.exportChartAsPNG('chartCategoryDonut', 'category-breakdown.png')" title="Download High-Res PNG">
-                  <i data-lucide="download" style="width:14px; height:14px;"></i>
-                </button>
+                <div style="display:flex; align-items:center; gap:4px; flex-wrap:wrap;">
+                  <button class="btn btn-secondary btn-sm" data-pie-range="7" style="padding:3px 7px; font-size:0.72rem;">7D</button>
+                  <button class="btn btn-primary btn-sm" data-pie-range="30" style="padding:3px 7px; font-size:0.72rem;">30D</button>
+                  <button class="btn btn-secondary btn-sm" data-pie-range="90" style="padding:3px 7px; font-size:0.72rem;">3M</button>
+                  <button class="btn btn-secondary btn-sm" data-pie-range="180" style="padding:3px 7px; font-size:0.72rem;">6M</button>
+                  <button class="btn btn-secondary btn-sm" data-pie-range="365" style="padding:3px 7px; font-size:0.72rem;">1Y</button>
+                  <button class="btn btn-secondary btn-sm" data-pie-range="all" style="padding:3px 7px; font-size:0.72rem;">ALL</button>
+                  <button class="btn btn-ghost btn-sm btn-icon-only" onclick="chartsEngine.exportChartAsPNG('chartCategoryDonut', 'category-breakdown.png')" title="Download High-Res PNG">
+                    <i data-lucide="download" style="width:14px; height:14px;"></i>
+                  </button>
+                </div>
               </div>
               <div class="chart-wrapper donut" style="height:210px;">
                 <canvas id="chartCategoryDonut"></canvas>

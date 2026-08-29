@@ -88,7 +88,8 @@ fun DashboardScreen(
     val needsReviewCount by viewModel.needsReviewCount.collectAsState()
 
     var chartModeIndex by remember { mutableIntStateOf(0) } // 0: Cumulative, 1: Unified
-    var chartRangeIndex by remember { mutableIntStateOf(1) } // 0: 7D, 1: 30D, 2: 90D
+    var chartRangeIndex by remember { mutableIntStateOf(1) } // 0: 7D, 1: 30D, 2: 3M, 3: 6M, 4: 1Y, 5: ALL
+    var pieChartRangeIndex by remember { mutableIntStateOf(1) } // 0: 7D, 1: 30D, 2: 3M, 3: 6M, 4: 1Y, 5: ALL
 
     val currencyFormat = remember {
         NumberFormat.getCurrencyInstance(Locale("en", "IN")).apply {
@@ -487,11 +488,54 @@ fun DashboardScreen(
 
         item {
             HigGlassCard(modifier = Modifier.fillMaxWidth()) {
-                val totalExpense = categoryBreakdown.sumOf { it.amount }
+                // Range Buttons (7D, 30D, 3M, 6M, 1Y, ALL) matching Cash Flow
+                HigSegmentedControl(
+                    items = listOf("7D", "30D", "3M", "6M", "1Y", "ALL"),
+                    selectedIndex = pieChartRangeIndex,
+                    onItemSelected = { pieChartRangeIndex = it }
+                )
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                val pieDaysRange = when (pieChartRangeIndex) {
+                    0 -> 7
+                    1 -> 30
+                    2 -> 90
+                    3 -> 180
+                    4 -> 365
+                    else -> -1
+                }
+
+                val filteredBreakdown = remember(transactions, pieDaysRange) {
+                    val validTxns = transactions.filter {
+                        it.type == TransactionType.EXPENSE && it.duplicateStatus != "merged"
+                    }
+                    val now = System.currentTimeMillis()
+                    val rangeTxns = if (pieDaysRange > 0) {
+                        val cutoff = now - (pieDaysRange.toLong() * 24 * 60 * 60 * 1000)
+                        validTxns.filter { it.date >= cutoff }
+                    } else {
+                        validTxns
+                    }
+                    val total = rangeTxns.sumOf { it.amount }.coerceAtLeast(1.0)
+                    rangeTxns.groupBy { it.category }
+                        .map { (cat, list) ->
+                            val amount = list.sumOf { it.amount }
+                            val pct = ((amount / total) * 100).toInt()
+                            CategoryBreakdownItem(
+                                categoryName = cat,
+                                amount = amount,
+                                percentage = pct,
+                                transactionCount = list.size
+                            )
+                        }.sortedByDescending { it.amount }
+                }
+
+                val totalExpense = filteredBreakdown.sumOf { it.amount }
 
                 // Category Donut / Pie Chart (72% cutout matching web app)
                 CategoryDonutChart(
-                    items = categoryBreakdown,
+                    items = filteredBreakdown,
                     totalExpense = totalExpense,
                     currencyFormat = currencyFormat,
                     modifier = Modifier
@@ -502,7 +546,7 @@ fun DashboardScreen(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                if (categoryBreakdown.isEmpty()) {
+                if (filteredBreakdown.isEmpty()) {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -510,19 +554,19 @@ fun DashboardScreen(
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         Text(
-                            text = "No expenses recorded yet",
+                            text = "No expenses recorded for this period",
                             fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.onSurface
                         )
                         Text(
-                            text = "Category donut chart will populate as you add expenses.",
+                            text = "Category donut chart will populate as expenses occur in this date range.",
                             fontSize = 12.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 } else {
                     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        categoryBreakdown.forEachIndexed { index, cat ->
+                        filteredBreakdown.forEachIndexed { index, cat ->
                             val color = CategoryChartColors[index % CategoryChartColors.size]
                             Column {
                                 Row(

@@ -7,6 +7,7 @@ class App {
   constructor() {
     this.currentTab = 'dashboard';
     this.currentDaysRange = 30;
+    this.currentPieDaysRange = 30;
     this.transactionsPage = 1;
     this.transactionsPerPage = 15;
     this.searchQuery = '';
@@ -139,6 +140,20 @@ class App {
         btn.classList.add('btn-primary');
         const rangeVal = btn.getAttribute('data-range');
         this.currentDaysRange = rangeVal === 'all' ? 'all' : (parseInt(rangeVal) || 30);
+        this.renderDashboardCharts();
+      });
+    });
+
+    // Pie Chart / Category Donut Range Selector buttons
+    const pieRangeBtns = document.querySelectorAll('[data-pie-range]');
+    pieRangeBtns.forEach(btn => {
+      btn.addEventListener('click', () => {
+        pieRangeBtns.forEach(b => b.classList.remove('btn-primary'));
+        pieRangeBtns.forEach(b => b.classList.add('btn-secondary'));
+        btn.classList.remove('btn-secondary');
+        btn.classList.add('btn-primary');
+        const rangeVal = btn.getAttribute('data-pie-range');
+        this.currentPieDaysRange = rangeVal === 'all' ? 'all' : (parseInt(rangeVal) || 30);
         this.renderDashboardCharts();
       });
     });
@@ -400,7 +415,7 @@ class App {
 
     window.chartsEngine.renderCashflowChart('chartCashflow', transactions, this.currentDaysRange, this.chartViewMode);
 
-    const donutData = window.chartsEngine.renderCategoryDonutChart('chartCategoryDonut', transactions);
+    const donutData = window.chartsEngine.renderCategoryDonutChart('chartCategoryDonut', transactions, this.currentPieDaysRange);
     const catList = document.getElementById('dashboardCategoryList');
     if (catList && donutData && donutData.sortedCats) {
       if (donutData.sortedCats.length === 0) {
