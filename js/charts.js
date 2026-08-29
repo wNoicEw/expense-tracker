@@ -271,7 +271,7 @@ class ChartsEngine {
   /**
    * 2. Category Expense Donut Chart
    */
-  renderCategoryDonutChart(canvasId, transactions) {
+  renderCategoryDonutChart(canvasId, transactions, daysRange = 30) {
     const ctx = document.getElementById(canvasId);
     if (!ctx) return;
 
@@ -279,7 +279,23 @@ class ChartsEngine {
       this.instances[canvasId].destroy();
     }
 
-    const validTxns = transactions.filter(t => t.type === 'expense' && t.duplicateStatus !== 'merged');
+    const now = new Date();
+    let numDays = 30;
+    if (daysRange === 'all' || daysRange === 'ALL') {
+      numDays = null;
+    } else {
+      numDays = parseInt(daysRange) || 30;
+    }
+
+    let validTxns = transactions.filter(t => t.type === 'expense' && t.duplicateStatus !== 'merged');
+    if (numDays !== null) {
+      const cutoff = new Date(now.getFullYear(), now.getMonth(), now.getDate() - numDays + 1);
+      validTxns = validTxns.filter(t => {
+        const d = new Date(t.date);
+        return !isNaN(d.getTime()) && d >= cutoff;
+      });
+    }
+
     const categoryTotals = {};
 
     validTxns.forEach(t => {
