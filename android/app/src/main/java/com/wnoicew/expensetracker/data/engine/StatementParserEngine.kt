@@ -52,11 +52,15 @@ object StatementParserEngine {
         customRules: List<RuleEntity> = emptyList(),
         password: String? = null
     ): StatementParseResult {
+        val bytes = inputStream.readBytes()
+        val isPdfMagic = bytes.size >= 4 && bytes[0] == '%'.code.toByte() && bytes[1] == 'P'.code.toByte() && bytes[2] == 'D'.code.toByte() && bytes[3] == 'F'.code.toByte()
         val ext = fileName.substringAfterLast('.', "").lowercase()
-        return if (ext == "pdf") {
-            parsePdfStream(inputStream, fileName, accountId, accountName, customRules, password)
+        val isPdf = isPdfMagic || ext == "pdf" || fileName.contains("pdf", ignoreCase = true)
+
+        return if (isPdf) {
+            parsePdfStream(java.io.ByteArrayInputStream(bytes), fileName, accountId, accountName, customRules, password)
         } else {
-            parseCsvStream(inputStream, fileName, accountId, accountName, customRules)
+            parseCsvStream(java.io.ByteArrayInputStream(bytes), fileName, accountId, accountName, customRules)
         }
     }
 
@@ -137,7 +141,13 @@ object StatementParserEngine {
                 parseNaviPdf(lines, fileName, accountId, effectiveAccountName, customRules)
             }
             ft.contains("state bank of india") || ft.contains("sbi") || fname.contains("sbi") || ft.contains("wdl tfr") || ft.contains("dep tfr") || detectedBank.contains("sbi", ignoreCase = true) -> {
-                parseSbiPdf(lines, fileName, accountId, effectiveAccountName, customRules)
+                val sbi = parseSbiPdf(lines, fileName, accountId, effectiveAccountName, customRules)
+                if (sbi.transactions.isNotEmpty()) sbi else {
+                    val generic = parseGenericTablePdf(lines, fileName, detectedBank, accountId, effectiveAccountName, customRules)
+                    if (generic.transactions.isNotEmpty()) generic else {
+                        parseFallbackLines(lines, fileName, detectedBank, accountId, effectiveAccountName, customRules)
+                    }
+                }
             }
             ft.contains("phonepe") || fname.contains("phonepe") -> {
                 parsePhonePePdf(lines, fileName, accountId, effectiveAccountName, customRules)
@@ -324,20 +334,27 @@ object StatementParserEngine {
     }
 
     // --- SBI STATEMENT PDF PARSER ---
-    private fun parseSbiPdf(
+    fun parseSbiPdf(
         lines: List<String>,
         fileName: String,
-        accountId: String,
-        accountName: String,
-        customRules: List<RuleEntity>
+        accountId: String = "",
+        accountName: String = "",
+        customRules: List<RuleEntity> = emptyList()
     ): StatementParseResult {
         val list = mutableListOf<TransactionEntity>()
         var inflow = 0.0
         var outflow = 0.0
 
-        val sbiDateRe = Regex("""^\d{2}/\d{2}/\d{4}$""")
-        val sbiDateLineRe = Regex("""^(\d{2}/\d{2}/\d{4})(?:\s+\d{2}/\d{2}/\d{4})?""")
-        val amtRe = Regex("""^-?[0-9]{1,3}(?:,[0-9]{2,3})*(?:\.[0-9]{2})$""")
+        val sbiDateLineRe = Regex(
+            """^(\d{1,2}[/\-.]\d{1,2}[/\-.]\d{2,4}|\d{1,2}[/\-.](?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*[/\-.]\d{2,4}|\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*,?\s+\d{2,4})(?:\s+(\d{1,2}[/\-.]\d{1,2}[/\-.]\d{2,4}|\d{1,2}[/\-.](?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*[/\-.]\d{2,4}|\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*,?\s+\d{2,4}))?""",
+            RegexOption.IGNORE_CASE
+        )
+        val sbiSingleDateRe = Regex(
+            """^(\d{1,2}[/\-.]\d{1,2}[/\-.]\d{2,4}|\d{1,2}[/\-.](?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*[/\-.]\d{2,4}|\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*,?\s+\d{2,4})$""",
+            RegexOption.IGNORE_CASE
+        )
+        val amtRe = Regex("""^-?[0-9]{1,3}(?:,[0-9]{2,3})*\.[0-9]{2}$""")
+        val skipPatterns = Regex("""^(page\s*no\.?|\d+$|balance|statement\s*summary|account\s*summary|welcome:?|statement\s*from|clear\s*balance|uncleared|drawing\s*power|interest\s*rate|branch\s*name|cif\s*number|account\s*number|ifsc\s*code|micr\s*code)""", RegexOption.IGNORE_CASE)
 
         var i = 0
         while (i < lines.size) {
@@ -347,70 +364,68 @@ object StatementParserEngine {
             if (dateM != null) {
                 val rawDate = dateM.groupValues[1]
                 var j = i + 1
-                // If immediately next line is Value Date (also dd/MM/yyyy), skip it
-                if (j < lines.size && sbiDateRe.matches(lines[j].trim())) {
+                // If immediately next line is Value Date (also a single date), skip it
+                if (j < lines.size && sbiSingleDateRe.matches(lines[j].trim())) {
                     j++
                 }
 
                 val chunk = mutableListOf<String>()
                 while (j < lines.size) {
                     val nextLine = lines[j].trim()
-                    if (sbiDateLineRe.containsMatchIn(nextLine) || nextLine.contains("Statement Summary", ignoreCase = true) || nextLine.contains("Page no", ignoreCase = true)) {
+                    if (sbiDateLineRe.containsMatchIn(nextLine)) {
                         break
                     }
-                    chunk.add(nextLine)
+                    if (!skipPatterns.containsMatchIn(nextLine)) {
+                        chunk.add(nextLine)
+                    }
                     j++
                 }
 
                 var typeMarker = TransactionType.EXPENSE
                 val narrationLines = mutableListOf<String>()
-                val amountTokens = mutableListOf<String>()
+                val tokens = mutableListOf<String>()
 
                 for (cl in chunk) {
-                    if (Regex("""\b(DEP\s*TFR|DEP\s*CLG|CREDIT|INTEREST\s*CREDIT|CEMTEX\s*DEP)\b""", RegexOption.IGNORE_CASE).containsMatchIn(cl)) {
+                    if (Regex("""\b(DEP\s*TFR|DEP\s*CLG|CREDIT|INTEREST\s*CREDIT|CEMTEX\s*DEP|BY\s+TRANSFER|CR\b|UPI/CR)\b""", RegexOption.IGNORE_CASE).containsMatchIn(cl)) {
                         typeMarker = TransactionType.INCOME
-                    } else if (Regex("""\b(WDL\s*TFR|WDL\s*CLG|DEBIT|MANDATE\s*DEBIT)\b""", RegexOption.IGNORE_CASE).containsMatchIn(cl)) {
+                    } else if (Regex("""\b(WDL\s*TFR|WDL\s*CLG|DEBIT|MANDATE\s*DEBIT|TO\s+TRANSFER|DR\b|UPI/DR)\b""", RegexOption.IGNORE_CASE).containsMatchIn(cl)) {
                         typeMarker = TransactionType.EXPENSE
                     }
 
                     if (amtRe.matches(cl) || cl == "-") {
-                        amountTokens.add(cl)
+                        tokens.add(cl)
                     } else {
                         narrationLines.add(cl)
                     }
                 }
 
+                val currencyTokens = tokens.filter { amtRe.matches(it) }
                 var txnAmount = 0.0
                 var finalType = typeMarker
 
-                if (amountTokens.size >= 3) {
-                    val creditToken = amountTokens[amountTokens.size - 2]
-                    val debitToken = amountTokens[amountTokens.size - 3]
+                if (tokens.size >= 3) {
+                    val candDebit = tokens[tokens.size - 3]
+                    val candCredit = tokens[tokens.size - 2]
 
-                    if (creditToken != "-" && amtRe.matches(creditToken)) {
-                        val amt = cleanAmount(creditToken)
+                    if (candCredit != "-" && amtRe.matches(candCredit)) {
+                        val amt = cleanAmount(candCredit)
                         if (amt > 0) {
                             txnAmount = amt
                             finalType = TransactionType.INCOME
                         }
-                    } else if (debitToken != "-" && amtRe.matches(debitToken)) {
-                        val amt = cleanAmount(debitToken)
+                    } else if (candDebit != "-" && amtRe.matches(candDebit)) {
+                        val amt = cleanAmount(candDebit)
                         if (amt > 0) {
                             txnAmount = amt
                             finalType = TransactionType.EXPENSE
                         }
                     }
-                } else if (amountTokens.isNotEmpty()) {
-                    for (k in 0 until amountTokens.size - 1) {
-                        val tok = amountTokens[k]
-                        if (tok != "-" && amtRe.matches(tok)) {
-                            val amt = cleanAmount(tok)
-                            if (amt > 0) {
-                                txnAmount = amt
-                                break
-                            }
-                        }
-                    }
+                } else if (currencyTokens.size >= 2) {
+                    val amt = cleanAmount(currencyTokens[currencyTokens.size - 2])
+                    if (amt > 0) txnAmount = amt
+                } else if (currencyTokens.size == 1) {
+                    val amt = cleanAmount(currencyTokens[0])
+                    if (amt > 0) txnAmount = amt
                 }
 
                 if (txnAmount > 0) {
@@ -811,12 +826,17 @@ object StatementParserEngine {
 
         // 3. Detect Account / Card Number Last 4 digits
         var last4 = ""
-        val keywordMatch = Regex("""(?:account(?:\s*no\.?)?|a/c(?:\s*no\.?)?|acct|card(?:\s*no\.?)?|ending in|ending with|xx|[*X]{4,12})[\s#:-]*([0-9]{4,18})""", RegexOption.IGNORE_CASE).find(fullText)
+        val keywordMatch = Regex("""(?:account(?:\s*number|\s*no\.?)?|a/c(?:\s*number|\s*no\.?)?|acct|card(?:\s*number|\s*no\.?)?|ending in|ending with|xx|[*X]{4,12})[\s#:-]*([0-9]{4,18})""", RegexOption.IGNORE_CASE).find(fullText)
         if (keywordMatch != null) {
             val numStr = keywordMatch.groupValues[1].trim()
             if (numStr.length >= 4) {
                 last4 = numStr.takeLast(4)
             }
+        }
+
+        if (last4.isEmpty() && (bankName.contains("SBI", ignoreCase = true) || bankName.contains("State Bank", ignoreCase = true))) {
+            val sbiAccMatch = Regex("""\b([0-9]{11})\b""").find(fullText)
+            if (sbiAccMatch != null) last4 = sbiAccMatch.groupValues[1].takeLast(4)
         }
 
         if (last4.isEmpty()) {
@@ -836,6 +856,13 @@ object StatementParserEngine {
                 if (num < 2020 || num > 2035) {
                     last4 = fnDigits.groupValues[1]
                 }
+            }
+        }
+
+        if (last4.isEmpty()) {
+            val longAccMatch = Regex("""\b(\d{11,18})\b""").find(fullText)
+            if (longAccMatch != null) {
+                last4 = longAccMatch.groupValues[1].takeLast(4)
             }
         }
 
