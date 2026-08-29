@@ -102,6 +102,11 @@ fun UploadScreen(
                     fileName = uri.lastPathSegment ?: "statement.pdf"
                 }
 
+                val mimeType = try { context.contentResolver.getType(uri) ?: "" } catch (_: Exception) { "" }
+                if (!fileName.contains(".") && (mimeType.contains("pdf", ignoreCase = true) || mimeType.isBlank())) {
+                    fileName += ".pdf"
+                }
+
                 currentImportFileName = fileName
                 currentProcessingFile = fileName
 

@@ -347,4 +347,81 @@ class LogicTests {
         assertEquals("HDFC Bank RuPay Credit Card (•••• 7788)", rupayMeta.name)
         assertTrue(rupayMeta.isRuPay)
     }
+
+    @Test
+    fun testSbiPdfParsing() {
+        val sbiSampleLines = listOf(
+            "Account Summary",
+            "Welcome: Mr. KUNTAL SAHA",
+            "Date of Statement : 25-08-2026",
+            "Account open Date : 21/05/2019",
+            "CIF Number : 89348187458",
+            "Account Number : 38471245239",
+            "REGULAR SB CHQ-INDIVIDUALS",
+            "IFSC Code : SBIN0004744",
+            "Statement From : 01-04-2025 to 31-03-2026",
+            "STATEMENT OF ACCOUNT State Bank of India",
+            "Branch Name : CHAKDAH",
+            "Balance",
+            "05/04/2025",
+            "05/04/2025",
+            "DEP TFR",
+            "UPI/CR/102675420440/RAJIB SAHA/HDFC/rajib.0025/PA",
+            "0097738162095 AT 04744 CHAKDAH",
+            "-",
+            "-",
+            "23,000.00",
+            "1,82,287.01",
+            "05/04/2025",
+            "05/04/2025",
+            "DEP TFR",
+            "UPI/CR/102675476703/RAJIB S/KKBK/rajib.0025/PAY",
+            "0097738162095 AT 04744 CHAKDAH",
+            "-",
+            "-",
+            "20,000.00",
+            "2,02,287.01",
+            "06/04/2025",
+            "06/04/2025",
+            "WDL TFR",
+            "UPI/DR/509692869793/BANHISHA /BKID/banhisaha4/UPI",
+            "0097690162095 AT 04744 CHAKDAH",
+            "-",
+            "10,000.00",
+            "-",
+            "1,92,287.01",
+            "1",
+            "Page no.",
+            "Balance",
+            "07/04/2025",
+            "07/04/2025",
+            "WDL TFR",
+            "UPI/DR/546347275587/DUMMY NAME/bkid/4063101100/UP",
+            "0097691162095 AT 04744 CHAKDAH",
+            "-",
+            "33,000.00",
+            "-",
+            "1,59,287.01"
+        )
+
+        val fullText = sbiSampleLines.joinToString("\n")
+        val meta = StatementParserEngine.extractAccountMetadata(fullText, "SBI_Statement.pdf")
+        assertEquals("State Bank of India (SBI)", meta.bankName)
+        assertEquals("Bank Account", meta.type)
+        assertEquals("5239", meta.lastFour)
+
+        val result = StatementParserEngine.parseSbiPdf(sbiSampleLines, "SBI_Statement.pdf")
+        assertEquals(4, result.transactions.size)
+        assertEquals(43000.0, result.totalInflow, 0.001)
+        assertEquals(43000.0, result.totalOutflow, 0.001)
+        assertEquals(TransactionType.INCOME, result.transactions[0].type)
+        assertEquals(23000.0, result.transactions[0].amount, 0.001)
+        assertEquals(TransactionType.INCOME, result.transactions[1].type)
+        assertEquals(20000.0, result.transactions[1].amount, 0.001)
+        assertEquals(TransactionType.EXPENSE, result.transactions[2].type)
+        assertEquals(10000.0, result.transactions[2].amount, 0.001)
+        assertEquals(TransactionType.EXPENSE, result.transactions[3].type)
+        assertEquals(33000.0, result.transactions[3].amount, 0.001)
+    }
 }
+
