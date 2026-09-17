@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -259,16 +260,24 @@ fun TransactionsScreen(
                     }
                 }
             } else {
-                item {
-                    HigInsetGroup {
-                        filteredList.forEachIndexed { index, txn ->
-                            Box(modifier = Modifier.clickable { selectedTxnForDetail = txn }) {
-                                TransactionRowItem(
-                                    transaction = txn,
-                                    currencyFormat = currencyFormat,
-                                    showDivider = index < filteredList.size - 1
-                                )
-                            }
+                itemsIndexed(filteredList, key = { _, txn -> txn.id }) { index, txn ->
+                    val shape = when {
+                        filteredList.size == 1 -> RoundedCornerShape(16.dp)
+                        index == 0 -> RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
+                        index == filteredList.lastIndex -> RoundedCornerShape(bottomStart = 16.dp, bottomEnd = 16.dp)
+                        else -> RoundedCornerShape(0.dp)
+                    }
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = shape,
+                        color = MaterialTheme.colorScheme.surface
+                    ) {
+                        Box(modifier = Modifier.clickable { selectedTxnForDetail = txn }) {
+                            TransactionRowItem(
+                                transaction = txn,
+                                currencyFormat = currencyFormat,
+                                showDivider = index < filteredList.size - 1
+                            )
                         }
                     }
                 }
@@ -280,7 +289,7 @@ fun TransactionsScreen(
             AddTransactionBottomSheet(
                 accounts = accounts.map { it.name },
                 onDismiss = { showAddSheet = false },
-                onAdd = { desc, amount, type, category, accountName, mode, notes ->
+                onAdd = { desc, amount, type, category, accountName, mode, notes, date ->
                     viewModel.addTransaction(
                         description = desc,
                         amount = amount,
@@ -288,7 +297,8 @@ fun TransactionsScreen(
                         category = category,
                         accountName = accountName,
                         paymentMode = mode,
-                        notes = notes
+                        notes = notes,
+                        date = date
                     )
                     showAddSheet = false
                 }
@@ -299,6 +309,7 @@ fun TransactionsScreen(
         selectedTxnForDetail?.let { txn ->
             TransactionDetailBottomSheet(
                 transaction = txn,
+                accounts = accounts.map { it.name },
                 currencyFormat = currencyFormat,
                 onDismiss = { selectedTxnForDetail = null },
                 onUpdateCategory = { newCat, learnRule ->
@@ -307,6 +318,10 @@ fun TransactionsScreen(
                     if (learnRule) {
                         viewModel.learnRuleAndReclassify(txn.description, newCat, txn.type)
                     }
+                    selectedTxnForDetail = null
+                },
+                onUpdateTransaction = { updated ->
+                    viewModel.updateTransaction(updated)
                     selectedTxnForDetail = null
                 },
                 onDelete = {
@@ -323,8 +338,9 @@ fun TransactionsScreen(
 fun AddTransactionBottomSheet(
     accounts: List<String>,
     onDismiss: () -> Unit,
-    onAdd: (String, Double, TransactionType, String, String, String, String) -> Unit
+    onAdd: (String, Double, TransactionType, String, String, String, String, Long) -> Unit
 ) {
+    val context = LocalContext.current
     var description by remember { mutableStateOf("") }
     var amountText by remember { mutableStateOf("") }
     var selectedTypeIndex by remember { mutableIntStateOf(0) } // 0: Expense, 1: Income, 2: Transfer
@@ -332,7 +348,11 @@ fun AddTransactionBottomSheet(
     var selectedAccount by remember { mutableStateOf(accounts.firstOrNull() ?: "Main Account") }
     var paymentMode by remember { mutableStateOf("UPI") }
     var notes by remember { mutableStateOf("") }
+    var selectedTimestamp by remember { mutableLongStateOf(System.currentTimeMillis()) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
+
+    val dateDisplayFormat = remember { SimpleDateFormat("dd MMM yyyy", Locale.getDefault()) }
+    val timeDisplayFormat = remember { SimpleDateFormat("hh:mm a", Locale.getDefault()) }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -411,6 +431,186 @@ fun AddTransactionBottomSheet(
                 }
             }
 
+            // Account Selector (if multiple accounts available)
+            if (accounts.isNotEmpty()) {
+                var accExpanded by remember { mutableStateOf(false) }
+                ExposedDropdownMenuBox(
+                    expanded = accExpanded,
+                    onExpandedChange = { accExpanded = it }
+                ) {
+                    OutlinedTextField(
+                        value = selectedAccount,
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("Account") },
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = accExpanded) },
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable).fillMaxWidth()
+                    )
+                    ExposedDropdownMenu(
+                        expanded = accExpanded,
+                        onDismissRequest = { accExpanded = false }
+                    ) {
+                        accounts.forEach { acc ->
+                            DropdownMenuItem(
+                                text = { Text(acc) },
+                                onClick = {
+                                    selectedAccount = acc
+                                    accExpanded = false
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Apple HIG Date & Time Group
+            HigInsetGroup {
+                // Date Row
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            val cal = Calendar.getInstance().apply { timeInMillis = selectedTimestamp }
+                            android.app.DatePickerDialog(
+                                context,
+                                { _, year, month, dayOfMonth ->
+                                    val c = Calendar.getInstance().apply {
+                                        timeInMillis = selectedTimestamp
+                                        set(Calendar.YEAR, year)
+                                        set(Calendar.MONTH, month)
+                                        set(Calendar.DAY_OF_MONTH, dayOfMonth)
+                                    }
+                                    selectedTimestamp = c.timeInMillis
+                                },
+                                cal.get(Calendar.YEAR),
+                                cal.get(Calendar.MONTH),
+                                cal.get(Calendar.DAY_OF_MONTH)
+                            ).show()
+                        }
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Icon(Icons.Default.CalendarToday, contentDescription = null, tint = PrimaryBlue, modifier = Modifier.size(18.dp))
+                        Text("Date", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
+                    }
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant
+                    ) {
+                        Text(
+                            text = dateDisplayFormat.format(Date(selectedTimestamp)),
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = PrimaryBlue,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                        )
+                    }
+                }
+
+                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+
+                // Time Row
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            val cal = Calendar.getInstance().apply { timeInMillis = selectedTimestamp }
+                            android.app.TimePickerDialog(
+                                context,
+                                { _, hourOfDay, minute ->
+                                    val c = Calendar.getInstance().apply {
+                                        timeInMillis = selectedTimestamp
+                                        set(Calendar.HOUR_OF_DAY, hourOfDay)
+                                        set(Calendar.MINUTE, minute)
+                                        set(Calendar.SECOND, 0)
+                                    }
+                                    selectedTimestamp = c.timeInMillis
+                                },
+                                cal.get(Calendar.HOUR_OF_DAY),
+                                cal.get(Calendar.MINUTE),
+                                false
+                            ).show()
+                        }
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Icon(Icons.Default.Schedule, contentDescription = null, tint = PrimaryBlue, modifier = Modifier.size(18.dp))
+                        Text("Time", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
+                    }
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant
+                    ) {
+                        Text(
+                            text = timeDisplayFormat.format(Date(selectedTimestamp)),
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = PrimaryBlue,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                        )
+                    }
+                }
+            }
+
+            // Payment Mode Selector
+            val paymentModes = listOf(
+                "UPI",
+                "Debit Card",
+                "Credit Card",
+                "Bank Transfer",
+                "NEFT",
+                "IMPS / RTGS",
+                "Net Banking",
+                "Cash",
+                "Cheque",
+                "Digital Wallet",
+                "Other"
+            )
+            var modeExpanded by remember { mutableStateOf(false) }
+            ExposedDropdownMenuBox(
+                expanded = modeExpanded,
+                onExpandedChange = { modeExpanded = it }
+            ) {
+                OutlinedTextField(
+                    value = paymentMode,
+                    onValueChange = {},
+                    readOnly = true,
+                    label = { Text("Payment Mode") },
+                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = modeExpanded) },
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable).fillMaxWidth()
+                )
+                ExposedDropdownMenu(
+                    expanded = modeExpanded,
+                    onDismissRequest = { modeExpanded = false }
+                ) {
+                    paymentModes.forEach { mode ->
+                        DropdownMenuItem(
+                            text = { Text(mode) },
+                            onClick = {
+                                paymentMode = mode
+                                modeExpanded = false
+                            }
+                        )
+                    }
+                }
+            }
+
+            OutlinedTextField(
+                value = notes,
+                onValueChange = { notes = it },
+                label = { Text("Notes / Tags (Optional)") },
+                placeholder = { Text("e.g. #personal, Dinner with family") },
+                singleLine = true,
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth()
+            )
+
             if (errorMessage != null) {
                 Text(
                     text = errorMessage!!,
@@ -435,7 +635,7 @@ fun AddTransactionBottomSheet(
                         1 -> TransactionType.INCOME
                         else -> TransactionType.TRANSFER
                     }
-                    onAdd(description.trim(), amount, type, selectedCategory, selectedAccount, paymentMode, notes.trim())
+                    onAdd(description.trim(), amount, type, selectedCategory, selectedAccount, paymentMode.trim(), notes.trim(), selectedTimestamp)
                 },
                 shape = RoundedCornerShape(14.dp),
                 colors = ButtonDefaults.buttonColors(
@@ -461,14 +661,45 @@ fun AddTransactionBottomSheet(
 @Composable
 fun TransactionDetailBottomSheet(
     transaction: TransactionEntity,
+    accounts: List<String>,
     currencyFormat: NumberFormat,
     onDismiss: () -> Unit,
     onUpdateCategory: (String, Boolean) -> Unit,
+    onUpdateTransaction: (TransactionEntity) -> Unit,
     onDelete: () -> Unit
 ) {
-    var selectedCat by remember { mutableStateOf(transaction.category) }
+    val context = LocalContext.current
+    var isEditing by remember { mutableStateOf(false) }
+
+    // Edit states
+    var editDescription by remember(transaction) { mutableStateOf(transaction.description) }
+    var editAmountText by remember(transaction) {
+        mutableStateOf(if (transaction.amount % 1.0 == 0.0) transaction.amount.toLong().toString() else transaction.amount.toString())
+    }
+    var editTypeIndex by remember(transaction) {
+        mutableIntStateOf(
+            when (transaction.type) {
+                TransactionType.EXPENSE -> 0
+                TransactionType.INCOME -> 1
+                TransactionType.TRANSFER -> 2
+            }
+        )
+    }
+    var editCategory by remember(transaction) { mutableStateOf(transaction.category) }
+    var editAccount by remember(transaction) { mutableStateOf(transaction.accountName.ifBlank { accounts.firstOrNull() ?: "Main Account" }) }
+    var editTimestamp by remember(transaction) { mutableLongStateOf(transaction.date) }
+    var editMode by remember(transaction) { mutableStateOf(transaction.paymentMode) }
+    var editRef by remember(transaction) { mutableStateOf(transaction.referenceNo) }
+    var editNotes by remember(transaction) { mutableStateOf(transaction.note) }
+    var editError by remember { mutableStateOf<String?>(null) }
+
+    // Non-edit states
+    var selectedCat by remember(transaction) { mutableStateOf(transaction.category) }
     var learnAsRule by remember { mutableStateOf(false) }
-    val dateFormat = remember { SimpleDateFormat("EEEE, dd MMMM yyyy", Locale.getDefault()) }
+
+    val fullDateFormat = remember { SimpleDateFormat("EEEE, dd MMMM yyyy · hh:mm a", Locale.getDefault()) }
+    val dateDisplayFormat = remember { SimpleDateFormat("dd MMM yyyy", Locale.getDefault()) }
+    val timeDisplayFormat = remember { SimpleDateFormat("hh:mm a", Locale.getDefault()) }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -483,110 +714,440 @@ fun TransactionDetailBottomSheet(
                 .safeDrawingPadding(),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
+            // Header with Title & Edit toggle button
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = transaction.description,
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Text(
-                        text = dateFormat.format(Date(transaction.date)),
-                        fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-
                 Text(
-                    text = currencyFormat.format(transaction.amount),
-                    fontSize = 22.sp,
-                    fontWeight = FontWeight.ExtraBold,
-                    color = if (transaction.type == TransactionType.INCOME) IncomeGreen else ExpenseRose
+                    text = if (isEditing) "Edit Transaction" else "Transaction Details",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
                 )
-            }
 
-            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f))
-
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                if (transaction.referenceNo.isNotBlank()) {
-                    Text(text = "UTR / Ref: ${transaction.referenceNo}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                if (transaction.sourceFile.isNotBlank()) {
-                    Text(text = "Source: ${transaction.sourceFile}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                Text(text = "Payment Mode: ${transaction.paymentMode}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-
-            Text(
-                text = "Reclassify Category",
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-
-            var catExpanded by remember { mutableStateOf(false) }
-            ExposedDropdownMenuBox(
-                expanded = catExpanded,
-                onExpandedChange = { catExpanded = it }
-            ) {
-                OutlinedTextField(
-                    value = selectedCat,
-                    onValueChange = {},
-                    readOnly = true,
-                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = catExpanded) },
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable).fillMaxWidth()
-                )
-                ExposedDropdownMenu(
-                    expanded = catExpanded,
-                    onDismissRequest = { catExpanded = false }
+                TextButton(
+                    onClick = {
+                        isEditing = !isEditing
+                        editError = null
+                    }
                 ) {
-                    ALL_CATEGORIES.forEach { cat ->
-                        DropdownMenuItem(
-                            text = { Text(cat) },
-                            onClick = {
-                                selectedCat = cat
-                                catExpanded = false
-                            }
-                        )
+                    if (isEditing) {
+                        Text("Cancel", color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Medium)
+                    } else {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Icon(Icons.Default.Edit, contentDescription = "Edit", modifier = Modifier.size(16.dp), tint = PrimaryBlue)
+                            Text("Edit", color = PrimaryBlue, fontWeight = FontWeight.Bold)
+                        }
                     }
                 }
             }
 
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Checkbox(checked = learnAsRule, onCheckedChange = { learnAsRule = it })
-                Text(
-                    text = "Always auto-categorize '${transaction.description}' entries",
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurface
+            if (isEditing) {
+                // EDIT MODE
+                HigSegmentedControl(
+                    items = listOf("Expense", "Income", "Transfer"),
+                    selectedIndex = editTypeIndex,
+                    onItemSelected = { editTypeIndex = it }
                 )
-            }
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                Button(
-                    onClick = { onUpdateCategory(selectedCat, learnAsRule) },
+                OutlinedTextField(
+                    value = editAmountText,
+                    onValueChange = { editAmountText = it },
+                    label = { Text("Amount (₹)") },
+                    placeholder = { Text("0.00") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    singleLine = true,
                     shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = PrimaryBlue),
-                    modifier = Modifier.weight(1f).height(48.dp)
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                OutlinedTextField(
+                    value = editDescription,
+                    onValueChange = { editDescription = it },
+                    label = { Text("Description / Merchant") },
+                    singleLine = true,
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                // Category Selector
+                var catExpanded by remember { mutableStateOf(false) }
+                ExposedDropdownMenuBox(
+                    expanded = catExpanded,
+                    onExpandedChange = { catExpanded = it }
                 ) {
-                    Text("Update Category", fontWeight = FontWeight.Bold)
+                    OutlinedTextField(
+                        value = editCategory,
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("Category") },
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = catExpanded) },
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable).fillMaxWidth()
+                    )
+                    ExposedDropdownMenu(
+                        expanded = catExpanded,
+                        onDismissRequest = { catExpanded = false }
+                    ) {
+                        ALL_CATEGORIES.forEach { cat ->
+                            DropdownMenuItem(
+                                text = { Text(cat) },
+                                onClick = {
+                                    editCategory = cat
+                                    catExpanded = false
+                                }
+                            )
+                        }
+                    }
                 }
 
-                OutlinedButton(
-                    onClick = onDelete,
-                    shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
-                    modifier = Modifier.height(48.dp)
+                // Account Selector
+                if (accounts.isNotEmpty()) {
+                    var accExpanded by remember { mutableStateOf(false) }
+                    ExposedDropdownMenuBox(
+                        expanded = accExpanded,
+                        onExpandedChange = { accExpanded = it }
+                    ) {
+                        OutlinedTextField(
+                            value = editAccount,
+                            onValueChange = {},
+                            readOnly = true,
+                            label = { Text("Account") },
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = accExpanded) },
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable).fillMaxWidth()
+                        )
+                        ExposedDropdownMenu(
+                            expanded = accExpanded,
+                            onDismissRequest = { accExpanded = false }
+                        ) {
+                            accounts.forEach { acc ->
+                                DropdownMenuItem(
+                                    text = { Text(acc) },
+                                    onClick = {
+                                        editAccount = acc
+                                        accExpanded = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // Apple HIG Date & Time Group for Editing
+                HigInsetGroup {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                val cal = Calendar.getInstance().apply { timeInMillis = editTimestamp }
+                                android.app.DatePickerDialog(
+                                    context,
+                                    { _, year, month, dayOfMonth ->
+                                        val c = Calendar.getInstance().apply {
+                                            timeInMillis = editTimestamp
+                                            set(Calendar.YEAR, year)
+                                            set(Calendar.MONTH, month)
+                                            set(Calendar.DAY_OF_MONTH, dayOfMonth)
+                                        }
+                                        editTimestamp = c.timeInMillis
+                                    },
+                                    cal.get(Calendar.YEAR),
+                                    cal.get(Calendar.MONTH),
+                                    cal.get(Calendar.DAY_OF_MONTH)
+                                ).show()
+                            }
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Icon(Icons.Default.CalendarToday, contentDescription = null, tint = PrimaryBlue, modifier = Modifier.size(18.dp))
+                            Text("Date", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
+                        }
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant
+                        ) {
+                            Text(
+                                text = dateDisplayFormat.format(Date(editTimestamp)),
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = PrimaryBlue,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                            )
+                        }
+                    }
+
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                val cal = Calendar.getInstance().apply { timeInMillis = editTimestamp }
+                                android.app.TimePickerDialog(
+                                    context,
+                                    { _, hourOfDay, minute ->
+                                        val c = Calendar.getInstance().apply {
+                                            timeInMillis = editTimestamp
+                                            set(Calendar.HOUR_OF_DAY, hourOfDay)
+                                            set(Calendar.MINUTE, minute)
+                                            set(Calendar.SECOND, 0)
+                                        }
+                                        editTimestamp = c.timeInMillis
+                                    },
+                                    cal.get(Calendar.HOUR_OF_DAY),
+                                    cal.get(Calendar.MINUTE),
+                                    false
+                                ).show()
+                            }
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Icon(Icons.Default.Schedule, contentDescription = null, tint = PrimaryBlue, modifier = Modifier.size(18.dp))
+                            Text("Time", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
+                        }
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant
+                        ) {
+                            Text(
+                                text = timeDisplayFormat.format(Date(editTimestamp)),
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = PrimaryBlue,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                            )
+                        }
+                    }
+                }
+
+                // Payment Mode Selector
+                val paymentModes = listOf(
+                    "UPI",
+                    "Debit Card",
+                    "Credit Card",
+                    "Bank Transfer",
+                    "NEFT",
+                    "IMPS / RTGS",
+                    "Net Banking",
+                    "Cash",
+                    "Cheque",
+                    "Digital Wallet",
+                    "Other"
+                )
+                var editModeExpanded by remember { mutableStateOf(false) }
+                ExposedDropdownMenuBox(
+                    expanded = editModeExpanded,
+                    onExpandedChange = { editModeExpanded = it }
                 ) {
-                    Icon(Icons.Default.Delete, contentDescription = "Delete", modifier = Modifier.size(18.dp))
+                    OutlinedTextField(
+                        value = editMode,
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("Payment Mode") },
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = editModeExpanded) },
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable).fillMaxWidth()
+                    )
+                    ExposedDropdownMenu(
+                        expanded = editModeExpanded,
+                        onDismissRequest = { editModeExpanded = false }
+                    ) {
+                        paymentModes.forEach { mode ->
+                            DropdownMenuItem(
+                                text = { Text(mode) },
+                                onClick = {
+                                    editMode = mode
+                                    editModeExpanded = false
+                                }
+                            )
+                        }
+                    }
+                }
+
+                OutlinedTextField(
+                    value = editRef,
+                    onValueChange = { editRef = it },
+                    label = { Text("Reference / UTR No") },
+                    singleLine = true,
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                OutlinedTextField(
+                    value = editNotes,
+                    onValueChange = { editNotes = it },
+                    label = { Text("Notes / Tags") },
+                    singleLine = true,
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                if (editError != null) {
+                    Text(
+                        text = editError!!,
+                        color = MaterialTheme.colorScheme.error,
+                        fontSize = 13.sp
+                    )
+                }
+
+                Button(
+                    onClick = {
+                        val amt = editAmountText.toDoubleOrNull()
+                        if (amt == null || amt <= 0) {
+                            editError = "Please enter a valid positive amount"
+                            return@Button
+                        }
+                        if (editDescription.isBlank()) {
+                            editError = "Please enter a description"
+                            return@Button
+                        }
+                        val finalType = when (editTypeIndex) {
+                            0 -> TransactionType.EXPENSE
+                            1 -> TransactionType.INCOME
+                            else -> TransactionType.TRANSFER
+                        }
+                        val updated = transaction.copy(
+                            description = editDescription.trim(),
+                            amount = amt,
+                            type = finalType,
+                            category = editCategory,
+                            accountName = editAccount,
+                            date = editTimestamp,
+                            paymentMode = editMode.trim().ifBlank { "Online" },
+                            referenceNo = editRef.trim(),
+                            note = editNotes.trim(),
+                            needsReview = false
+                        )
+                        onUpdateTransaction(updated)
+                    },
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = PrimaryBlue),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(50.dp)
+                ) {
+                    Text("Save Changes", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                }
+            } else {
+                // VIEW DETAILS & QUICK RECLASSIFY MODE
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = transaction.description,
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = fullDateFormat.format(Date(transaction.date)),
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    Text(
+                        text = currencyFormat.format(transaction.amount),
+                        fontSize = 22.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = if (transaction.type == TransactionType.INCOME) IncomeGreen else ExpenseRose
+                    )
+                }
+
+                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f))
+
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (transaction.accountName.isNotBlank()) {
+                        Text(text = "Account: ${transaction.accountName}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    if (transaction.referenceNo.isNotBlank()) {
+                        Text(text = "UTR / Ref: ${transaction.referenceNo}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    if (transaction.sourceFile.isNotBlank()) {
+                        Text(text = "Source: ${transaction.sourceFile}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Text(text = "Payment Mode: ${transaction.paymentMode}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    if (transaction.note.isNotBlank()) {
+                        Text(text = "Notes: ${transaction.note}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+
+                Text(
+                    text = "Reclassify Category",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                var catExpanded by remember { mutableStateOf(false) }
+                ExposedDropdownMenuBox(
+                    expanded = catExpanded,
+                    onExpandedChange = { catExpanded = it }
+                ) {
+                    OutlinedTextField(
+                        value = selectedCat,
+                        onValueChange = {},
+                        readOnly = true,
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = catExpanded) },
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable).fillMaxWidth()
+                    )
+                    ExposedDropdownMenu(
+                        expanded = catExpanded,
+                        onDismissRequest = { catExpanded = false }
+                    ) {
+                        ALL_CATEGORIES.forEach { cat ->
+                            DropdownMenuItem(
+                                text = { Text(cat) },
+                                onClick = {
+                                    selectedCat = cat
+                                    catExpanded = false
+                                }
+                            )
+                        }
+                    }
+                }
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(checked = learnAsRule, onCheckedChange = { learnAsRule = it })
+                    Text(
+                        text = "Always auto-categorize '${transaction.description}' entries",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Button(
+                        onClick = { onUpdateCategory(selectedCat, learnAsRule) },
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = PrimaryBlue),
+                        modifier = Modifier.weight(1f).height(48.dp)
+                    ) {
+                        Text("Update Category", fontWeight = FontWeight.Bold)
+                    }
+
+                    OutlinedButton(
+                        onClick = onDelete,
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                        modifier = Modifier.height(48.dp)
+                    ) {
+                        Icon(Icons.Default.Delete, contentDescription = "Delete", modifier = Modifier.size(18.dp))
+                    }
                 }
             }
 

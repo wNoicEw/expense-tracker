@@ -232,7 +232,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         accountId: String = "",
         accountName: String = "",
         paymentMode: String = "Online",
-        notes: String = ""
+        notes: String = "",
+        date: Long = System.currentTimeMillis()
     ) {
         val profile = activeProfile.value ?: return
         viewModelScope.launch {
@@ -247,6 +248,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
             db.transactionDao().insertTransaction(
                 TransactionEntity(
+                    date = date,
                     description = description.trim(),
                     amount = amount,
                     type = finalType,

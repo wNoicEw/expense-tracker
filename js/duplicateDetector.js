@@ -18,10 +18,14 @@ class DuplicateDetector {
 
     const detectedPairs = [];
     const updatedTransactions = [...transactions];
+    const changedIds = new Set();
 
     // Reset duplicate flags first (unless explicitly merged or dismissed)
     updatedTransactions.forEach(t => {
       if (t.duplicateStatus !== 'merged' && t.duplicateStatus !== 'dismissed') {
+        if (t.isDuplicate || t.duplicateWithId || t.duplicateStatus !== 'none' || t.duplicateConfidence) {
+          changedIds.add(t.id);
+        }
         t.isDuplicate = false;
         t.duplicateWithId = null;
         t.duplicateStatus = 'none';
@@ -88,6 +92,7 @@ class DuplicateDetector {
               t1.duplicateWithId = null;
               t1.duplicateConfidence = 0;
               t1.duplicateReason = '';
+              changedIds.add(t1.id);
 
               // Completely delete t2 from DB
               await window.db.delete('transactions', t2.id);
@@ -99,12 +104,14 @@ class DuplicateDetector {
               t1.duplicateStatus = 'pending_review';
               t1.duplicateConfidence = matchResult.confidence;
               t1.duplicateReason = matchResult.reason;
+              changedIds.add(t1.id);
 
               t2.isDuplicate = true;
               t2.duplicateWithId = t1.id;
               t2.duplicateStatus = 'pending_review';
               t2.duplicateConfidence = matchResult.confidence;
               t2.duplicateReason = matchResult.reason;
+              changedIds.add(t2.id);
 
               detectedPairs.push({
                 tx1: t1,
@@ -119,9 +126,11 @@ class DuplicateDetector {
       }
     }
 
-    // Save active updated transactions back to DB (excluding deleted records)
-    const finalTransactions = updatedTransactions.filter(t => !deletedIds.has(t.id));
-    await window.db.putBatch('transactions', finalTransactions);
+    // Save only the transactions whose duplicate-related fields actually changed (excluding deleted records)
+    const finalTransactions = updatedTransactions.filter(t => !deletedIds.has(t.id) && changedIds.has(t.id));
+    if (finalTransactions.length > 0) {
+      await window.db.putBatch('transactions', finalTransactions);
+    }
     return {
       duplicatesFound: detectedPairs.length,
       pairs: detectedPairs

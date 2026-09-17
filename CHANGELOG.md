@@ -4,6 +4,29 @@ All notable changes to **Money Tracker (Offline AI Expense Tracker & Financial I
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.2] - 2026-09-18
+
+### Fixed
+- **Privacy**: Removed hardcoded personal names/contacts from the shared merchant categorizer (`js/categorizer.js`, `CategorizerEngine.kt`) — they were shipping inside the committed source and the built APK. Add them back per-profile via Learned Rules if needed.
+- **Security**: PDF report export (`js/export.js`) now HTML-escapes transaction/account fields before rendering, closing an XSS gap that every other render path already guarded against.
+- **Android performance**: Transactions list now uses a keyed lazy `itemsIndexed` instead of composing the entire filtered list eagerly inside one `LazyColumn` item — fixes janky scrolling on long transaction histories.
+- **Android reliability**: Statement parsing on upload now runs on a background dispatcher instead of the UI thread, preventing ANRs on larger PDF statements.
+- **Web dashboard**: "Total Inflow/Outflow (30D)" KPIs were actually computing the current calendar month (near-zero on day 1 of a month); `getBudgetsStatus` now supports a rolling day-range and the dashboard uses it.
+- **Web performance**: Duplicate scanner now only writes transactions whose duplicate-related fields actually changed, instead of rewriting the entire transaction store on every scan (init, every upload, and every Duplicates tab open).
+
+## [1.1.1] - 2026-09-18
+
+### Added & Improved
+- **Payment Mode Dropdowns & Account Selection**:
+  - Replaced freeform text inputs with comprehensive `<select>` dropdowns in both Add and Edit transaction modals across Web and Android (`ExposedDropdownMenuBox`).
+  - Included options: `UPI`, `Debit Card`, `Credit Card`, `Bank Transfer`, `NEFT`, `IMPS / RTGS`, `Net Banking`, `Cash`, `Cheque`, `Digital Wallet`, and `Other`.
+  - Added robust default fallback accounts (`Primary Bank Account`, `Cash / Wallet`, `Credit Card`) ensuring dropdowns are never empty.
+- **DateTime Capsule Card Redesign**:
+  - Eliminated native WebKit browser white spin-button artifacts on Windows Chromium browsers (`::-webkit-inner-spin-button`).
+  - Added 1-tap quick preset pills (`Now`, `Today`, `Yesterday`) and unified glassmorphic card styling.
+- **Automatic Versioning & Distribution Rules**:
+  - Established formal development workflow rules in `AGENTS.md` and `.agents/rules/development_workflow.md` adhering to semantic versioning (patch increment for minor fixes, minor increment for features, automated APK compilation to root and archive).
+
 ## [1.1.0] - 2026-08-27
 
 ### Added

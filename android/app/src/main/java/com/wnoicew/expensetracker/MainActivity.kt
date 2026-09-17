@@ -268,7 +268,7 @@ fun MainAppRoot(viewModel: MainViewModel) {
                 AddTransactionBottomSheet(
                     accounts = accounts.map { it.name },
                     onDismiss = { showAddTxnSheet = false },
-                    onAdd = { desc, amount, type, category, accountName, mode, notes ->
+                    onAdd = { desc, amount, type, category, accountName, mode, notes, date ->
                         viewModel.addTransaction(
                             description = desc,
                             amount = amount,
@@ -276,7 +276,8 @@ fun MainAppRoot(viewModel: MainViewModel) {
                             category = category,
                             accountName = accountName,
                             paymentMode = mode,
-                            notes = notes
+                            notes = notes,
+                            date = date
                         )
                         showAddTxnSheet = false
                     }

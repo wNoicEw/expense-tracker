@@ -423,5 +423,54 @@ class LogicTests {
         assertEquals(TransactionType.EXPENSE, result.transactions[3].type)
         assertEquals(33000.0, result.transactions[3].amount, 0.001)
     }
+
+    // ==========================================
+    // 9. TRANSACTION CREATION & EDITING TESTS
+    // ==========================================
+
+    @Test
+    fun testTransactionCreationAndEditing() {
+        val initialTimestamp = 1758110400000L // Specific epoch
+        val originalTxn = TransactionEntity(
+            date = initialTimestamp,
+            description = "Blue Tokai Coffee",
+            amount = 240.0,
+            type = TransactionType.EXPENSE,
+            category = "Food & Dining",
+            accountName = "HDFC Bank",
+            paymentMode = "UPI",
+            note = "#coffee",
+            referenceNo = "MANUAL_123456"
+        )
+
+        assertEquals(initialTimestamp, originalTxn.date)
+        assertEquals(240.0, originalTxn.amount, 0.001)
+        assertEquals("Blue Tokai Coffee", originalTxn.description)
+        assertEquals("Food & Dining", originalTxn.category)
+
+        // Simulate editing all details (date/time, amount, category, type, notes, paymentMode, etc.)
+        val updatedTimestamp = 1758196800000L // 1 day later
+        val editedTxn = originalTxn.copy(
+            date = updatedTimestamp,
+            description = "Blue Tokai Specialty Pour-Over",
+            amount = 320.0,
+            type = TransactionType.EXPENSE,
+            category = "Food & Dining",
+            accountName = "ICICI Credit Card",
+            paymentMode = "Credit Card",
+            note = "#coffee #pourover",
+            referenceNo = "REF_987654",
+            needsReview = false
+        )
+
+        assertEquals(updatedTimestamp, editedTxn.date)
+        assertEquals(320.0, editedTxn.amount, 0.001)
+        assertEquals("Blue Tokai Specialty Pour-Over", editedTxn.description)
+        assertEquals("ICICI Credit Card", editedTxn.accountName)
+        assertEquals("Credit Card", editedTxn.paymentMode)
+        assertEquals("#coffee #pourover", editedTxn.note)
+        assertEquals("REF_987654", editedTxn.referenceNo)
+        assertFalse(editedTxn.needsReview)
+    }
 }
 

@@ -38,6 +38,8 @@ import com.wnoicew.expensetracker.ui.theme.IncomeGreen
 import com.wnoicew.expensetracker.ui.theme.ExpenseRose
 import com.wnoicew.expensetracker.ui.theme.PrimaryBlue
 import com.wnoicew.expensetracker.ui.theme.WarningAmber
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.text.NumberFormat
@@ -50,6 +52,7 @@ fun UploadScreen(
     viewModel: MainViewModel
 ) {
     val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
     val uploads by viewModel.statementUploads.collectAsState()
     var parseResultToPreview by remember { mutableStateOf<StatementParseResult?>(null) }
     var currentImportFileName by remember { mutableStateOf("") }
@@ -87,8 +90,9 @@ fun UploadScreen(
         if (uri != null) {
             parsingError = null
             genericError = null
-            try {
-                isReadingFile = true
+            isReadingFile = true
+            coroutineScope.launch(Dispatchers.IO) {
+              try {
                 var fileName = "statement"
                 // Try query filename from content resolver
                 try {
@@ -127,10 +131,11 @@ fun UploadScreen(
                 } else {
                     parsingError = e
                 }
-            } catch (e: Exception) {
+              } catch (e: Exception) {
                 genericError = e.message ?: "Failed to process statement file."
-            } finally {
+              } finally {
                 isReadingFile = false
+              }
             }
         }
     }

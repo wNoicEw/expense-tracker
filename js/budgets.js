@@ -7,16 +7,20 @@ class BudgetsManager {
   constructor() {}
 
   /**
-   * Get budget status for all categories for a given month/year
+   * Get budget status for all categories.
+   * Pass `daysBack` (e.g. 30) for a rolling window ending today, instead of a calendar month.
    */
-  async getBudgetsStatus(year = new Date().getFullYear(), month = new Date().getMonth()) {
+  async getBudgetsStatus(daysBack = null, year = new Date().getFullYear(), month = new Date().getMonth()) {
     const categories = await window.db.getAll('categories');
     const transactions = await window.db.getAll('transactions');
 
-    // Filter transactions for the specified month & year (ignoring merged duplicates & transfers)
+    const rangeStart = daysBack ? Date.now() - daysBack * 24 * 60 * 60 * 1000 : null;
+
+    // Filter transactions for the rolling window (if given) or the specified month & year (ignoring merged duplicates)
     const monthTxns = transactions.filter(t => {
       if (t.duplicateStatus === 'merged') return false;
       const d = new Date(t.date);
+      if (rangeStart !== null) return d.getTime() >= rangeStart;
       return d.getFullYear() === year && d.getMonth() === month;
     });
 

@@ -76,10 +76,11 @@ class ChartsEngine {
     }
 
     validTxns.forEach(t => {
-      if (dateMap[t.date]) {
+      const dateKey = t.date ? t.date.split('T')[0].split(' ')[0] : '';
+      if (dateMap[dateKey]) {
         const amt = Math.abs(parseFloat(t.amount) || 0);
-        if (t.type === 'income') dateMap[t.date].income += amt;
-        else if (t.type === 'expense') dateMap[t.date].expense += amt;
+        if (t.type === 'income') dateMap[dateKey].income += amt;
+        else if (t.type === 'expense') dateMap[dateKey].expense += amt;
       }
     });
 

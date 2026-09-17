@@ -282,7 +282,8 @@ class App {
   // --- DASHBOARD VIEW ---
   async renderDashboard() {
     const transactions = await window.db.getAll('transactions');
-    const budgetStatus = await window.budgetsManager.getBudgetsStatus();
+    const daysBack = this.currentDaysRange === 'all' ? null : this.currentDaysRange;
+    const budgetStatus = await window.budgetsManager.getBudgetsStatus(daysBack);
     const accounts = await window.accountsManager.getAccountsWithMetrics();
 
     let totalNetWorth = 0;
@@ -713,7 +714,10 @@ class App {
 
           return `
             <tr class="${isDup ? 'duplicate-row' : ''}">
-              <td><span style="font-family:var(--font-mono); font-size:0.8rem; color:var(--text-muted);">${this.escape(t.date)}</span></td>
+              <td>
+                <div style="font-family:var(--font-mono); font-size:0.8rem; color:var(--text-muted);">${this.escape(t.date)}</div>
+                ${t.time ? `<div style="font-family:var(--font-mono); font-size:0.7rem; color:var(--text-dim); margin-top:2px;">${this.escape(t.time)}</div>` : ''}
+              </td>
               <td>
                 <div style="font-weight:600; color:var(--text-main); display:flex; align-items:center; gap:6px;">
                   ${this.escape(t.description)}
@@ -731,9 +735,14 @@ class App {
                 </span>
               </td>
               <td style="text-align:center;">
-                <button class="btn btn-ghost btn-sm btn-icon-only" onclick="app.deleteTransaction('${t.id}')" title="Delete">
-                  <i data-lucide="trash-2" style="width:14px; height:14px; color:#f43f5e;"></i>
-                </button>
+                <div style="display:inline-flex; align-items:center; gap:4px;">
+                  <button class="btn btn-ghost btn-sm btn-icon-only" onclick="app.openEditTxnModal('${t.id}')" title="Edit Transaction">
+                    <i data-lucide="edit-3" style="width:14px; height:14px; color:#3b82f6;"></i>
+                  </button>
+                  <button class="btn btn-ghost btn-sm btn-icon-only" onclick="app.deleteTransaction('${t.id}')" title="Delete">
+                    <i data-lucide="trash-2" style="width:14px; height:14px; color:#f43f5e;"></i>
+                  </button>
+                </div>
               </td>
             </tr>
           `;
@@ -1675,7 +1684,7 @@ class App {
     if (rSavings) rSavings.textContent = '₹ ' + budgetStatus.netSavings.toLocaleString('en-IN');
   }
 
-  // --- MANUAL TRANSACTION MODAL ---
+  // --- MANUAL & EDIT TRANSACTION MODALS ---
   bindModalEvents() {
     const addTxnBtn = document.getElementById('btnOpenAddTxnModal');
     const modal = document.getElementById('manualTxnModal');
@@ -1683,10 +1692,9 @@ class App {
     const cancelBtn = document.getElementById('btnCancelAddTxn');
     const form = document.getElementById('manualTxnForm');
 
-    if (addTxnBtn && modal) {
+    if (addTxnBtn) {
       addTxnBtn.addEventListener('click', () => {
-        this.populateModalAccountOptions();
-        modal.classList.add('active');
+        this.openManualTxnModal();
       });
     }
 
@@ -1699,10 +1707,16 @@ class App {
         e.preventDefault();
         const type = document.getElementById('mTxnType').value;
         const amount = parseFloat(document.getElementById('mTxnAmount').value) || 0;
-        const date = document.getElementById('mTxnDate').value || new Date().toISOString().split('T')[0];
+        const now = new Date();
+        const defaultDate = now.toLocaleDateString('en-CA');
+        const defaultTime = String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
+        const date = document.getElementById('mTxnDate').value || defaultDate;
+        const time = document.getElementById('mTxnTime').value || defaultTime;
         const category = document.getElementById('mTxnCategory').value;
         const accountId = document.getElementById('mTxnAccount').value;
         const description = document.getElementById('mTxnDesc').value;
+        const paymentMode = document.getElementById('mTxnMode')?.value || (type === 'income' ? 'Direct Credit' : 'Cash/Manual');
+        const referenceNo = document.getElementById('mTxnRef')?.value || ('MANUAL_' + Date.now().toString().slice(-6));
         const notes = document.getElementById('mTxnNotes').value;
 
         if (amount <= 0 || !description) {
@@ -1713,6 +1727,7 @@ class App {
         const newTxn = {
           id: 'txn_manual_' + Date.now(),
           date,
+          time,
           amount,
           type,
           category,
@@ -1722,8 +1737,8 @@ class App {
           description,
           rawNarration: 'Manual Entry: ' + description,
           accountId,
-          paymentMode: type === 'income' ? 'Direct Credit' : 'Cash/Manual',
-          referenceNo: 'MANUAL_' + Date.now().toString().slice(-6),
+          paymentMode,
+          referenceNo,
           sourceFile: 'Manual Entry',
           isDuplicate: false,
           notes,
@@ -1743,6 +1758,213 @@ class App {
         await this.refreshAllViews();
       });
     }
+
+    // Edit Transaction Modal Wiring
+    const editModal = document.getElementById('editTxnModal');
+    const closeEditBtn = document.getElementById('btnCloseEditTxnModal');
+    const cancelEditBtn = document.getElementById('btnCancelEditTxn');
+    const editForm = document.getElementById('editTxnForm');
+
+    const closeEditModal = () => editModal && editModal.classList.remove('active');
+    if (closeEditBtn) closeEditBtn.addEventListener('click', closeEditModal);
+    if (cancelEditBtn) cancelEditBtn.addEventListener('click', closeEditModal);
+
+    if (editForm) {
+      editForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const id = document.getElementById('eTxnId').value;
+        const txn = (window.db.getById ? await window.db.getById('transactions', id) : (window.db.get ? await window.db.get('transactions', id) : null)) || (await window.db.getAll('transactions')).find(t => t.id === id);
+        if (!txn) {
+          alert('Transaction not found.');
+          return;
+        }
+
+        const type = document.getElementById('eTxnType').value;
+        const amount = parseFloat(document.getElementById('eTxnAmount').value) || 0;
+        const now = new Date();
+        const defaultDate = now.toLocaleDateString('en-CA');
+        const defaultTime = String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
+        const date = document.getElementById('eTxnDate').value || defaultDate;
+        const time = document.getElementById('eTxnTime').value || defaultTime;
+        const category = document.getElementById('eTxnCategory').value;
+        const accountId = document.getElementById('eTxnAccount').value;
+        const description = document.getElementById('eTxnDesc').value;
+        const paymentMode = document.getElementById('eTxnMode').value || txn.paymentMode || 'Online';
+        const referenceNo = document.getElementById('eTxnRef').value || txn.referenceNo || '';
+        const notes = document.getElementById('eTxnNotes').value || '';
+
+        if (amount <= 0 || !description) {
+          alert('Please enter a valid amount and description.');
+          return;
+        }
+
+        txn.type = type;
+        txn.amount = amount;
+        txn.date = date;
+        txn.time = time;
+        txn.category = category;
+        txn.accountId = accountId;
+        txn.description = description;
+        txn.paymentMode = paymentMode;
+        txn.referenceNo = referenceNo;
+        txn.notes = notes;
+        txn.updatedAt = new Date().toISOString();
+
+        await window.db.put('transactions', txn);
+
+        if (description.length > 2 && category !== 'Uncategorized') {
+          await window.categorizer.learnRuleAndReclassify(description, category, type);
+        }
+
+        closeEditModal();
+        this.showToast('Transaction updated successfully!', 'success');
+        await this.refreshAllViews();
+      });
+    }
+  }
+
+  setQuickDateTime(targetModal, preset) {
+    const isEdit = targetModal === 'edit';
+    const dateInput = document.getElementById(isEdit ? 'eTxnDate' : 'mTxnDate');
+    const timeInput = document.getElementById(isEdit ? 'eTxnTime' : 'mTxnTime');
+
+    if (!dateInput || !timeInput) return;
+
+    const now = new Date();
+
+    if (preset === 'now') {
+      dateInput.value = now.toLocaleDateString('en-CA');
+      timeInput.value = String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
+    } else if (preset === 'today') {
+      dateInput.value = now.toLocaleDateString('en-CA');
+    } else if (preset === 'yesterday') {
+      const yesterday = new Date(now);
+      yesterday.setDate(yesterday.getDate() - 1);
+      dateInput.value = yesterday.toLocaleDateString('en-CA');
+    }
+  }
+
+  async openManualTxnModal(accountId = null) {
+    const modal = document.getElementById('manualTxnModal');
+    if (!modal) return;
+    await this.populateModalAccountOptions();
+    if (accountId) {
+      const accSelect = document.getElementById('mTxnAccount');
+      if (accSelect) accSelect.value = accountId;
+    }
+    const modeSelect = document.getElementById('mTxnMode');
+    if (modeSelect) modeSelect.value = 'UPI';
+    modal.classList.add('active');
+    if (window.lucide) lucide.createIcons();
+  }
+
+  async openEditTxnModal(txnId) {
+    const txn = (window.db.getById ? await window.db.getById('transactions', txnId) : (window.db.get ? await window.db.get('transactions', txnId) : null)) || (await window.db.getAll('transactions')).find(t => t.id === txnId);
+    if (!txn) {
+      this.showToast('Transaction not found', 'error');
+      return;
+    }
+
+    const accounts = await window.db.getAll('accounts');
+    const categories = (await window.db.getAll('categories')).filter(c => c.name !== 'Uncategorized');
+
+    const modal = document.getElementById('editTxnModal');
+    const idInput = document.getElementById('eTxnId');
+    const typeSelect = document.getElementById('eTxnType');
+    const amountInput = document.getElementById('eTxnAmount');
+    const dateInput = document.getElementById('eTxnDate');
+    const timeInput = document.getElementById('eTxnTime');
+    const accSelect = document.getElementById('eTxnAccount');
+    const catSelect = document.getElementById('eTxnCategory');
+    const descInput = document.getElementById('eTxnDesc');
+    const modeSelect = document.getElementById('eTxnMode');
+    const refInput = document.getElementById('eTxnRef');
+    const notesInput = document.getElementById('eTxnNotes');
+
+    if (accSelect) {
+      if (accounts.length === 0) {
+        accSelect.innerHTML = `
+          <option value="default_bank">Primary Bank Account</option>
+          <option value="default_cash">Cash / Wallet</option>
+          <option value="default_card">Credit Card</option>
+        `;
+      } else {
+        accSelect.innerHTML = accounts.map(a => `<option value="${a.id}">${this.escape(a.name)} (${this.escape(a.bankName || '')})</option>`).join('');
+      }
+      if (txn.accountId) {
+        const exists = Array.from(accSelect.options).some(o => o.value === txn.accountId);
+        if (!exists) {
+          const opt = document.createElement('option');
+          opt.value = txn.accountId;
+          opt.textContent = txn.accountName || txn.accountId;
+          accSelect.appendChild(opt);
+        }
+        accSelect.value = txn.accountId;
+      }
+    }
+
+    if (catSelect) {
+      catSelect.innerHTML = categories.map(c => `<option value="${c.name}">${c.name}</option>`).join('');
+      if (txn.category) catSelect.value = txn.category;
+    }
+
+    if (idInput) idInput.value = txn.id;
+    if (typeSelect) typeSelect.value = txn.type || 'expense';
+    if (amountInput) amountInput.value = txn.amount;
+
+    // Normalizing Date & Time
+    let dVal = txn.date || '';
+    let tVal = txn.time || '';
+    if (dVal.includes('T')) {
+      const parts = dVal.split('T');
+      dVal = parts[0];
+      if (!tVal && parts[1]) tVal = parts[1].slice(0, 5);
+    } else if (dVal.includes(' ')) {
+      const parts = dVal.split(' ');
+      dVal = parts[0];
+      if (!tVal && parts[1]) tVal = parts[1].slice(0, 5);
+    }
+    if (!tVal && txn.createdAt) {
+      try {
+        const cd = new Date(txn.createdAt);
+        if (!isNaN(cd.getTime())) {
+          tVal = String(cd.getHours()).padStart(2, '0') + ':' + String(cd.getMinutes()).padStart(2, '0');
+        }
+      } catch (e) {}
+    }
+    if (!tVal) tVal = '12:00';
+
+    if (dateInput) dateInput.value = dVal;
+    if (timeInput) timeInput.value = tVal;
+    if (descInput) descInput.value = txn.description || '';
+    
+    // Select or preserve payment mode
+    if (modeSelect) {
+      const targetMode = (txn.paymentMode || 'UPI').trim();
+      let matched = false;
+      for (const opt of modeSelect.options) {
+        if (opt.value.toLowerCase() === targetMode.toLowerCase() || opt.text.toLowerCase().includes(targetMode.toLowerCase())) {
+          modeSelect.value = opt.value;
+          matched = true;
+          break;
+        }
+      }
+      if (!matched && targetMode) {
+        const opt = document.createElement('option');
+        opt.value = targetMode;
+        opt.textContent = targetMode;
+        modeSelect.appendChild(opt);
+        modeSelect.value = targetMode;
+      }
+    }
+
+    if (refInput) refInput.value = txn.referenceNo || '';
+    if (notesInput) notesInput.value = txn.notes || '';
+
+    if (modal) {
+      modal.classList.add('active');
+      if (window.lucide) lucide.createIcons();
+    }
   }
 
   async populateModalAccountOptions() {
@@ -1752,7 +1974,11 @@ class App {
     const accSelect = document.getElementById('mTxnAccount');
     if (accSelect) {
       if (accounts.length === 0) {
-        accSelect.innerHTML = '<option value="">No Accounts (Add in Cards & Accounts or Upload Statement)</option>';
+        accSelect.innerHTML = `
+          <option value="default_bank">Primary Bank Account</option>
+          <option value="default_cash">Cash / Wallet</option>
+          <option value="default_card">Credit Card</option>
+        `;
       } else {
         accSelect.innerHTML = accounts.map(a => `<option value="${a.id}">${this.escape(a.name)} (${this.escape(a.bankName || '')})</option>`).join('');
       }
@@ -1764,8 +1990,13 @@ class App {
     }
 
     const dateInput = document.getElementById('mTxnDate');
+    const timeInput = document.getElementById('mTxnTime');
+    const now = new Date();
     if (dateInput) {
-      dateInput.value = new Date().toISOString().split('T')[0];
+      dateInput.value = now.toLocaleDateString('en-CA');
+    }
+    if (timeInput) {
+      timeInput.value = String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
     }
   }
 

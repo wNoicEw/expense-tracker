@@ -129,6 +129,10 @@ class Database {
     });
   }
 
+  async get(storeName, id) {
+    return this.getById(storeName, id);
+  }
+
   async put(storeName, item) {
     return new Promise((resolve, reject) => {
       const tx = this.db.transaction(storeName, 'readwrite');

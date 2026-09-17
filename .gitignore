@@ -17,8 +17,19 @@ android/local.properties
 .idea/
 *.iml
 
-# User & Agent specific folders
+# Local private configuration and data
 Dont upload/
+[Dd]ont [Uu]pload/
+Dont upload/**
+[Dd]ont [Uu]pload/**
 .agents/
+.agents/**
 .agent/
-
+.agent/**
+AGENTS.md
+GEMINI.md
+.impeccable/
+.claude/
+.claude/**
+.cursor/
+.cursor/**

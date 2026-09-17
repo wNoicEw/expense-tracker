@@ -6,6 +6,16 @@
 class ExportEngine {
   constructor() {}
 
+  escape(str) {
+    if (str === null || str === undefined) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  }
+
   /**
    * 1. Export Complete Excel Workbook (.xlsx)
    */
@@ -35,11 +45,12 @@ class ExportEngine {
     const wsSummary = XLSX.utils.aoa_to_sheet(summaryData);
 
     // --- Sheet 2: All Transactions Register ---
-    const txnsHeaders = ['Date', 'Type', 'Category', 'Description', 'Amount (INR)', 'Account', 'Payment Mode', 'Reference / UTR', 'Source File', 'Notes'];
+    const txnsHeaders = ['Date', 'Time', 'Type', 'Category', 'Description', 'Amount (INR)', 'Account', 'Payment Mode', 'Reference / UTR', 'Source File', 'Notes'];
     const txnsRows = validTxns.map(t => {
       const acc = accounts.find(a => a.id === t.accountId);
       return [
         t.date,
+        t.time || '',
         t.type.toUpperCase(),
         t.category,
         t.description,
@@ -99,6 +110,7 @@ class ExportEngine {
 
     const csvContent = Papa.unparse(validTxns.map(t => ({
       Date: t.date,
+      Time: t.time || '',
       Type: t.type,
       Category: t.category,
       Description: t.description,
@@ -172,9 +184,9 @@ class ExportEngine {
         <tbody>
           ${accounts.map(a => `
             <tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
-              <td style="padding:8px;">${a.name}</td>
-              <td style="padding:8px; text-transform:uppercase;">${a.type}</td>
-              <td style="padding:8px;">${a.bankName}</td>
+              <td style="padding:8px;">${this.escape(a.name)}</td>
+              <td style="padding:8px; text-transform:uppercase;">${this.escape(a.type)}</td>
+              <td style="padding:8px;">${this.escape(a.bankName)}</td>
               <td style="padding:8px; text-align:right; font-weight:bold; color:${a.computedBalance >= 0 ? '#10b981' : '#f43f5e'}">
                 ₹ ${a.computedBalance.toLocaleString('en-IN')}
               </td>
@@ -197,10 +209,10 @@ class ExportEngine {
         <tbody>
           ${validTxns.map(t => `
             <tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
-              <td style="padding:8px;">${t.date}</td>
-              <td style="padding:8px;">${t.description}</td>
-              <td style="padding:8px;">${t.category}</td>
-              <td style="padding:8px;">${t.paymentMode || 'Online'}</td>
+              <td style="padding:8px;">${this.escape(t.date)}</td>
+              <td style="padding:8px;">${this.escape(t.description)}</td>
+              <td style="padding:8px;">${this.escape(t.category)}</td>
+              <td style="padding:8px;">${this.escape(t.paymentMode || 'Online')}</td>
               <td style="padding:8px; text-align:right; font-weight:bold; color:${t.type === 'income' ? '#10b981' : '#f43f5e'}">
                 ${t.type === 'income' ? '+' : '-'} ₹ ${t.amount.toLocaleString('en-IN')}
               </td>

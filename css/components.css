@@ -1,4 +1,4 @@
-﻿/* ==========================================================================
+/* ==========================================================================
    OFFLINE EXPENSE TRACKER - COMPONENTS STYLING
    ========================================================================== */
 
@@ -463,6 +463,51 @@
   font-family: inherit;
   outline: none;
   transition: all var(--transition-fast);
+  color-scheme: dark;
+}
+
+[data-theme="light"] .input-control,
+[data-theme="light"] .select-control {
+  color-scheme: light;
+}
+
+/* Eliminate ugly browser spin buttons completely */
+input[type="time"]::-webkit-inner-spin-button,
+input[type="time"]::-webkit-outer-spin-button,
+input[type="date"]::-webkit-inner-spin-button,
+input[type="date"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none !important;
+  margin: 0 !important;
+  display: none !important;
+}
+
+input[type="number"] {
+  -moz-appearance: textfield;
+}
+
+/* Polished native calendar and clock indicators */
+input[type="date"]::-webkit-calendar-picker-indicator,
+input[type="time"]::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  filter: invert(0.85);
+  opacity: 0.7;
+  padding: 3px;
+  border-radius: 4px;
+  transition: opacity 0.15s ease, transform 0.15s ease, background-color 0.15s ease;
+}
+
+input[type="date"]::-webkit-calendar-picker-indicator:hover,
+input[type="time"]::-webkit-calendar-picker-indicator:hover {
+  opacity: 1;
+  transform: scale(1.1);
+  background: rgba(59, 130, 246, 0.2);
+}
+
+[data-theme="light"] input[type="date"]::-webkit-calendar-picker-indicator,
+[data-theme="light"] input[type="time"]::-webkit-calendar-picker-indicator {
+  filter: invert(0.2);
 }
 
 .input-control:focus, .select-control:focus {
@@ -475,11 +520,129 @@
   color: var(--text-dim);
 }
 
+/* DateTime Capsule Card Component */
+.datetime-capsule-card {
+  background: rgba(15, 23, 42, 0.55);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  padding: 10px 14px;
+  margin-bottom: var(--space-md);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.datetime-capsule-card:focus-within {
+  border-color: rgba(59, 130, 246, 0.4);
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.15);
+}
+
+.datetime-capsule-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.datetime-capsule-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.datetime-presets {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.datetime-preset-btn {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--glass-border);
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 2px 9px;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.datetime-preset-btn:hover {
+  background: rgba(59, 130, 246, 0.2);
+  border-color: rgba(59, 130, 246, 0.5);
+  color: #60a5fa;
+  transform: translateY(-1px);
+}
+
+.datetime-inputs-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.datetime-input-box {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.datetime-input-box .datetime-icon {
+  position: absolute;
+  left: 11px;
+  width: 15px;
+  height: 15px;
+  color: var(--color-primary);
+  pointer-events: none;
+  opacity: 0.85;
+}
+
+.datetime-input-box .input-control {
+  padding-left: 34px;
+  padding-right: 10px;
+  font-size: 0.86rem;
+  background: rgba(10, 16, 30, 0.75);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.datetime-input-box .input-control:focus {
+  background: rgba(15, 23, 42, 0.95);
+  border-color: var(--color-primary);
+}
+
+[data-theme="light"] .datetime-capsule-card {
+  background: rgba(241, 245, 249, 0.8);
+}
+
+[data-theme="light"] .datetime-input-box .input-control {
+  background: #ffffff;
+  border-color: #cbd5e1;
+}
+
+[data-theme="light"] .datetime-preset-btn {
+  background: #ffffff;
+  border-color: #cbd5e1;
+  color: #475569;
+}
+
+[data-theme="light"] .datetime-preset-btn:hover {
+  background: #e0e7ff;
+  border-color: #6366f1;
+  color: #4338ca;
+}
+
 .form-group {
   display: flex;
   flex-direction: column;
   gap: 6px;
   margin-bottom: var(--space-md);
+}
+
+.modal-body .form-group {
+  margin-bottom: 12px;
 }
 
 .form-label {
@@ -1173,12 +1336,12 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: var(--space-lg);
+  padding: 16px 20px;
   border-bottom: 1px solid var(--glass-border);
 }
 
 .modal-body {
-  padding: var(--space-lg);
+  padding: 18px 20px;
 }
 
 .modal-footer {
@@ -1186,7 +1349,7 @@
   align-items: center;
   justify-content: flex-end;
   gap: var(--space-sm);
-  padding: var(--space-md) var(--space-lg);
+  padding: 12px 20px;
   border-top: 1px solid var(--glass-border);
   background: rgba(15, 23, 42, 0.5);
 }
