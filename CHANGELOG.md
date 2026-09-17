@@ -4,6 +4,15 @@ All notable changes to **Money Tracker (Offline AI Expense Tracker & Financial I
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.3] - 2026-09-18
+
+### Fixed & Improved
+- **Statement Feature Cards Layout Redesign (`index.html`, `components.css`)**:
+  - Resolved CSS class name collision where upload feature cards previously shared `.profile-card` with the user profile switcher, causing them to inherit constrained widths (`max-width: 148px`), tall vertical padding, and excessive empty space.
+  - Implemented dedicated `.statement-features-grid` and `.statement-feature-card` components with a balanced 4-column horizontal layout, compact padding, and distinct accent-color icon containers.
+- **Git Exclusions**:
+  - Permanently untracked and excluded `AGENTS.md` in `.gitignore` to protect internal repository guidelines.
+
 ## [1.1.2] - 2026-09-18
 
 ### Fixed

@@ -1,7 +1,7 @@
 # 💎 Money Tracker — Offline AI Expense Tracker & Financial Intelligence
 
-[![Version](https://img.shields.io/badge/version-1.1.2-10b981.svg?style=flat-square)](https://github.com/wNoicEw/expense-tracker/releases/tag/v1.1.2)
-[![Android](https://img.shields.io/badge/android-v1.1.2%20(SDK%2035)-3DDC84.svg?style=flat-square&logo=android&logoColor=white)](#-native-android-application-v112)
+[![Version](https://img.shields.io/badge/version-1.1.3-10b981.svg?style=flat-square)](https://github.com/wNoicEw/expense-tracker/releases/tag/v1.1.3)
+[![Android](https://img.shields.io/badge/android-v1.1.3%20(SDK%2035)-3DDC84.svg?style=flat-square&logo=android&logoColor=white)](#-native-android-application-v113)
 [![Privacy](https://img.shields.io/badge/privacy-100%25%20On--Device-6366f1.svg?style=flat-square)](#-privacy--security-guarantee)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg?style=flat-square)](LICENSE)
 
@@ -9,7 +9,7 @@ An executive-grade, **local-first financial intelligence suite** and offline exp
 
 ---
 
-## 📱 Native Android Application (v1.1.2)
+## 📱 Native Android Application (v1.1.3)
 
 The native Android app brings 100% feature parity with the browser application into a modern mobile experience:
 
@@ -20,7 +20,7 @@ The native Android app brings 100% feature parity with the browser application i
 - **Category Budgets & Health Scoring**: Visual progress allowances and real-time Financial Health Score (0–100).
 - **Direct APK Distribution**:
   - **Main Root (Always Latest)**: [**`ExpenseTracker.apk`**](ExpenseTracker.apk)
-  - **Version Archive**: [**`apks/`**](apks/) (`ExpenseTracker-v1.0.0.apk`, `ExpenseTracker-v1.1.0.apk`, `ExpenseTracker-v1.1.1.apk`, `ExpenseTracker-v1.1.2.apk`)
+  - **Version Archive**: [**`apks/`**](apks/) (`ExpenseTracker-v1.0.0.apk`, `ExpenseTracker-v1.1.0.apk`, `ExpenseTracker-v1.1.1.apk`, `ExpenseTracker-v1.1.2.apk`, `ExpenseTracker-v1.1.3.apk`)
 
 ---
 
@@ -95,7 +95,7 @@ The compiled APK will automatically be placed at the root [`ExpenseTracker.apk`]
 
 All notable changes and architectural updates are recorded in [**CHANGELOG.md**](CHANGELOG.md).
 
-- **Current Release:** [`v1.1.2`](https://github.com/wNoicEw/expense-tracker/releases/tag/v1.1.2) — *Privacy, security, and performance fixes: removed hardcoded personal data from categorization, closed a PDF-export XSS gap, fixed dashboard KPI date range, and reduced duplicate-scan/transaction-list overhead.*
+- **Current Release:** [`v1.1.3`](https://github.com/wNoicEw/expense-tracker/releases/tag/v1.1.3) — *Statement upload feature cards redesign with dedicated horizontal grid layout, proportional spacing, and strict agent rule configurations.*
 
 ---
 
