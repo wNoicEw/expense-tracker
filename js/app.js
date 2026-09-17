@@ -28,6 +28,31 @@ class App {
       .replace(/'/g, '&#039;');
   }
 
+  // --- BACKUP REMINDER (data lives only in this browser's IndexedDB) ---
+  shouldShowBackupReminder(transactionCount) {
+    if (!transactionCount) return false;
+    try {
+      const profileId = (window.profileManager && window.profileManager.getActiveProfile()?.id) || 'default';
+      const dismissedUntil = parseInt(localStorage.getItem('backupReminderDismissedUntil_' + profileId) || '0', 10);
+      if (Date.now() < dismissedUntil) return false;
+      const lastBackupAt = parseInt(localStorage.getItem('lastBackupAt_' + profileId) || '0', 10);
+      const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+      return (Date.now() - lastBackupAt) > THIRTY_DAYS_MS;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  dismissBackupReminder() {
+    try {
+      const profileId = (window.profileManager && window.profileManager.getActiveProfile()?.id) || 'default';
+      const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+      localStorage.setItem('backupReminderDismissedUntil_' + profileId, String(Date.now() + SEVEN_DAYS_MS));
+    } catch (e) { /* localStorage unavailable, ignore */ }
+    const banner = document.getElementById('dashboardBackupBanner');
+    if (banner) banner.style.display = 'none';
+  }
+
   async init() {
     try {
       // Initialize Theme Preference
@@ -284,6 +309,12 @@ class App {
     const transactions = await window.db.getAll('transactions');
     const daysBack = this.currentDaysRange === 'all' ? null : this.currentDaysRange;
     const budgetStatus = await window.budgetsManager.getBudgetsStatus(daysBack);
+
+    const backupBanner = document.getElementById('dashboardBackupBanner');
+    if (backupBanner) {
+      const validTxnCount = transactions.filter(t => t.duplicateStatus !== 'merged').length;
+      backupBanner.style.display = this.shouldShowBackupReminder(validTxnCount) ? 'flex' : 'none';
+    }
     const accounts = await window.accountsManager.getAccountsWithMetrics();
 
     let totalNetWorth = 0;

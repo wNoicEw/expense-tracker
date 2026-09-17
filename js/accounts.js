@@ -57,13 +57,7 @@ class AccountsManager {
         availableCredit = Math.max(0, limit - outstandingDues);
         utilizationPercent = Math.min(100, Math.round((outstandingDues / limit) * 100));
       } else {
-        if (acc.balance && acc.balance !== 0) {
-          calculatedBalance = (acc.balance || 0) + totalIncome - totalExpense - totalTransfersOut + totalTransfersIn;
-        } else if (totalIncome > 0) {
-          calculatedBalance = totalIncome - totalExpense - totalTransfersOut + totalTransfersIn;
-        } else {
-          calculatedBalance = totalExpense; // total spent via this account/wallet
-        }
+        calculatedBalance = (acc.balance || 0) + totalIncome - totalExpense - totalTransfersOut + totalTransfersIn;
       }
 
       return {
@@ -164,17 +158,27 @@ class AccountsManager {
    */
   async deleteAccount(accountId) {
     const accounts = await window.db.getAll('accounts');
-    const fallback = accounts.find(a => a.id !== accountId) || { id: 'acc_cash_default' };
-    
-    const txns = await window.db.getAll('transactions');
-    const updatedTxns = txns.map(t => {
-      if (t.accountId === accountId) {
-        return { ...t, accountId: fallback.id };
-      }
-      return t;
-    });
+    let fallback = accounts.find(a => a.id === 'acc_cash_default' && a.id !== accountId);
+    if (!fallback) {
+      fallback = {
+        id: accountId === 'acc_cash_default' ? 'acc_cash_default_' + Date.now() : 'acc_cash_default',
+        name: 'Unassigned',
+        type: 'cash',
+        bankName: 'Cash / Unassigned',
+        accountNumberLast4: '0000',
+        balance: 0,
+        color: '#64748b',
+        createdAt: new Date().toISOString()
+      };
+      await window.db.put('accounts', fallback);
+    }
 
-    await window.db.putBatch('transactions', updatedTxns);
+    const txns = await window.db.getAll('transactions');
+    const affectedTxns = txns.filter(t => t.accountId === accountId).map(t => ({ ...t, accountId: fallback.id }));
+
+    if (affectedTxns.length > 0) {
+      await window.db.putBatch('transactions', affectedTxns);
+    }
     await window.db.delete('accounts', accountId);
     return true;
   }

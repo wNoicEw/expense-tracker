@@ -174,28 +174,35 @@ class Categorizer {
       }
     }
 
-    // 2. Check Built-in Merchant Rules (High confidence)
+    // 2. Check Built-in Merchant Rules (High confidence) — prefer the most specific (longest) keyword match
+    // so e.g. "amazon prime" (Subscriptions) wins over the broader "amazon" (Shopping) keyword.
+    let bestRule = null;
+    let bestKeyword = null;
     for (const rule of this.merchantRules) {
       for (const keyword of rule.keywords) {
-        if (text.includes(keyword)) {
-          let type = 'expense';
-          if (rule.category === 'Salary & Professional' || rule.category === 'Freelance & Side Hustle') {
-            type = 'income';
-          } else if (rule.category === 'Transfers & CC Bill') {
-            type = 'transfer';
-          }
-
-          return {
-            category: rule.category,
-            cleanTitle: this.extractMerchantName(rawText, keyword),
-            type: type,
-            confidence: 'high',
-            needsReview: false,
-            matchedKeyword: keyword,
-            identifier: identifier
-          };
+        if (text.includes(keyword) && (!bestKeyword || keyword.length > bestKeyword.length)) {
+          bestRule = rule;
+          bestKeyword = keyword;
         }
       }
+    }
+    if (bestRule) {
+      let type = 'expense';
+      if (bestRule.category === 'Salary & Professional' || bestRule.category === 'Freelance & Side Hustle') {
+        type = 'income';
+      } else if (bestRule.category === 'Transfers & CC Bill') {
+        type = 'transfer';
+      }
+
+      return {
+        category: bestRule.category,
+        cleanTitle: this.extractMerchantName(rawText, bestKeyword),
+        type: type,
+        confidence: 'high',
+        needsReview: false,
+        matchedKeyword: bestKeyword,
+        identifier: identifier
+      };
     }
 
     // 3. Fallback heuristic for salary / credit (word-boundary safe)

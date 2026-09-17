@@ -162,17 +162,31 @@ class DuplicateDetector {
     const narr1 = (t1.rawNarration || '').toLowerCase();
     const narr2 = (t2.rawNarration || '').toLowerCase();
 
-    const isUtrMatch = (ref1 && ref2 && ref1.length > 6 && (ref1 === ref2 || ref1.includes(ref2) || ref2.includes(ref1))) ||
-                       (ref1 && ref1.length > 6 && narr2.includes(ref1)) ||
-                       (ref2 && ref2.length > 6 && narr1.includes(ref2));
+    // Exact UTR match only — safe to auto-merge (deletes a record) on this signal
+    const isExactUtrMatch = ref1 && ref2 && ref1.length > 6 && ref1 === ref2;
+
+    // Overlapping/substring UTR match — send to manual review, never auto-merge
+    const isPartialUtrMatch = !isExactUtrMatch && (
+      (ref1 && ref2 && ref1.length > 6 && (ref1.includes(ref2) || ref2.includes(ref1))) ||
+      (ref1 && ref1.length > 6 && narr2.includes(ref1)) ||
+      (ref2 && ref2.length > 6 && narr1.includes(ref2))
+    );
 
     const isMerchantMatch = this.isSameMerchant(t1, t2);
 
-    if (isUtrMatch) {
+    if (isExactUtrMatch) {
       return {
         isMatch: true,
         confidence: 99,
         reason: `Identical UTR / Reference No on same date: ${t1.referenceNo}`
+      };
+    }
+
+    if (isPartialUtrMatch) {
+      return {
+        isMatch: true,
+        confidence: 90,
+        reason: `Overlapping UTR / Reference No on same date: ${t1.referenceNo || t1.rawNarration} / ${t2.referenceNo || t2.rawNarration}`
       };
     }
 

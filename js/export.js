@@ -16,6 +16,13 @@ class ExportEngine {
       .replace(/'/g, '&#039;');
   }
 
+  markBackedUp() {
+    try {
+      const profileId = (window.profileManager && window.profileManager.getActiveProfile()?.id) || 'default';
+      localStorage.setItem('lastBackupAt_' + profileId, String(Date.now()));
+    } catch (e) { /* localStorage unavailable, ignore */ }
+  }
+
   /**
    * 1. Export Complete Excel Workbook (.xlsx)
    */
@@ -99,6 +106,7 @@ class ExportEngine {
     // Trigger Download
     const fileName = `Expense_Report_${new Date().toISOString().split('T')[0]}.xlsx`;
     XLSX.writeFile(wb, fileName);
+    this.markBackedUp();
   }
 
   /**
@@ -126,6 +134,7 @@ class ExportEngine {
     link.href = URL.createObjectURL(blob);
     link.download = `Transactions_${new Date().toISOString().split('T')[0]}.csv`;
     link.click();
+    this.markBackedUp();
   }
 
   /**
@@ -232,6 +241,7 @@ class ExportEngine {
     };
 
     html2pdf().set(opt).from(printArea).save();
+    this.markBackedUp();
   }
 }
 

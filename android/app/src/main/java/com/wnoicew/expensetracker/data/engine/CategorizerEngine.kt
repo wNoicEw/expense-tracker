@@ -198,22 +198,29 @@ object CategorizerEngine {
             }
         }
 
-        // 2. Check built-in merchant rules
+        // 2. Check built-in merchant rules — prefer the most specific (longest) keyword match
+        // so e.g. "amazon prime" (Subscriptions) wins over the broader "amazon" (Shopping) keyword.
+        var bestRule: MerchantRule? = null
+        var bestKeyword: String? = null
         for (rule in merchantRules) {
             for (kw in rule.keywords) {
-                if (text.contains(kw)) {
-                    val pretty = extractMerchantName(rawText, kw)
-                    return CategorizationResult(
-                        category = rule.category,
-                        cleanTitle = pretty,
-                        type = rule.defaultType,
-                        confidence = "high",
-                        needsReview = false,
-                        matchedKeyword = kw,
-                        identifier = identifier
-                    )
+                if (text.contains(kw) && (bestKeyword == null || kw.length > bestKeyword!!.length)) {
+                    bestRule = rule
+                    bestKeyword = kw
                 }
             }
+        }
+        if (bestRule != null && bestKeyword != null) {
+            val pretty = extractMerchantName(rawText, bestKeyword)
+            return CategorizationResult(
+                category = bestRule.category,
+                cleanTitle = pretty,
+                type = bestRule.defaultType,
+                confidence = "high",
+                needsReview = false,
+                matchedKeyword = bestKeyword,
+                identifier = identifier
+            )
         }
 
         // 3. Fallback salary check

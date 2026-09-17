@@ -4,6 +4,18 @@ All notable changes to **Money Tracker (Offline AI Expense Tracker & Financial I
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.4] - 2026-09-18
+
+### Fixed
+- **Correctness**: cash/wallet accounts with a zero starting balance and no income were showing a positive "Available Balance" equal to total spend instead of negative (`js/accounts.js`).
+- **Data integrity**: deleting an account reassigned its orphaned transactions to an arbitrary other account instead of a dedicated "Unassigned" bucket (`js/accounts.js`).
+- **Data safety**: cross-statement duplicate matching no longer auto-merges (permanently deletes a record) on a substring/overlapping UTR match — only an exact reference-number match auto-merges; overlapping matches now go to manual review at 90% confidence (`js/duplicateDetector.js`).
+- **Categorization**: fixed a rule-order bug where broader keywords (e.g. "amazon") matched before more specific ones (e.g. "amazon prime"), misclassifying subscriptions as shopping. Matching now prefers the longest/most specific keyword across all rules (`js/categorizer.js`, `CategorizerEngine.kt`).
+- **Security**: pinned the previously `@latest` Lucide icons CDN script to a fixed version and added Subresource Integrity (SRI) hashes to all CDN-loaded scripts (`index.html`).
+- **Android privacy**: disabled `allowBackup` so the local transactions database is no longer swept into Android's default cloud auto-backup.
+- **Android build hygiene**: removed the unused `release` build variant, which was signed with the debug key and unminified — the project only ever ships `assembleDebug` per its release workflow.
+- **Web reminder**: added a dismissible dashboard banner nudging users to export a backup if they haven't in 30+ days, since data lives only in browser storage.
+
 ## [1.1.3] - 2026-09-18
 
 ### Fixed & Improved

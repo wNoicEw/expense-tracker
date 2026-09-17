@@ -18,17 +18,17 @@
   <link rel="stylesheet" href="css/print.css?v=5">
 
   <!-- Core Offline Libraries -->
-  <script src="https://cdn.jsdelivr.net/npm/lucide@latest/dist/umd/lucide.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/lucide@1.47.0/dist/umd/lucide.js" integrity="sha384-L0vkqT/Xajy/BJR61WFLBDKJc60ZKKigF3gXZcWzQvDyEcwwCWK8vA3lcppKlbmE" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" integrity="sha384-9nhczxUqK87bcKHh20fSQcTGD4qq5GhayNYSYWqwBkINBhOfQLg/P5HG5lF1urn4" crossorigin="anonymous"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js" integrity="sha384-/1qUCSGwTur9vjf/z9lmu/eCUYbpOTgSjmpbMQZ1/CtX2v/WcAIKqRv+U1DUCG6e" crossorigin="anonymous"></script>
   <script>
     if (window.pdfjsLib) {
       pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
     }
   </script>
-  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js" integrity="sha384-vtjasyidUo0kW94K5MXDXntzOJpQgBKXmE7e2Ga4LG0skTTLeBi97eFAXsqewJjw" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js" integrity="sha384-D/t0ZMqQW31H3az8ktEiNb39wyKnS82iFY52QPACM+IjKW3jDUhyIgh2PApRqJZs" crossorigin="anonymous"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js" integrity="sha384-Yv5O+t3uE3hunW8uyrbpPW3iw6/5/Y7HitWJBLgqfMoA36NogMmy+8wWZMpn3HWc" crossorigin="anonymous"></script>
 </head>
 <body>
 
@@ -215,6 +215,29 @@
           <button class="btn btn-warning btn-sm" onclick="app.switchTab('review')">
             <i data-lucide="sparkles" style="width:14px; height:14px;"></i> Review &amp; Teach AI
           </button>
+        </div>
+
+        <!-- Backup Reminder Banner (Appears when data hasn't been exported recently) -->
+        <div class="review-banner" id="dashboardBackupBanner" style="display:none;">
+          <div class="review-banner-text">
+            <div class="review-banner-icon">
+              <i data-lucide="shield-alert" style="width:22px; height:22px;"></i>
+            </div>
+            <div>
+              <div style="font-weight:700; font-size:0.98rem; color:var(--text-main);" id="dashboardBackupBannerTitle">
+                Back Up Your Financial Data
+              </div>
+              <div style="font-size:0.82rem; color:var(--text-muted); margin-top:2px;">
+                Your data lives only in this browser. Export a backup so you never lose it if the browser data is cleared.
+              </div>
+            </div>
+          </div>
+          <div style="display:flex; gap:8px;">
+            <button class="btn btn-secondary btn-sm" onclick="app.dismissBackupReminder()">Remind Me Later</button>
+            <button class="btn btn-warning btn-sm" onclick="app.switchTab('reports')">
+              <i data-lucide="download" style="width:14px; height:14px;"></i> Export Backup
+            </button>
+          </div>
         </div>
 
         <!-- BENTO HERO ROW -->
