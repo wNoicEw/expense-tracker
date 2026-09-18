@@ -257,6 +257,16 @@
   margin-bottom: var(--space-xl);
 }
 
+/* Grid items default to min-width:auto, which stops them shrinking below the
+   intrinsic width of content like a chart canvas or wide table — forcing
+   the whole grid (and page) wider than the viewport. min-width:0 lets each
+   column actually shrink to its track, so the canvas/table can fit or fall
+   back to their own overflow-x:auto instead of the page scrolling sideways. */
+.dashboard-bento-col-left,
+.dashboard-bento-col-right {
+  min-width: 0;
+}
+
 @media (max-width: 1100px) {
   .dashboard-bento-grid {
     grid-template-columns: 1fr;
@@ -1435,6 +1445,7 @@ input[type="time"]::-webkit-calendar-picker-indicator {
   align-items: center;
   justify-content: space-between;
   gap: var(--space-md);
+  flex-wrap: wrap;
   box-shadow: 0 4px 20px rgba(245, 158, 11, 0.12);
   animation: fadeIn var(--transition-normal) forwards;
 }

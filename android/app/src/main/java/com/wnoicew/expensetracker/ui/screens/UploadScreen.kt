@@ -640,10 +640,12 @@ fun UploadScreen(
     if (showPasswordDialog && pendingPdfUri != null) {
         AlertDialog(
             onDismissRequest = {
-                showPasswordDialog = false
-                passwordInput = ""
-                passwordError = null
-                pendingPdfUri = null
+                if (!isUnlockingPdf) {
+                    showPasswordDialog = false
+                    passwordInput = ""
+                    passwordError = null
+                    pendingPdfUri = null
+                }
             },
             icon = {
                 Icon(
@@ -693,24 +695,28 @@ fun UploadScreen(
             },
             confirmButton = {
                 Button(
-                    onClick = {
-                        val stream = context.contentResolver.openInputStream(pendingPdfUri!!)
-                        if (stream != null) {
+                    onClick = onClick@{
+                        val uri = pendingPdfUri ?: return@onClick
+                        val fileName = pendingPdfFileName
+                        val password = passwordInput
+                        isUnlockingPdf = true
+                        coroutineScope.launch(Dispatchers.IO) {
+                            var stream: java.io.InputStream? = null
                             try {
-                                isUnlockingPdf = true
-                                val parsed = viewModel.parseStatementStream(
-                                    stream,
-                                    pendingPdfFileName,
-                                    password = passwordInput
-                                )
-                                stream.close()
-                                showPasswordDialog = false
-                                passwordInput = ""
-                                passwordError = null
-                                pendingPdfUri = null
-                                parseResultToPreview = parsed
+                                stream = context.contentResolver.openInputStream(uri)
+                                if (stream != null) {
+                                    val parsed = viewModel.parseStatementStream(
+                                        stream,
+                                        fileName,
+                                        password = password
+                                    )
+                                    showPasswordDialog = false
+                                    passwordInput = ""
+                                    passwordError = null
+                                    pendingPdfUri = null
+                                    parseResultToPreview = parsed
+                                }
                             } catch (e: com.wnoicew.expensetracker.data.engine.StatementParsingException) {
-                                stream.close()
                                 if (e.isPasswordProtected) {
                                     passwordError = if (e.isIncorrectPassword) "Incorrect password. Please try again." else e.detail
                                 } else {
@@ -718,10 +724,10 @@ fun UploadScreen(
                                     parsingError = e
                                 }
                             } catch (e: Exception) {
-                                stream.close()
                                 showPasswordDialog = false
                                 genericError = e.message ?: "Failed to unlock PDF."
                             } finally {
+                                stream?.close()
                                 isUnlockingPdf = false
                             }
                         }
@@ -746,7 +752,8 @@ fun UploadScreen(
                         passwordInput = ""
                         passwordError = null
                         pendingPdfUri = null
-                    }
+                    },
+                    enabled = !isUnlockingPdf
                 ) {
                     Text("Cancel")
                 }

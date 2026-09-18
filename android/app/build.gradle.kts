@@ -13,8 +13,8 @@ android {
         applicationId = "com.wnoicew.expensetracker"
         minSdk = 26
         targetSdk = 35
-        versionCode = 11
-        versionName = "1.3.2"
+        versionCode = 12
+        versionName = "1.3.3"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -46,7 +46,12 @@ android {
 
     applicationVariants.all {
         val variant = this
-        val vName = variant.versionName ?: "1.0.0"
+        // Only the debug variant is ever built/shipped by this project's release workflow
+        // (see AGENTS.md); registering this for release too would race both variants to
+        // overwrite the same ExpenseTracker.apk / versioned archive file.
+        if (variant.buildType.name != "debug") return@all
+
+        val vName = variant.versionName ?: "unknown"
         val capitalizedVariantName = variant.name.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
         val taskName = "copyApk$capitalizedVariantName"
 
@@ -89,8 +94,11 @@ android {
                                     a.name.compareTo(b.name)
                                 }
                             }).take(archivedApks.size - 10).forEach { oldApk ->
-                                println("  [APKs Folder] Pruned old fallback version: ${oldApk.name}")
-                                oldApk.delete()
+                                if (oldApk.delete()) {
+                                    println("  [APKs Folder] Pruned old fallback version: ${oldApk.name}")
+                                } else {
+                                    println("  [APKs Folder] WARNING: could not delete ${oldApk.name} (file locked or in use)")
+                                }
                             }
                         }
 

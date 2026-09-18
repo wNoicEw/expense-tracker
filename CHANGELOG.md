@@ -4,6 +4,23 @@ All notable changes to **Money Tracker (Offline AI Expense Tracker & Financial I
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.3] - 2026-09-18
+
+### Fixed
+- **Security (High)**: stored XSS in profile rename — a profile name was threaded through an inline `onclick="...'${name}'..."` string; HTML-escaping doesn't protect that context since the browser decodes entities before the JS parser sees them. A crafted profile name (e.g. `x'-alert(1)-'`) executed on click. `startEditProfile`/`cancelEditProfile` no longer take a name parameter at all — they look the profile up by id instead (`js/app.js`).
+- **Reliability (High, Android)**: the PDF password-retry path parsed statements synchronously on the UI thread, reintroducing the exact ANR the main upload path was already fixed for. Now runs on `Dispatchers.IO`, with the URI captured up front and Cancel/dismiss disabled while unlocking to close a use-after-cancel crash window (`UploadScreen.kt`).
+- **Build correctness (Medium)**: `build.gradle.kts`'s APK-copy/retention task was registered for both the debug and release variants despite the project only ever shipping debug — if both were ever built together they'd race to overwrite the same output files. Now scoped to the debug variant only; the retention pruning also no longer fails silently if a file can't be deleted.
+- **Accessibility (Medium)**: the 5 legacy modals (Add/Edit Transaction, Account, PDF Password, Profile Manager) had no `role="dialog"`, focus management, or Escape-to-close, unlike the calendar/timepicker popovers. All 5 now match that pattern — dialog semantics, focus-in on open, focus-restore on close, and a shared Escape handler. Fixed a regression this introduced where Escape would close a calendar/timepicker popover *and* the modal underneath it in one keystroke — the popover now consumes that Escape press first (`js/app.js`, `js/calendar.js`, `js/timepicker.js`, `index.html`).
+- **Responsive design (Medium)**: confirmed real horizontal overflow on mobile (375px viewport, 537px content). Root cause was a CSS Grid item defaulting to `min-width: auto`, so a Chart.js canvas forced the whole dashboard grid wider than the screen; fixed with `min-width: 0` on the grid columns plus `flex-wrap` on two button rows that had the same gap (`css/components.css`, `css/main.css`).
+- **Polish (Low)**: replaced two remaining decorative gradient-text instances (sidebar brand title, both themes) with the app's solid text color; added `prefers-reduced-motion` support app-wide.
+- **Android/Web parity**: two correctness fixes shipped web-only in v1.1.4 had not been ported to Android — cash/wallet accounts with a zero starting balance and no income showed a positive balance instead of negative, and cross-statement duplicate auto-merge accepted a substring UTR match instead of requiring an exact one. Both are now fixed identically on Android (`MainViewModel.kt`, `DuplicateDetectorEngine.kt`, `AccountsScreen.kt`).
+
+### Known gaps (Android vs. Web, not yet addressed)
+- No calendar month-view / day-ledger on the Transactions screen (Android is table-only).
+- No "back up your data" reminder banner on Android.
+- Android's native date/time pickers lack the web calendar/timepicker's "Clear" action and custom accent styling (functionally equivalent otherwise).
+- 371+ hardcoded hex colors across the web CSS vs. 14 design tokens — flagged as a separate, dedicated pass rather than a blind mechanical migration.
+
 ## [1.3.2] - 2026-09-18
 
 ### Fixed

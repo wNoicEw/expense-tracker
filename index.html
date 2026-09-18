@@ -13,8 +13,8 @@
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800;900&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   
   <!-- CSS Stylesheets -->
-  <link rel="stylesheet" href="css/main.css?v=7">
-  <link rel="stylesheet" href="css/components.css?v=7">
+  <link rel="stylesheet" href="css/main.css?v=9">
+  <link rel="stylesheet" href="css/components.css?v=9">
   <link rel="stylesheet" href="css/print.css?v=7">
 
   <!-- Core Offline Libraries -->
@@ -232,7 +232,7 @@
               </div>
             </div>
           </div>
-          <div style="display:flex; gap:8px;">
+          <div style="display:flex; gap:8px; flex-wrap:wrap;">
             <button class="btn btn-secondary btn-sm" onclick="app.dismissBackupReminder()">Remind Me Later</button>
             <button class="btn btn-warning btn-sm" onclick="app.switchTab('reports')">
               <i data-lucide="download" style="width:14px; height:14px;"></i> Export Backup
@@ -807,13 +807,13 @@
 
   <!-- ==================== MANUAL TRANSACTION ENTRY MODAL ==================== -->
   <div class="modal-overlay" id="manualTxnModal">
-    <div class="modal-content">
+    <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="manualTxnModalTitle" tabindex="-1">
       <div class="modal-header">
         <div style="display:flex; align-items:center; gap:8px;">
           <div style="width:32px; height:32px; border-radius:8px; background:rgba(59,130,246,0.2); color:#3b82f6; display:flex; align-items:center; justify-content:center;">
             <i data-lucide="plus-circle" style="width:18px; height:18px;"></i>
           </div>
-          <h3 style="font-size:1.15rem; font-weight:700;">Record Offline / Manual Transaction</h3>
+          <h3 id="manualTxnModalTitle" style="font-size:1.15rem; font-weight:700;">Record Offline / Manual Transaction</h3>
         </div>
         <button class="btn btn-ghost btn-sm btn-icon-only" id="btnCloseAddTxnModal">
           <i data-lucide="x" style="width:18px; height:18px;"></i>
@@ -925,13 +925,13 @@
 
   <!-- ==================== EDIT TRANSACTION MODAL ==================== -->
   <div class="modal-overlay" id="editTxnModal">
-    <div class="modal-content">
+    <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="editTxnModalTitle" tabindex="-1">
       <div class="modal-header">
         <div style="display:flex; align-items:center; gap:8px;">
           <div style="width:32px; height:32px; border-radius:8px; background:rgba(59,130,246,0.2); color:#3b82f6; display:flex; align-items:center; justify-content:center;">
             <i data-lucide="edit-3" style="width:18px; height:18px;"></i>
           </div>
-          <h3 style="font-size:1.15rem; font-weight:700;">Edit Transaction</h3>
+          <h3 id="editTxnModalTitle" style="font-size:1.15rem; font-weight:700;">Edit Transaction</h3>
         </div>
         <button class="btn btn-ghost btn-sm btn-icon-only" id="btnCloseEditTxnModal">
           <i data-lucide="x" style="width:18px; height:18px;"></i>
@@ -1044,7 +1044,7 @@
 
   <!-- ==================== ADD / EDIT ACCOUNT OR CARD MODAL ==================== -->
   <div class="modal-overlay" id="accountModal">
-    <div class="modal-content">
+    <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="accountModalTitle" tabindex="-1">
       <div class="modal-header">
         <div style="display:flex; align-items:center; gap:8px;">
           <div style="width:32px; height:32px; border-radius:8px; background:rgba(37,99,235,0.15); color:#2563eb; display:flex; align-items:center; justify-content:center;">
@@ -1131,14 +1131,14 @@
 
   <!-- PDF PASSWORD UNLOCK MODAL -->
   <div class="modal-overlay" id="pdfPasswordModal">
-    <div class="modal-content" style="max-width: 440px;">
+    <div class="modal-content" style="max-width: 440px;" role="dialog" aria-modal="true" aria-labelledby="pdfPasswordModalTitle" tabindex="-1">
       <div class="modal-header">
         <div style="display:flex; align-items:center; gap:10px;">
           <div style="width:36px; height:36px; border-radius:10px; background:rgba(99,102,241,0.15); display:flex; align-items:center; justify-content:center; color:#818cf8;">
             <i data-lucide="lock" style="width:20px; height:20px;"></i>
           </div>
           <div>
-            <h3 class="modal-title" style="margin:0; font-size:1.05rem;">Password-Protected PDF</h3>
+            <h3 id="pdfPasswordModalTitle" class="modal-title" style="margin:0; font-size:1.05rem;">Password-Protected PDF</h3>
             <span style="font-size:0.75rem; color:var(--text-muted);" id="pdfPasswordFileName">statement.pdf</span>
           </div>
         </div>
@@ -1189,7 +1189,7 @@
 
   <!-- PROFILE MANAGER MODAL -->
   <div class="modal-overlay" id="profileManagerModal">
-    <div class="pmm-sheet">
+    <div class="pmm-sheet" role="dialog" aria-modal="true" aria-labelledby="profileManagerModalTitle" tabindex="-1">
 
       <!-- Modal header with gradient accent -->
       <div class="pmm-header">
@@ -1198,7 +1198,7 @@
             <i data-lucide="users" style="width:18px;height:18px;"></i>
           </div>
           <div>
-            <div class="pmm-title">Profiles</div>
+            <div class="pmm-title" id="profileManagerModalTitle">Profiles</div>
             <div class="pmm-subtitle">Switch or manage your accounts</div>
           </div>
         </div>
@@ -1255,9 +1255,9 @@
   <script src="js/budgets.js?v=2"></script>
   <script src="js/charts.js?v=2"></script>
   <script src="js/export.js?v=2"></script>
-  <script src="js/calendar.js?v=2"></script>
-  <script src="js/timepicker.js?v=4"></script>
-  <script src="js/app.js?v=2"></script>
+  <script src="js/calendar.js?v=3"></script>
+  <script src="js/timepicker.js?v=5"></script>
+  <script src="js/app.js?v=4"></script>
 
 </body>
 </html>

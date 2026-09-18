@@ -474,6 +474,8 @@ class MoneyTrackerCalendar {
 
   handleKeyDown(e) {
     if (e.key === 'Escape' && this.activePopover) {
+      // Stop the modal underneath from also closing on this same Escape press.
+      e.stopImmediatePropagation();
       this.closeDatePicker();
     }
   }

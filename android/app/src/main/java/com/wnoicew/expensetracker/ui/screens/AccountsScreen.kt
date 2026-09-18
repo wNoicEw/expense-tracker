@@ -408,7 +408,7 @@ private fun AccountRowItem(
                         text = currencyFormat.format(item.computedBalance),
                         fontWeight = FontWeight.Bold,
                         fontSize = 15.sp,
-                        color = if (isCreditCard || (item.totalIncome == 0.0 && item.totalExpense > 0.0)) ExpenseRose else if (item.computedBalance >= 0) IncomeGreen else ExpenseRose
+                        color = if (isCreditCard) ExpenseRose else if (item.computedBalance >= 0) IncomeGreen else ExpenseRose
                     )
                     Text(
                         text = if (isCreditCard) "Due / Spent" else if (item.totalIncome > 0) "Balance" else "Spent",

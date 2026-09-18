@@ -17,6 +17,48 @@ class App {
     this.chartViewMode = 'cumulative';
     this.theme = 'dark';
     this.txnViewMode = 'table';
+    this._modalFocusReturn = new Map();
+  }
+
+  // --- MODAL ACCESSIBILITY (focus in on open, focus restore on close) ---
+  focusModal(modal) {
+    if (!modal) return;
+    this._modalFocusReturn.set(modal.id, document.activeElement);
+    const dialogEl = modal.querySelector('[role="dialog"]') || modal;
+    const focusable = dialogEl.querySelector('input, select, textarea, button, [tabindex]');
+    (focusable || dialogEl).focus();
+  }
+
+  restoreModalFocus(modal) {
+    if (!modal) return;
+    const returnEl = this._modalFocusReturn.get(modal.id);
+    this._modalFocusReturn.delete(modal.id);
+    if (returnEl && typeof returnEl.focus === 'function' && document.contains(returnEl)) {
+      returnEl.focus();
+    }
+  }
+
+  bindGlobalModalEscape() {
+    const modalCloseActions = {
+      manualTxnModal: () => document.getElementById('btnCloseAddTxnModal')?.click(),
+      editTxnModal: () => document.getElementById('btnCloseEditTxnModal')?.click(),
+      accountModal: () => this.closeAccountModal(),
+      pdfPasswordModal: () => this.closePdfPasswordModal(),
+      profileManagerModal: () => this.closeProfileModal()
+    };
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape') return;
+      // A calendar/timepicker popover open inside a modal should close on its own
+      // Escape first (their own handlers do that) — don't also close the modal underneath it.
+      if (window.calendarEngine?.activePopover || window.timePickerEngine?.activePopover) return;
+      for (const [id, closeFn] of Object.entries(modalCloseActions)) {
+        const modal = document.getElementById(id);
+        if (modal && modal.classList.contains('active')) {
+          closeFn();
+          break;
+        }
+      }
+    });
   }
 
   escape(str) {
@@ -80,6 +122,7 @@ class App {
       this.bindModalEvents();
       this.bindAccountModalEvents();
       this.bindProfileModalEvents();
+      this.bindGlobalModalEscape();
 
       // Initial Duplicate Scan
       await window.duplicateDetector.scanDatabase();
@@ -1300,6 +1343,7 @@ class App {
 
         modal.classList.add('active');
         if (window.lucide) lucide.createIcons();
+        this.focusModal(modal);
       });
     } else {
       if (title) title.textContent = 'Add Bank Account or Card';
@@ -1318,12 +1362,14 @@ class App {
 
       modal.classList.add('active');
       if (window.lucide) lucide.createIcons();
+      this.focusModal(modal);
     }
   }
 
   closeAccountModal() {
     const modal = document.getElementById('accountModal');
     if (modal) modal.classList.remove('active');
+    this.restoreModalFocus(modal);
   }
 
   async deleteAccount(accountId) {
@@ -1667,13 +1713,14 @@ class App {
     if (modal) modal.classList.add('active');
     if (window.lucide) window.lucide.createIcons();
     setTimeout(() => {
-      if (inputEl) inputEl.focus();
+      this.focusModal(modal);
     }, 150);
   }
 
   closePdfPasswordModal() {
     const modal = document.getElementById('pdfPasswordModal');
     if (modal) modal.classList.remove('active');
+    this.restoreModalFocus(modal);
     this.pendingPdfFile = null;
     const inputEl = document.getElementById('pdfPasswordInput');
     if (inputEl) inputEl.value = '';
@@ -1786,6 +1833,7 @@ class App {
     const closeModal = () => {
       if (modal) modal.classList.remove('active');
       if (window.calendarEngine) window.calendarEngine.closeDatePicker();
+      this.restoreModalFocus(modal);
     };
     if (closeBtn) closeBtn.addEventListener('click', closeModal);
     if (cancelBtn) cancelBtn.addEventListener('click', closeModal);
@@ -1856,6 +1904,7 @@ class App {
     const closeEditModal = () => {
       if (editModal) editModal.classList.remove('active');
       if (window.calendarEngine) window.calendarEngine.closeDatePicker();
+      this.restoreModalFocus(editModal);
     };
     if (closeEditBtn) closeEditBtn.addEventListener('click', closeEditModal);
     if (cancelEditBtn) cancelEditBtn.addEventListener('click', closeEditModal);
@@ -1957,6 +2006,7 @@ class App {
 
     modal.classList.add('active');
     if (window.lucide) lucide.createIcons();
+    this.focusModal(modal);
   }
 
   openAddTxnModal(prefillDate = null) {
@@ -2069,6 +2119,7 @@ class App {
     if (modal) {
       modal.classList.add('active');
       if (window.lucide) lucide.createIcons();
+      this.focusModal(modal);
     }
   }
 
@@ -2201,6 +2252,7 @@ class App {
     if (window.lucide) lucide.createIcons();
     requestAnimationFrame(() => {
       modal.classList.add('active');
+      this.focusModal(modal);
     });
   }
 
@@ -2208,6 +2260,7 @@ class App {
     const modal = document.getElementById('profileManagerModal');
     if (!modal) return;
     modal.classList.remove('active');
+    this.restoreModalFocus(modal);
   }
 
   renderProfileManagerList() {
@@ -2230,7 +2283,7 @@ class App {
           </div>
           <div class="profile-manager-actions">
             ${!isActive ? `<button class="btn btn-sm btn-secondary" onclick="window.profileManager.switchProfile('${p.id}')">Switch</button>` : ''}
-            <button class="btn btn-sm btn-ghost" style="color:var(--text-muted);" onclick="app.startEditProfile('${p.id}', '${this.escape(p.name)}')" title="Rename">
+            <button class="btn btn-sm btn-ghost" style="color:var(--text-muted);" onclick="app.startEditProfile('${p.id}')" title="Rename">
               <i data-lucide="pencil" style="width:14px;height:14px;"></i>
             </button>
             <button class="btn btn-sm btn-ghost" style="color:#ef4444;" onclick="app.deleteProfileFromManager('${p.id}')" title="Delete">
@@ -2286,10 +2339,11 @@ class App {
    * Switches a profile row in the manager modal into edit mode.
    * Replaces the name text with an input + Save / Cancel buttons.
    */
-  startEditProfile(id, currentName) {
+  startEditProfile(id) {
     const nameEl = document.getElementById(`profile-name-display-${id}`);
-    const avatarEl = document.getElementById(`profile-avatar-${id}`);
-    if (!nameEl) return;
+    const profile = window.profileManager.getProfiles().find(p => p.id === id);
+    if (!nameEl || !profile) return;
+    const currentName = profile.name;
 
     // Build inline editor — preserves the Active badge if present
     const isActive = nameEl.querySelector('.profile-active-badge') !== null;
@@ -2304,7 +2358,7 @@ class App {
           value="${this.escape(currentName)}"
           maxlength="32"
           autocomplete="off"
-          onkeydown="if(event.key==='Enter') app.saveProfileRename('${id}'); if(event.key==='Escape') app.cancelEditProfile('${id}', '${this.escape(currentName)}')"
+          onkeydown="if(event.key==='Enter') app.saveProfileRename('${id}'); if(event.key==='Escape') app.cancelEditProfile('${id}')"
         >
         ${activeBadge}
       </div>
@@ -2313,7 +2367,7 @@ class App {
         <button class="btn btn-sm btn-primary" style="font-size:0.75rem; padding:3px 10px;" onclick="app.saveProfileRename('${id}')">
           <i data-lucide="check" style="width:12px;height:12px;"></i> Save
         </button>
-        <button class="btn btn-sm btn-ghost" style="font-size:0.75rem; padding:3px 8px;" onclick="app.cancelEditProfile('${id}', '${this.escape(currentName)}')">
+        <button class="btn btn-sm btn-ghost" style="font-size:0.75rem; padding:3px 8px;" onclick="app.cancelEditProfile('${id}')">
           Cancel
         </button>
       </div>
@@ -2367,13 +2421,14 @@ class App {
   /**
    * Cancels editing and restores the original name text.
    */
-  cancelEditProfile(id, originalName) {
+  cancelEditProfile(id) {
     const nameEl = document.getElementById(`profile-name-display-${id}`);
-    if (!nameEl) return;
+    const profile = window.profileManager.getProfiles().find(p => p.id === id);
+    if (!nameEl || !profile) return;
     const active = window.profileManager.getActiveProfile();
     const isActive = active && active.id === id;
     nameEl.innerHTML = `
-      ${this.escape(originalName)}
+      ${this.escape(profile.name)}
       ${isActive ? '<span class="profile-active-badge">Active</span>' : ''}
     `;
     if (window.lucide) lucide.createIcons();

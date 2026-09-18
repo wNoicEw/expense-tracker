@@ -97,14 +97,24 @@ object DuplicateDetectorEngine {
         val narr1 = (t1.rawNarration + " " + t1.description).lowercase()
         val narr2 = (t2.rawNarration + " " + t2.description).lowercase()
 
-        val isUtrMatch = (ref1.length > 6 && ref2.length > 6 && (ref1 == ref2 || ref1.contains(ref2) || ref2.contains(ref1))) ||
+        // Exact UTR match only — safe to auto-merge (deletes a record) on this signal
+        val isExactUtrMatch = ref1.length > 6 && ref2.length > 6 && ref1 == ref2
+
+        // Overlapping/substring UTR match — send to manual review, never auto-merge
+        val isPartialUtrMatch = !isExactUtrMatch && (
+                (ref1.length > 6 && ref2.length > 6 && (ref1.contains(ref2) || ref2.contains(ref1))) ||
                 (ref1.length > 6 && narr2.contains(ref1)) ||
                 (ref2.length > 6 && narr1.contains(ref2))
+        )
 
         val isMerchantMatch = isSameMerchant(t1, t2)
 
-        if (isUtrMatch) {
+        if (isExactUtrMatch) {
             return MatchResult(true, 99, "Identical UTR / Reference on same date: ${t1.referenceNo}")
+        }
+
+        if (isPartialUtrMatch) {
+            return MatchResult(true, 90, "Overlapping UTR / Reference on same date: ${t1.referenceNo} / ${t2.referenceNo}")
         }
 
         if (isMerchantMatch) {

@@ -214,9 +214,7 @@ body::before {
   font-size: 1.15rem;
   font-weight: 700;
   letter-spacing: -0.02em;
-  background: linear-gradient(to right, #ffffff, #94a3b8);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
+  color: var(--text-main);
 }
 
 .brand-badge {
@@ -327,6 +325,7 @@ body::before {
   display: flex;
   align-items: center;
   gap: var(--space-sm);
+  flex-wrap: wrap;
 }
 
 /* Tab Panels */
@@ -391,12 +390,6 @@ body::before {
   border-bottom-color: #e2e8f0;
 }
 
-[data-theme="light"] .brand-text h1 {
-  background: linear-gradient(135deg, #0f172a 0%, #334155 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-}
-
 [data-theme="light"] .brand-badge {
   color: #047857;
   background: #ecfdf5;
@@ -451,4 +444,15 @@ body::before {
   background: #ffffff;
   border: 1px solid #e2e8f0;
   color: #0f172a;
+}
+
+/* Respect the OS-level "reduce motion" preference: state changes (modals
+   opening, popovers appearing) still happen, just without animated easing. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

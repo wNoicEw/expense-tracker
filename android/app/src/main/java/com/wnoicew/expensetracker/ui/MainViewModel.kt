@@ -117,13 +117,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val computedBalance = if (isCreditCard) {
                 if (outstandingDues > 0) outstandingDues else expense
             } else {
-                if (acc.balance != 0.0) {
-                    acc.balance + income - expense - transfersOut + transfersIn
-                } else if (income > 0) {
-                    income - expense - transfersOut + transfersIn
-                } else {
-                    expense // if statement has only debits/expenses, show total spent
-                }
+                acc.balance + income - expense - transfersOut + transfersIn
             }
 
             AccountWithMetrics(
