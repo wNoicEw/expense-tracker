@@ -20,7 +20,7 @@ The native Android app brings 100% feature parity with the browser application i
 - **Category Budgets & Health Scoring**: Visual progress allowances and real-time Financial Health Score (0–100).
 - **Direct APK Distribution**:
   - **Main Root (Always Latest)**: [**`ExpenseTracker.apk`**](ExpenseTracker.apk)
-  - **Version Archive**: [**`apks/`**](apks/) (`ExpenseTracker-v1.0.0.apk`, `ExpenseTracker-v1.1.0.apk`, `ExpenseTracker-v1.1.1.apk`, `ExpenseTracker-v1.1.2.apk`, `ExpenseTracker-v1.1.3.apk`, `ExpenseTracker-v1.1.4.apk`, `ExpenseTracker-v1.2.0.apk`, `ExpenseTracker-v1.2.1.apk`, `ExpenseTracker-v1.3.0.apk`, `ExpenseTracker-v1.3.1.apk`, `ExpenseTracker-v1.3.2.apk`)
+  - **Version Archive**: [**`apks/`**](apks/) (Last 10 emergency fallback versions: `v1.1.0`, `v1.1.1`, `v1.1.2`, `v1.1.3`, `v1.1.4`, `v1.2.0`, `v1.2.1`, `v1.3.0`, `v1.3.1`, `v1.3.2`)
 
 ---
 

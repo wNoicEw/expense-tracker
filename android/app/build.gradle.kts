@@ -66,9 +66,33 @@ android {
                         val rootApk = File(rootDir, "ExpenseTracker.apk")
                         apkFile.copyTo(rootApk, overwrite = true)
 
-                        // 2. Keep all versions in the apks folder
+                        // 2. Keep versioned APK in apks folder
                         val versionedApk = File(apksFolder, "ExpenseTracker-v${vName}.apk")
                         apkFile.copyTo(versionedApk, overwrite = true)
+
+                        // 3. Keep only the last 10 versions for emergency fallback
+                        val versionRegex = Regex("""ExpenseTracker-v(\d+)\.(\d+)\.(\d+)\.apk""")
+                        val archivedApks = apksFolder.listFiles { f -> f.isFile && versionRegex.matches(f.name) }
+                        if (archivedApks != null && archivedApks.size > 10) {
+                            archivedApks.sortedWith(Comparator { a, b ->
+                                val mA = versionRegex.matchEntire(a.name)
+                                val mB = versionRegex.matchEntire(b.name)
+                                if (mA != null && mB != null) {
+                                    val (majA, minA, patA) = mA.destructured
+                                    val (majB, minB, patB) = mB.destructured
+                                    val cMaj = majA.toInt().compareTo(majB.toInt())
+                                    if (cMaj != 0) return@Comparator cMaj
+                                    val cMin = minA.toInt().compareTo(minB.toInt())
+                                    if (cMin != 0) return@Comparator cMin
+                                    patA.toInt().compareTo(patB.toInt())
+                                } else {
+                                    a.name.compareTo(b.name)
+                                }
+                            }).take(archivedApks.size - 10).forEach { oldApk ->
+                                println("  [APKs Folder] Pruned old fallback version: ${oldApk.name}")
+                                oldApk.delete()
+                            }
+                        }
 
                         println("--------------------------------------------------")
                         println("APK Distribution updated successfully:")
