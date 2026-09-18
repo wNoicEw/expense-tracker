@@ -51,6 +51,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         prefs.edit().putBoolean("is_dark_mode", newTheme).apply()
     }
 
+    // Backup Reminder State & Persistence (Matching Web app's shouldShowBackupReminder / dismissBackupReminder)
+    private val backupPrefs = application.getSharedPreferences("backup_reminder_prefs", Context.MODE_PRIVATE)
+    private val backupStateVersion = MutableStateFlow(0)
+
+    fun dismissBackupReminder() {
+        val profileId = activeProfile.value?.id ?: return
+        val sevenDaysMs = 7L * 24 * 60 * 60 * 1000L
+        backupPrefs.edit().putLong("backupReminderDismissedUntil_$profileId", System.currentTimeMillis() + sevenDaysMs).apply()
+        backupStateVersion.value++
+    }
+
+    fun recordBackupCompleted() {
+        val profileId = activeProfile.value?.id ?: return
+        backupPrefs.edit().putLong("lastBackupAt_$profileId", System.currentTimeMillis()).apply()
+        backupStateVersion.value++
+    }
+
     // Dynamic Database DAO based on active profile
     @OptIn(ExperimentalCoroutinesApi::class)
     val activeDb: Flow<ExpenseTrackerDatabase?> = snapshotFlow { profileManager.activeProfile.value }
@@ -66,6 +83,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             if (db != null) db.transactionDao().getAllTransactions() else flowOf(emptyList())
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val shouldShowBackupReminder: StateFlow<Boolean> = combine(
+        transactions,
+        snapshotFlow { profileManager.activeProfile.value },
+        backupStateVersion
+    ) { txnList, profile, _ ->
+        if (txnList.isEmpty() || profile == null) {
+            false
+        } else {
+            val profileId = profile.id
+            val now = System.currentTimeMillis()
+            val dismissedUntil = backupPrefs.getLong("backupReminderDismissedUntil_$profileId", 0L)
+            if (now < dismissedUntil) {
+                false
+            } else {
+                val lastBackupAt = backupPrefs.getLong("lastBackupAt_$profileId", 0L)
+                val thirtyDaysMs = 30L * 24 * 60 * 60 * 1000L
+                (now - lastBackupAt) > thirtyDaysMs
+            }
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
     @OptIn(ExperimentalCoroutinesApi::class)
     val accounts: StateFlow<List<AccountEntity>> = activeDb
@@ -505,6 +543,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val txns = transactions.value
         val accs = accounts.value
         val r = rules.value
+        recordBackupCompleted()
         return ExportEngine.generateJsonBackup(profile.name, txns, accs, r)
     }
 
@@ -520,6 +559,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 if (data.transactions.isNotEmpty()) db.transactionDao().insertTransactions(data.transactions)
                 if (data.accounts.isNotEmpty()) db.accountDao().insertAccounts(data.accounts)
                 if (data.rules.isNotEmpty()) db.ruleDao().insertRules(data.rules)
+                recordBackupCompleted()
                 onComplete(true, "Restored ${data.transactions.size} transactions, ${data.accounts.size} accounts, and ${data.rules.size} rules.")
             } catch (e: Exception) {
                 onComplete(false, e.message ?: "Failed to parse backup JSON")

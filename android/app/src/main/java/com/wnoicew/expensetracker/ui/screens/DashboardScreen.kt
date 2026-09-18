@@ -74,7 +74,8 @@ fun DashboardScreen(
     onNavigateToAccounts: () -> Unit,
     onNavigateToReview: () -> Unit,
     onNavigateToUpload: () -> Unit,
-    onOpenAddTransaction: () -> Unit
+    onOpenAddTransaction: () -> Unit,
+    onNavigateToReports: () -> Unit = {}
 ) {
     val activeProfile by viewModel.activeProfile
     val isDarkMode by viewModel.isDarkMode
@@ -86,6 +87,7 @@ fun DashboardScreen(
     val transactions by viewModel.transactions.collectAsState()
     val accounts by viewModel.accounts.collectAsState()
     val needsReviewCount by viewModel.needsReviewCount.collectAsState()
+    val shouldShowBackupReminder by viewModel.shouldShowBackupReminder.collectAsState()
 
     var chartModeIndex by remember { mutableIntStateOf(0) } // 0: Cumulative, 1: Unified
     var chartRangeIndex by remember { mutableIntStateOf(1) } // 0: 7D, 1: 30D, 2: 3M, 3: 6M, 4: 1Y, 5: ALL
@@ -242,6 +244,99 @@ fun DashboardScreen(
                             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
                         ) {
                             Text("Review & Teach AI", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.Black)
+                        }
+                    }
+                }
+            }
+        }
+
+        // 2b. Apple HIG Backup Reminder Banner (Appears when local data has not been backed up recently)
+        if (shouldShowBackupReminder) {
+            item {
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = WarningAmber.copy(alpha = 0.12f),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, WarningAmber.copy(alpha = 0.35f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(WarningAmber.copy(alpha = 0.2f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Shield,
+                                    contentDescription = null,
+                                    tint = WarningAmber,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Back Up Your Financial Data",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = "Your data lives only on this device. Export a backup so you never lose it if app data is cleared.",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.End,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            TextButton(
+                                onClick = { viewModel.dismissBackupReminder() },
+                                modifier = Modifier.height(36.dp),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                            ) {
+                                Text(
+                                    text = "Remind Me Later",
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Button(
+                                onClick = onNavigateToReports,
+                                shape = RoundedCornerShape(10.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = WarningAmber),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                modifier = Modifier.height(36.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.FileDownload,
+                                    contentDescription = null,
+                                    tint = Color.Black,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = "Export Backup",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.Black
+                                )
+                            }
                         }
                     }
                 }

@@ -1,7 +1,7 @@
 # 💎 Money Tracker — Offline AI Expense Tracker & Financial Intelligence
 
-[![Version](https://img.shields.io/badge/version-1.3.3-10b981.svg?style=flat-square)](https://github.com/wNoicEw/expense-tracker/releases/tag/v1.3.3)
-[![Android](https://img.shields.io/badge/android-v1.3.3%20(SDK%2035)-3DDC84.svg?style=flat-square&logo=android&logoColor=white)](#-native-android-application-v133)
+[![Version](https://img.shields.io/badge/version-1.4.0-10b981.svg?style=flat-square)](https://github.com/wNoicEw/expense-tracker/releases/tag/v1.4.0)
+[![Android](https://img.shields.io/badge/android-v1.4.0%20(SDK%2035)-3DDC84.svg?style=flat-square&logo=android&logoColor=white)](#-native-android-application-v140)
 [![Privacy](https://img.shields.io/badge/privacy-100%25%20On--Device-6366f1.svg?style=flat-square)](#-privacy--security-guarantee)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg?style=flat-square)](LICENSE)
 
@@ -9,18 +9,20 @@ An executive-grade, **local-first financial intelligence suite** and offline exp
 
 ---
 
-## 📱 Native Android Application (v1.3.3)
+## 📱 Native Android Application (v1.4.0)
 
 The native Android app brings 100% feature parity with the browser application into a modern mobile experience:
 
 - **Apple Human Interface Guidelines (HIG) Design**: Translucent glass surfaces (`HigGlassCard`), iOS-style spring sliding segmented controls (`HigSegmentedControl`), Inset Group containers (`HigInsetGroup`), and Apple Wallet card carousels.
+- **Financial Calendar Month-View & Interactive Day-Ledger**: Full calendar grid with monthly inflow/outflow cards, touch-optimized day cells, income/expense indicator pills, and an interactive day-ledger with a 1-tap "Add for this Date" shortcut.
+- **On-Device Backup Reminder Banner**: Proactive Apple HIG backup banner alerting the user when local data hasn't been backed up in the last 30 days.
 - **Universal Statement CSV Importer**: Ingest bank & UPI CSV statements (HDFC, SBI, ICICI, Axis, GPay, PhonePe, Paytm, CRED) directly on-device.
 - **Cross-Statement Duplicate Resolver**: 99% UTR reference matching and ±24h date-proximity scoring with 1-tap "Merge & Enrich".
 - **Dynamic Rule Engine**: Automatic UPI handle stripping, 12 built-in financial categories, and retroactive ledger reclassification.
 - **Category Budgets & Health Scoring**: Visual progress allowances and real-time Financial Health Score (0–100).
 - **Direct APK Distribution**:
   - **Main Root (Always Latest)**: [**`ExpenseTracker.apk`**](ExpenseTracker.apk)
-  - **Version Archive**: [**`apks/`**](apks/) (Last 10 emergency fallback versions: `v1.1.1`, `v1.1.2`, `v1.1.3`, `v1.1.4`, `v1.2.0`, `v1.2.1`, `v1.3.0`, `v1.3.1`, `v1.3.2`, `v1.3.3`)
+  - **Version Archive**: [**`apks/`**](apks/) (Last 10 emergency fallback versions: `v1.1.2`, `v1.1.3`, `v1.1.4`, `v1.2.0`, `v1.2.1`, `v1.3.0`, `v1.3.1`, `v1.3.2`, `v1.3.3`, `v1.4.0`)
 
 ---
 

@@ -4,6 +4,21 @@ All notable changes to **Money Tracker (Offline AI Expense Tracker & Financial I
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-09-18
+
+### Added
+- **Android Calendar Month-View & Day-Ledger (`CalendarMonthView.kt`, `TransactionsScreen.kt`)**:
+  - Brought full feature parity to Android for the financial calendar month-view and interactive day-ledger, styled with Apple Human Interface Guidelines (HIG) and `HigGlassCard`.
+  - **Sliding Pill View Switcher**: Toggles between "List View" and "Calendar Month" via `HigSegmentedControl`.
+  - **Monthly Financial Header**: Displays Total Inflow, Total Outflow, and Net Cashflow summary cards with high-contrast semantic typography (`IncomeGreen`, `ExpenseRose`). Includes quick `<` / `Today` / `>` month navigation and interactive Month/Year picker dialog.
+  - **7-Column Month Grid**: Accessible day cells (≥44dp touch targets) displaying day numbers, today ring, selection highlight, and transaction badges/indicators (income, expense, count).
+  - **Interactive Day-Ledger**: Shows all transactions for any tapped date in an Apple HIG grouped card (`HigInsetGroup`) with day totals and a 1-tap "Add for this Date" shortcut that pre-populates the transaction sheet with the selected date.
+- **Android Backup-Reminder Banner (`DashboardScreen.kt`, `MainViewModel.kt`)**:
+  - Implemented the Apple HIG backup reminder banner on the Android dashboard, matching the web application's rules.
+  - Automatically alerts the user if financial data has not been backed up in the last 30 days (or never) while transactions exist.
+  - Features "Remind Me Later" (snoozes the banner for 7 days via persistent preferences) and "Export Backup" (navigates directly to the Reports & Exports hub).
+  - Automatically records backup completion upon exporting or restoring JSON backups.
+
 ## [1.3.3] - 2026-09-18
 
 ### Fixed
@@ -16,8 +31,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **Android/Web parity**: two correctness fixes shipped web-only in v1.1.4 had not been ported to Android — cash/wallet accounts with a zero starting balance and no income showed a positive balance instead of negative, and cross-statement duplicate auto-merge accepted a substring UTR match instead of requiring an exact one. Both are now fixed identically on Android (`MainViewModel.kt`, `DuplicateDetectorEngine.kt`, `AccountsScreen.kt`).
 
 ### Known gaps (Android vs. Web, not yet addressed)
-- No calendar month-view / day-ledger on the Transactions screen (Android is table-only).
-- No "back up your data" reminder banner on Android.
 - Android's native date/time pickers lack the web calendar/timepicker's "Clear" action and custom accent styling (functionally equivalent otherwise).
 - 371+ hardcoded hex colors across the web CSS vs. 14 design tokens — flagged as a separate, dedicated pass rather than a blind mechanical migration.
 

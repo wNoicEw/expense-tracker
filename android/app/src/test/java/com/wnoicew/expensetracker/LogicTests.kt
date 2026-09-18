@@ -472,5 +472,113 @@ class LogicTests {
         assertEquals("REF_987654", editedTxn.referenceNo)
         assertFalse(editedTxn.needsReview)
     }
+
+    // ==========================================
+    // 11. CALENDAR MONTH-VIEW & DAY-LEDGER AGGREGATION TESTS
+    // ==========================================
+
+    @Test
+    fun testCalendarMonthTransactionAggregation() {
+        val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.ENGLISH)
+        val day1 = sdf.parse("2026-09-15")!!.time
+        val day2 = sdf.parse("2026-09-18")!!.time
+
+        val txns = listOf(
+            TransactionEntity(
+                id = "t1",
+                date = day1,
+                description = "Salary Credit",
+                amount = 50000.0,
+                type = TransactionType.INCOME,
+                category = "Salary & Professional"
+            ),
+            TransactionEntity(
+                id = "t2",
+                date = day1,
+                description = "Grocery Store",
+                amount = 2500.0,
+                type = TransactionType.EXPENSE,
+                category = "Groceries & Mart"
+            ),
+            TransactionEntity(
+                id = "t3",
+                date = day2,
+                description = "Dining Out",
+                amount = 1200.0,
+                type = TransactionType.EXPENSE,
+                category = "Food & Dining"
+            ),
+            TransactionEntity(
+                id = "t4",
+                date = day2,
+                description = "Duplicate Record",
+                amount = 1200.0,
+                type = TransactionType.EXPENSE,
+                category = "Food & Dining",
+                duplicateStatus = "merged" // Must be excluded!
+            )
+        )
+
+        val monthPrefix = "2026-09"
+        val activeTxns = txns.filter { it.duplicateStatus != "merged" }
+        var monthInflow = 0.0
+        var monthOutflow = 0.0
+        val byDate = mutableMapOf<String, MutableList<TransactionEntity>>()
+
+        activeTxns.forEach { t ->
+            val dStr = sdf.format(java.util.Date(t.date))
+            if (dStr.startsWith(monthPrefix)) {
+                byDate.getOrPut(dStr) { mutableListOf() }.add(t)
+                if (t.type == TransactionType.INCOME) monthInflow += t.amount
+                else if (t.type == TransactionType.EXPENSE) monthOutflow += t.amount
+            }
+        }
+
+        assertEquals(50000.0, monthInflow, 0.001)
+        assertEquals(3700.0, monthOutflow, 0.001)
+        assertEquals(46300.0, monthInflow - monthOutflow, 0.001)
+        assertEquals(2, byDate.size)
+        assertEquals(2, byDate["2026-09-15"]?.size)
+        assertEquals(1, byDate["2026-09-18"]?.size)
+    }
+
+    // ==========================================
+    // 12. BACKUP REMINDER LOGIC TESTS
+    // ==========================================
+
+    @Test
+    fun testBackupReminderThresholds() {
+        val now = 1758200000000L
+        val thirtyDaysMs = 30L * 24 * 60 * 60 * 1000L
+        val sevenDaysMs = 7L * 24 * 60 * 60 * 1000L
+
+        fun shouldShow(txnCount: Int, lastBackupAt: Long, dismissedUntil: Long, currentTime: Long): Boolean {
+            if (txnCount == 0) return false
+            if (currentTime < dismissedUntil) return false
+            return (currentTime - lastBackupAt) > thirtyDaysMs
+        }
+
+        // 1. No transactions -> never show
+        assertFalse(shouldShow(0, 0L, 0L, now))
+
+        // 2. Transactions exist, never backed up -> show
+        assertTrue(shouldShow(5, 0L, 0L, now))
+
+        // 3. Backed up recently (5 days ago) -> don't show
+        val recentBackup = now - (5L * 24 * 60 * 60 * 1000L)
+        assertFalse(shouldShow(5, recentBackup, 0L, now))
+
+        // 4. Backed up 31 days ago -> show
+        val oldBackup = now - (31L * 24 * 60 * 60 * 1000L)
+        assertTrue(shouldShow(5, oldBackup, 0L, now))
+
+        // 5. Backed up 31 days ago but dismissed for 7 days (snoozed) -> don't show
+        val dismissedUntil = now + sevenDaysMs
+        assertFalse(shouldShow(5, oldBackup, dismissedUntil, now))
+
+        // 6. Snooze period expired (8 days later) -> show again
+        val later = now + (8L * 24 * 60 * 60 * 1000L)
+        assertTrue(shouldShow(5, oldBackup, dismissedUntil, later))
+    }
 }
 

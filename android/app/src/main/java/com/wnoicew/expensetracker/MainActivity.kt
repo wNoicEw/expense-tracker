@@ -231,7 +231,8 @@ fun MainAppRoot(viewModel: MainViewModel) {
                                 onNavigateToAccounts = { activeSubScreen = SubScreen.ACCOUNTS },
                                 onNavigateToReview = { navigateToTab(BottomTab.REVIEW) },
                                 onNavigateToUpload = { navigateToTab(BottomTab.UPLOAD) },
-                                onOpenAddTransaction = { showAddTxnSheet = true }
+                                onOpenAddTransaction = { showAddTxnSheet = true },
+                                onNavigateToReports = { activeSubScreen = SubScreen.REPORTS }
                             )
                             BottomTab.TRANSACTIONS -> TransactionsScreen(
                                 viewModel = viewModel

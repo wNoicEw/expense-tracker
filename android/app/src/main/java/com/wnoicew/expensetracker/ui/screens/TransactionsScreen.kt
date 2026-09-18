@@ -31,6 +31,7 @@ import com.wnoicew.expensetracker.data.model.TransactionEntity
 import com.wnoicew.expensetracker.data.model.TransactionType
 import com.wnoicew.expensetracker.ui.ALL_CATEGORIES
 import com.wnoicew.expensetracker.ui.MainViewModel
+import com.wnoicew.expensetracker.ui.components.CalendarMonthView
 import com.wnoicew.expensetracker.ui.components.HigGlassCard
 import com.wnoicew.expensetracker.ui.components.HigInsetGroup
 import com.wnoicew.expensetracker.ui.components.HigSegmentedControl
@@ -58,12 +59,17 @@ fun TransactionsScreen(
     var filterTypeIndex by remember { mutableIntStateOf(0) } // 0: All, 1: Expenses, 2: Income, 3: Transfers, 4: Review
     var selectedCategoryFilter by remember { mutableStateOf<String?>(null) }
     var selectedAccountFilter by remember { mutableStateOf<String?>(null) }
+    var viewModeIndex by remember { mutableIntStateOf(0) } // 0: List, 1: Calendar
+    var prefillDateMillis by remember { mutableStateOf<Long?>(null) }
 
     var showAddSheet by remember { mutableStateOf(false) }
     var selectedTxnForDetail by remember { mutableStateOf<TransactionEntity?>(null) }
 
     BackHandler(enabled = showAddSheet || selectedTxnForDetail != null) {
-        if (showAddSheet) showAddSheet = false
+        if (showAddSheet) {
+            showAddSheet = false
+            prefillDateMillis = null
+        }
         if (selectedTxnForDetail != null) selectedTxnForDetail = null
     }
 
@@ -95,7 +101,10 @@ fun TransactionsScreen(
     Scaffold(
         floatingActionButton = {
             FloatingActionButton(
-                onClick = { showAddSheet = true },
+                onClick = {
+                    prefillDateMillis = null
+                    showAddSheet = true
+                },
                 containerColor = PrimaryBlue,
                 contentColor = Color.White,
                 shape = RoundedCornerShape(18.dp)
@@ -150,62 +159,64 @@ fun TransactionsScreen(
                 }
             }
 
-            // Search Bar
-            item {
-                OutlinedTextField(
-                    value = searchQuery,
-                    onValueChange = { searchQuery = it },
-                    placeholder = { Text("Search by merchant, UTR, narration, notes...", fontSize = 14.sp) },
-                    leadingIcon = {
-                        Icon(Icons.Default.Search, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                    },
-                    trailingIcon = {
-                        if (searchQuery.isNotEmpty()) {
-                            IconButton(onClick = { searchQuery = "" }) {
-                                Icon(Icons.Default.Clear, contentDescription = "Clear")
-                            }
-                        }
-                    },
-                    singleLine = true,
-                    shape = RoundedCornerShape(14.dp),
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
-
-            // Type Filter Segmented Control (All, Expenses, Income, Transfers, Review)
+            // View Mode Switcher (List View vs Calendar Month)
             item {
                 HigSegmentedControl(
-                    items = listOf("All", "Expenses", "Income", "Transfers", "Review (${needsReviewCount})"),
-                    selectedIndex = filterTypeIndex,
-                    onItemSelected = { filterTypeIndex = it }
+                    items = listOf("List View", "Calendar Month"),
+                    selectedIndex = viewModeIndex,
+                    onItemSelected = { viewModeIndex = it }
                 )
             }
 
-            // Category Chips Row
-            item {
-                LazyRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    contentPadding = PaddingValues(vertical = 2.dp)
-                ) {
-                    item {
-                        FilterChip(
-                            selected = selectedCategoryFilter == null,
-                            onClick = { selectedCategoryFilter = null },
-                            label = { Text("All Categories") }
-                        )
-                    }
-                    items(ALL_CATEGORIES) { cat ->
-                        FilterChip(
-                            selected = selectedCategoryFilter == cat,
-                            onClick = { selectedCategoryFilter = if (selectedCategoryFilter == cat) null else cat },
-                            label = { Text(cat) }
-                        )
-                    }
+            if (viewModeIndex == 1) {
+                // Calendar Month-View and Interactive Day-Ledger
+                item {
+                    CalendarMonthView(
+                        transactions = transactions,
+                        currencyFormat = currencyFormat,
+                        onSelectTransaction = { selectedTxnForDetail = it },
+                        onAddTransactionForDate = { dateStr ->
+                            val parsed = try {
+                                SimpleDateFormat("yyyy-MM-dd", Locale.ENGLISH).parse(dateStr)
+                            } catch (e: Exception) { null }
+                            prefillDateMillis = parsed?.time ?: System.currentTimeMillis()
+                            showAddSheet = true
+                        }
+                    )
                 }
-            }
+            } else {
+                // Search Bar
+                item {
+                    OutlinedTextField(
+                        value = searchQuery,
+                        onValueChange = { searchQuery = it },
+                        placeholder = { Text("Search by merchant, UTR, narration, notes...", fontSize = 14.sp) },
+                        leadingIcon = {
+                            Icon(Icons.Default.Search, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        },
+                        trailingIcon = {
+                            if (searchQuery.isNotEmpty()) {
+                                IconButton(onClick = { searchQuery = "" }) {
+                                    Icon(Icons.Default.Clear, contentDescription = "Clear")
+                                }
+                            }
+                        },
+                        singleLine = true,
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
 
-            // Account Filter Chips (if accounts exist)
-            if (accounts.isNotEmpty()) {
+                // Type Filter Segmented Control (All, Expenses, Income, Transfers, Review)
+                item {
+                    HigSegmentedControl(
+                        items = listOf("All", "Expenses", "Income", "Transfers", "Review (${needsReviewCount})"),
+                        selectedIndex = filterTypeIndex,
+                        onItemSelected = { filterTypeIndex = it }
+                    )
+                }
+
+                // Category Chips Row
                 item {
                     LazyRow(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -213,71 +224,96 @@ fun TransactionsScreen(
                     ) {
                         item {
                             FilterChip(
-                                selected = selectedAccountFilter == null,
-                                onClick = { selectedAccountFilter = null },
-                                label = { Text("All Accounts") }
+                                selected = selectedCategoryFilter == null,
+                                onClick = { selectedCategoryFilter = null },
+                                label = { Text("All Categories") }
                             )
                         }
-                        items(accounts) { acc ->
+                        items(ALL_CATEGORIES) { cat ->
                             FilterChip(
-                                selected = selectedAccountFilter == acc.name,
-                                onClick = { selectedAccountFilter = if (selectedAccountFilter == acc.name) null else acc.name },
-                                label = { Text(acc.name) }
+                                selected = selectedCategoryFilter == cat,
+                                onClick = { selectedCategoryFilter = if (selectedCategoryFilter == cat) null else cat },
+                                label = { Text(cat) }
                             )
                         }
                     }
                 }
-            }
 
-            if (filteredList.isEmpty()) {
-                item {
-                    HigGlassCard(modifier = Modifier.fillMaxWidth()) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(24.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally
+                // Account Filter Chips (if accounts exist)
+                if (accounts.isNotEmpty()) {
+                    item {
+                        LazyRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            contentPadding = PaddingValues(vertical = 2.dp)
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.Receipt,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
-                                modifier = Modifier.size(48.dp)
-                            )
-                            Spacer(modifier = Modifier.height(10.dp))
-                            Text(
-                                text = if (searchQuery.isEmpty()) "No transactions found" else "No matching transactions",
-                                fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            Text(
-                                text = "Upload statements in Upload tab or tap + to record manually.",
-                                fontSize = 13.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(top = 4.dp)
-                            )
+                            item {
+                                FilterChip(
+                                    selected = selectedAccountFilter == null,
+                                    onClick = { selectedAccountFilter = null },
+                                    label = { Text("All Accounts") }
+                                )
+                            }
+                            items(accounts) { acc ->
+                                FilterChip(
+                                    selected = selectedAccountFilter == acc.name,
+                                    onClick = { selectedAccountFilter = if (selectedAccountFilter == acc.name) null else acc.name },
+                                    label = { Text(acc.name) }
+                                )
+                            }
                         }
                     }
                 }
-            } else {
-                itemsIndexed(filteredList, key = { _, txn -> txn.id }) { index, txn ->
-                    val shape = when {
-                        filteredList.size == 1 -> RoundedCornerShape(16.dp)
-                        index == 0 -> RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
-                        index == filteredList.lastIndex -> RoundedCornerShape(bottomStart = 16.dp, bottomEnd = 16.dp)
-                        else -> RoundedCornerShape(0.dp)
+
+                if (filteredList.isEmpty()) {
+                    item {
+                        HigGlassCard(modifier = Modifier.fillMaxWidth()) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(24.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Receipt,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                                    modifier = Modifier.size(48.dp)
+                                )
+                                Spacer(modifier = Modifier.height(10.dp))
+                                Text(
+                                    text = if (searchQuery.isEmpty()) "No transactions found" else "No matching transactions",
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = "Upload statements in Upload tab or tap + to record manually.",
+                                    fontSize = 13.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(top = 4.dp)
+                                )
+                            }
+                        }
                     }
-                    Surface(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = shape,
-                        color = MaterialTheme.colorScheme.surface
-                    ) {
-                        Box(modifier = Modifier.clickable { selectedTxnForDetail = txn }) {
-                            TransactionRowItem(
-                                transaction = txn,
-                                currencyFormat = currencyFormat,
-                                showDivider = index < filteredList.size - 1
-                            )
+                } else {
+                    itemsIndexed(filteredList, key = { _, txn -> txn.id }) { index, txn ->
+                        val shape = when {
+                            filteredList.size == 1 -> RoundedCornerShape(16.dp)
+                            index == 0 -> RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
+                            index == filteredList.lastIndex -> RoundedCornerShape(bottomStart = 16.dp, bottomEnd = 16.dp)
+                            else -> RoundedCornerShape(0.dp)
+                        }
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = shape,
+                            color = MaterialTheme.colorScheme.surface
+                        ) {
+                            Box(modifier = Modifier.clickable { selectedTxnForDetail = txn }) {
+                                TransactionRowItem(
+                                    transaction = txn,
+                                    currencyFormat = currencyFormat,
+                                    showDivider = index < filteredList.size - 1
+                                )
+                            }
                         }
                     }
                 }
@@ -288,7 +324,11 @@ fun TransactionsScreen(
         if (showAddSheet) {
             AddTransactionBottomSheet(
                 accounts = accounts.map { it.name },
-                onDismiss = { showAddSheet = false },
+                initialDateMillis = prefillDateMillis,
+                onDismiss = {
+                    showAddSheet = false
+                    prefillDateMillis = null
+                },
                 onAdd = { desc, amount, type, category, accountName, mode, notes, date ->
                     viewModel.addTransaction(
                         description = desc,
@@ -301,6 +341,7 @@ fun TransactionsScreen(
                         date = date
                     )
                     showAddSheet = false
+                    prefillDateMillis = null
                 }
             )
         }
@@ -338,7 +379,8 @@ fun TransactionsScreen(
 fun AddTransactionBottomSheet(
     accounts: List<String>,
     onDismiss: () -> Unit,
-    onAdd: (String, Double, TransactionType, String, String, String, String, Long) -> Unit
+    onAdd: (String, Double, TransactionType, String, String, String, String, Long) -> Unit,
+    initialDateMillis: Long? = null
 ) {
     val context = LocalContext.current
     var description by remember { mutableStateOf("") }
@@ -348,7 +390,9 @@ fun AddTransactionBottomSheet(
     var selectedAccount by remember { mutableStateOf(accounts.firstOrNull() ?: "Main Account") }
     var paymentMode by remember { mutableStateOf("UPI") }
     var notes by remember { mutableStateOf("") }
-    var selectedTimestamp by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    var selectedTimestamp by remember(initialDateMillis) {
+        mutableLongStateOf(initialDateMillis ?: System.currentTimeMillis())
+    }
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
     val dateDisplayFormat = remember { SimpleDateFormat("dd MMM yyyy", Locale.getDefault()) }
