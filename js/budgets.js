@@ -14,12 +14,15 @@ class BudgetsManager {
     const categories = await window.db.getAll('categories');
     const transactions = await window.db.getAll('transactions');
 
-    const rangeStart = daysBack ? Date.now() - daysBack * 24 * 60 * 60 * 1000 : null;
+    // Rolling window = today plus the previous (daysBack - 1) local calendar days, matching the charts
+    const rangeStart = daysBack
+      ? new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate() - daysBack + 1).getTime()
+      : null;
 
     // Filter transactions for the rolling window (if given) or the specified month & year (ignoring merged duplicates)
     const monthTxns = transactions.filter(t => {
       if (t.duplicateStatus === 'merged') return false;
-      const d = new Date(t.date);
+      const d = DateUtil.parseLocal(t.date);
       if (rangeStart !== null) return d.getTime() >= rangeStart;
       return d.getFullYear() === year && d.getMonth() === month;
     });

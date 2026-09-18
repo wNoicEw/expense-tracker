@@ -20,7 +20,17 @@ class Database {
 
   async init() {
     return new Promise((resolve, reject) => {
-      const request = indexedDB.open(DB_NAME, DB_VERSION);
+      if (typeof indexedDB === 'undefined') {
+        reject(new Error('IndexedDB is not available in this browser context.'));
+        return;
+      }
+      let request;
+      try {
+        request = indexedDB.open(DB_NAME, DB_VERSION);
+      } catch (err) {
+        reject(err);
+        return;
+      }
 
       request.onupgradeneeded = (event) => {
         const db = event.target.result;
@@ -65,14 +75,24 @@ class Database {
 
       request.onsuccess = async (event) => {
         this.db = event.target.result;
+        // Let another tab upgrade or delete this database instead of blocking it forever
+        this.db.onversionchange = () => this.db.close();
         this.isReady = true;
-        await this.seedDefaultCategories();
-        resolve(this);
+        try {
+          await this.seedDefaultCategories();
+          resolve(this);
+        } catch (err) {
+          reject(err);
+        }
+      };
+
+      request.onblocked = () => {
+        reject(new Error('The local database is locked by another open tab. Close other Money Tracker tabs and try again.'));
       };
 
       request.onerror = (event) => {
         console.error('IndexedDB init error:', event.target.error);
-        reject(event.target.error);
+        reject(event.target.error || new Error('IndexedDB is unavailable in this browser context.'));
       };
     });
   }
@@ -150,6 +170,36 @@ class Database {
       items.forEach(item => store.put(item));
       tx.oncomplete = () => resolve(items.length);
       tx.onerror = () => reject(tx.error);
+    });
+  }
+
+  // Puts and deletes in one IndexedDB transaction, so a crash can't leave a merge half-applied.
+  async batchWrite(storeName, putItems = [], deleteIds = []) {
+    if (putItems.length === 0 && deleteIds.length === 0) return 0;
+    return new Promise((resolve, reject) => {
+      const tx = this.db.transaction(storeName, 'readwrite');
+      const store = tx.objectStore(storeName);
+      putItems.forEach(item => store.put(item));
+      deleteIds.forEach(id => store.delete(id));
+      tx.oncomplete = () => resolve(putItems.length + deleteIds.length);
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error);
+    });
+  }
+
+  // Replace the contents of several stores atomically (used by backup restore): all-or-nothing.
+  async replaceStores(data) {
+    const names = Object.keys(data).filter(n => this.db.objectStoreNames.contains(n));
+    return new Promise((resolve, reject) => {
+      const tx = this.db.transaction(names, 'readwrite');
+      names.forEach(name => {
+        const store = tx.objectStore(name);
+        store.clear();
+        (data[name] || []).forEach(item => store.put(item));
+      });
+      tx.oncomplete = () => resolve(names.length);
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error);
     });
   }
 

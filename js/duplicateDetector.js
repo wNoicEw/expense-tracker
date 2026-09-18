@@ -56,7 +56,6 @@ class DuplicateDetector {
     // Clean up any legacy merged records so only one record is retained
     for (const t of transactions) {
       if (t.duplicateStatus === 'merged') {
-        await window.db.delete('transactions', t.id);
         deletedIds.add(t.id);
       }
     }
@@ -94,8 +93,7 @@ class DuplicateDetector {
               t1.duplicateReason = '';
               changedIds.add(t1.id);
 
-              // Completely delete t2 from DB
-              await window.db.delete('transactions', t2.id);
+              // t2 is removed in the same transaction as t1's enrichment (see batchWrite below)
               deletedIds.add(t2.id);
             } else {
               // < 99% Confidence: Give to user in Duplicate Resolver for manual review
@@ -128,9 +126,7 @@ class DuplicateDetector {
 
     // Save only the transactions whose duplicate-related fields actually changed (excluding deleted records)
     const finalTransactions = updatedTransactions.filter(t => !deletedIds.has(t.id) && changedIds.has(t.id));
-    if (finalTransactions.length > 0) {
-      await window.db.putBatch('transactions', finalTransactions);
-    }
+    await window.db.batchWrite('transactions', finalTransactions, Array.from(deletedIds));
     return {
       duplicatesFound: detectedPairs.length,
       pairs: detectedPairs
@@ -146,6 +142,11 @@ class DuplicateDetector {
 
     // 1. Date Check: MUST be on the exact same calendar day (YYYY-MM-DD)
     if (!this.isSameDate(t1.date, t2.date)) {
+      return { isMatch: false, confidence: 0 };
+    }
+
+    // Opposite directions (a debit and a credit) are never the same transaction
+    if (t1.type && t2.type && t1.type !== t2.type) {
       return { isMatch: false, confidence: 0 };
     }
 
@@ -174,10 +175,14 @@ class DuplicateDetector {
 
     const isMerchantMatch = this.isSameMerchant(t1, t2);
 
+    // A matching UTR on two 'transfer' legs is usually the two sides of one own-account move,
+    // not a duplicate: never auto-delete those, leave them for manual review.
+    const involvesTransfer = t1.type === 'transfer' || t2.type === 'transfer';
+
     if (isExactUtrMatch) {
       return {
         isMatch: true,
-        confidence: 99,
+        confidence: involvesTransfer ? 90 : 99,
         reason: `Identical UTR / Reference No on same date: ${t1.referenceNo}`
       };
     }
@@ -207,7 +212,7 @@ class DuplicateDetector {
     const normalize = (s) => {
       if (typeof s === 'string' && /^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
       const d = new Date(s);
-      if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10);
+      if (!isNaN(d.getTime())) return [d.getFullYear(), String(d.getMonth() + 1).padStart(2, '0'), String(d.getDate()).padStart(2, '0')].join('-');
       return String(s).trim();
     };
     return normalize(d1Str) === normalize(d2Str);
@@ -224,9 +229,15 @@ class DuplicateDetector {
     const tokens2 = this.tokenizeText(desc2 + ' ' + narr2);
 
     const commonTokens = tokens1.filter(token => tokens2.includes(token));
-    const ignoreWords = ['bank', 'transfer', 'payment', 'paid', 'imps', 'upi', 'neft', 'dr', 'cr', 'online', 'transaction', 'statement', 'account'];
-    const significant = commonTokens.filter(tok => tok.length >= 3 && !ignoreWords.includes(tok));
-    return significant.length > 0;
+    const ignoreWords = [
+      'bank', 'transfer', 'payment', 'paid', 'imps', 'upi', 'neft', 'rtgs', 'dr', 'cr', 'online', 'transaction', 'statement', 'account',
+      'pvt', 'ltd', 'limited', 'private', 'india', 'services', 'service', 'technologies', 'solutions', 'enterprises', 'the', 'and', 'ref', 'txn', 'pos', 'debit', 'credit', 'card',
+      'okaxis', 'oksbi', 'okicici', 'okhdfcbank', 'ybl', 'ibl', 'axl', 'paytm', 'apl', 'yesb', 'hdfc', 'icic', 'sbin', 'utib', 'punb', 'kkbk'
+    ];
+    const significant = [...new Set(commonTokens.filter(tok => tok.length >= 3 && !/^\d+$/.test(tok) && !ignoreWords.includes(tok)))];
+    // One shared generic word isn't enough evidence of "same merchant": need a distinctive
+    // word (4+ letters) or two shared words.
+    return significant.length >= 2 || significant.some(tok => tok.length >= 5);
   }
 
 
@@ -266,23 +277,35 @@ class DuplicateDetector {
 
     // If both have real reference IDs, check if they match
     if (hasRef1 && hasRef2) {
-      if (ref1 === ref2 || ref1.includes(ref2) || ref2.includes(ref1)) {
-        return true;
-      }
-    } else if (hasRef1 && (narr2.includes(ref1) || desc2.includes(ref1))) {
+      if (ref1 === ref2) return true;
+    } else if (hasRef1 && ref1.length >= 8 && (narr2.includes(ref1) || desc2.includes(ref1))) {
       return true;
-    } else if (hasRef2 && (narr1.includes(ref2) || desc1.includes(ref2))) {
+    } else if (hasRef2 && ref2.length >= 8 && (narr1.includes(ref2) || desc1.includes(ref2))) {
       return true;
     }
 
-    // 5. Name / Description / Raw Narration Match
-    const isNameMatch = (desc1 && desc1 === desc2) || (narr1 && narr1 === narr2) || this.isSameMerchant(t1, t2);
+    // 5. Identical description / narration only. Fuzzy "same merchant" matches are deliberately
+    // NOT dropped silently on import; the duplicate scan queues those for manual review instead.
+    const isNameMatch = (desc1 && desc1 === desc2) || (narr1 && narr1 === narr2);
     if (isNameMatch) {
       if (!hasRef1 && !hasRef2) return true;
       if (hasRef1 === hasRef2 && ref1 === ref2) return true;
     }
 
     return false;
+  }
+
+  /**
+   * Two rows from the SAME statement are only duplicates when they carry the same real
+   * reference number. A statement can legitimately list two identical ₹200 rides on one day.
+   */
+  isRepeatWithinStatement(t1, t2) {
+    const ref1 = (t1.referenceNo || '').trim().toLowerCase();
+    const ref2 = (t2.referenceNo || '').trim().toLowerCase();
+    const real = (r) => r && !r.startsWith('ref_') && r.length >= 8;
+    if (!real(ref1) || ref1 !== ref2) return false;
+    if (t1.type && t2.type && t1.type !== t2.type) return false;
+    return this.isSameDate(t1.date, t2.date) && Math.abs(Math.abs(parseFloat(t1.amount) || 0) - Math.abs(parseFloat(t2.amount) || 0)) <= 0.001;
   }
 
   /**
@@ -295,7 +318,7 @@ class DuplicateDetector {
 
     for (const item of incomingTransactions) {
       const matchesDb = existingTransactions.some(dbItem => this.isExactDuplicate(item, dbItem));
-      const matchesBatch = accepted.some(batchItem => this.isExactDuplicate(item, batchItem));
+      const matchesBatch = accepted.some(batchItem => this.isRepeatWithinStatement(item, batchItem));
       if (matchesDb || matchesBatch) {
         exactDuplicatesCount++;
       } else {
@@ -395,4 +418,11 @@ class DuplicateDetector {
 }
 
 // Global instance
-window.duplicateDetector = new DuplicateDetector();
+if (typeof window !== 'undefined') {
+  window.duplicateDetector = new DuplicateDetector();
+}
+
+// Node/test export (does not affect browser <script> usage)
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = DuplicateDetector;
+}

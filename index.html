@@ -13,8 +13,8 @@
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800;900&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   
   <!-- CSS Stylesheets -->
-  <link rel="stylesheet" href="css/main.css?v=9">
-  <link rel="stylesheet" href="css/components.css?v=9">
+  <link rel="stylesheet" href="css/main.css?v=10">
+  <link rel="stylesheet" href="css/components.css?v=10">
   <link rel="stylesheet" href="css/print.css?v=7">
 
   <!-- Core Offline Libraries -->
@@ -87,10 +87,12 @@
     </div>
   </div>
 
+  <a class="skip-link" href="#mainContent">Skip to main content</a>
+
   <div class="app-container">
     
     <!-- SIDEBAR NAVIGATION -->
-    <aside class="sidebar">
+    <aside class="sidebar" id="sidebar" aria-label="Main navigation">
       <div class="brand-header">
         <div class="brand-icon" style="padding:0; overflow:hidden; background:transparent; border:none;">
           <img src="logos/export/logo.svg" alt="Money Tracker Logo" style="width:36px; height:36px; border-radius:10px; box-shadow:0 4px 12px rgba(16,185,129,0.3);">
@@ -167,16 +169,16 @@
     </aside>
 
     <!-- MAIN CONTENT -->
-    <main class="main-content">
+    <main class="main-content" id="mainContent" tabindex="-1">
       
       <!-- TOP BAR -->
       <header class="top-bar">
         <div style="display:flex; align-items:center; gap:16px;">
-          <button class="mobile-menu-btn" id="mobileMenuToggle">
+          <button class="mobile-menu-btn" id="mobileMenuToggle" type="button" aria-label="Open navigation menu" aria-controls="sidebar" aria-expanded="false">
             <i data-lucide="menu" style="width:20px; height:20px;"></i>
           </button>
           <div class="page-title">
-            <h2>Financial Dashboard</h2>
+            <h2 id="pageTitle">Financial Dashboard</h2>
           </div>
         </div>
 
@@ -263,8 +265,8 @@
             <!-- Inflow vs Outflow Mini Flow Bar -->
             <div class="flow-ratio-container">
               <div class="flow-ratio-labels">
-                <span style="color:#10b981; font-weight:600; font-size:0.82rem;" id="heroInflowLabel">Inflow: ₹ 0</span>
-                <span style="color:#f43f5e; font-weight:600; font-size:0.82rem;" id="heroOutflowLabel">Outflow: ₹ 0</span>
+                <span style="color:var(--text-income); font-weight:600; font-size:0.82rem;" id="heroInflowLabel">Inflow: ₹ 0</span>
+                <span style="color:var(--text-expense); font-weight:600; font-size:0.82rem;" id="heroOutflowLabel">Outflow: ₹ 0</span>
               </div>
               <div class="flow-ratio-bar">
                 <div class="flow-ratio-fill income" id="heroFlowBarIncome" style="width:70%;"></div>
@@ -282,7 +284,7 @@
                 <span class="bento-stat-label">Total Inflow (30D)</span>
                 <div class="bento-stat-icon income"><i data-lucide="arrow-down-left" style="width:16px; height:16px;"></i></div>
               </div>
-              <div class="bento-stat-val" id="kpiTotalIncome" style="color:#10b981;">₹ 0</div>
+              <div class="bento-stat-val" id="kpiTotalIncome" style="color:var(--text-income);">₹ 0</div>
               <div class="bento-stat-sub positive">Salary &amp; Credits</div>
             </div>
 
@@ -292,7 +294,7 @@
                 <span class="bento-stat-label">Total Outflow (30D)</span>
                 <div class="bento-stat-icon expense"><i data-lucide="arrow-up-right" style="width:16px; height:16px;"></i></div>
               </div>
-              <div class="bento-stat-val" id="kpiTotalExpense" style="color:#f43f5e;">₹ 0</div>
+              <div class="bento-stat-val" id="kpiTotalExpense" style="color:var(--text-expense);">₹ 0</div>
               <div class="bento-stat-sub negative">Excl. Duplicates</div>
             </div>
 
@@ -302,7 +304,7 @@
                 <span class="bento-stat-label">Net Savings Rate</span>
                 <div class="bento-stat-icon savings"><i data-lucide="trending-up" style="width:16px; height:16px;"></i></div>
               </div>
-              <div class="bento-stat-val" id="kpiSavingsRate" style="color:#06b6d4;">0%</div>
+              <div class="bento-stat-val" id="kpiSavingsRate" style="color:var(--text-info);">0%</div>
               <div class="bento-stat-sub positive">Of Cashflow Saved</div>
             </div>
 
@@ -349,7 +351,7 @@
               </div>
 
               <div class="chart-wrapper" style="height:330px;">
-                <canvas id="chartCashflow"></canvas>
+                <canvas id="chartCashflow" role="img" aria-label="Cash flow chart: income, expenses and running balance over the selected period">Cash flow chart. Use the transactions table for the underlying figures.</canvas>
               </div>
             </div>
 
@@ -405,7 +407,7 @@
                 </div>
               </div>
               <div class="chart-wrapper donut" style="height:210px;">
-                <canvas id="chartCategoryDonut"></canvas>
+                <canvas id="chartCategoryDonut" role="img" aria-label="Donut chart of spending by category for the selected period">Spending by category chart. Use the transactions table for the underlying figures.</canvas>
               </div>
               <div class="category-breakdown-list" id="dashboardCategoryList" style="max-height:220px; overflow-y:auto;">
                 <!-- Dynamically rendered -->
@@ -444,7 +446,7 @@
           </div>
           
           <div class="dropzone-container" id="statementDropzone">
-            <input type="file" id="statementFileInput" accept=".pdf,.csv,.xlsx,.xls,.txt" style="display:none;">
+            <input type="file" id="statementFileInput" accept=".pdf,.csv,.xlsx,.xls,.txt" multiple aria-label="Choose bank or UPI statement files" style="display:none;">
             <div class="dropzone-icon">
               <i data-lucide="upload-cloud" style="width:32px; height:32px;"></i>
             </div>
@@ -553,7 +555,7 @@
             </div>
             <span class="badge-tag duplicate" id="reviewCountHeaderBadge">0 Pending</span>
           </div>
-          <p style="color:#94a3b8; font-size:0.88rem;">
+          <p style="color:var(--text-muted); font-size:0.88rem;">
             When a transaction cannot be classified with high confidence, it appears here. When you select a type/category for it, Money Tracker <strong>memorizes the merchant / UPI ID</strong> so all future (and past) transactions to that same account will be classified automatically!
           </p>
         </div>
@@ -570,23 +572,23 @@
         <div class="filter-bar">
           <div class="search-box">
             <i data-lucide="search" class="search-icon" style="width:16px; height:16px;"></i>
-            <input type="text" id="txnSearchInput" class="input-control" placeholder="Search by merchant, UTR, narration, notes...">
+            <input type="text" id="txnSearchInput" class="input-control" aria-label="Search transactions" placeholder="Search by merchant, UTR, narration, notes...">
           </div>
 
           <div style="width:180px;">
-            <select id="txnCategoryFilter" class="select-control">
+            <select id="txnCategoryFilter" class="select-control" aria-label="Filter by category">
               <option value="all">All Categories</option>
             </select>
           </div>
 
           <div style="width:180px;">
-            <select id="txnAccountFilter" class="select-control">
+            <select id="txnAccountFilter" class="select-control" aria-label="Filter by account">
               <option value="all">All Accounts</option>
             </select>
           </div>
 
           <div style="width:150px;">
-            <select id="txnTypeFilter" class="select-control">
+            <select id="txnTypeFilter" class="select-control" aria-label="Filter by type">
               <option value="all">All Types</option>
               <option value="needs_review">Needs Review ⚠️</option>
               <option value="expense">Expenses Only</option>
@@ -662,7 +664,7 @@
               <i data-lucide="refresh-cw" style="width:14px; height:14px;"></i> Re-Scan All Records
             </button>
           </div>
-          <p style="color:#94a3b8; font-size:0.88rem;">
+          <p style="color:var(--text-muted); font-size:0.88rem;">
             When you upload both your UPI app statement (Google Pay, PhonePe, Paytm) and your Bank account statement (HDFC, SBI, etc.), the same purchases appear in both files. Our AI engine identifies matching UTRs, timestamps, and amounts so you can merge them into a single enriched transaction and eliminate double-counting.
           </p>
         </div>
@@ -701,7 +703,7 @@
               <span>AI Auto-Classification Memory (Learned Rules)</span>
             </div>
           </div>
-          <p style="color:#94a3b8; font-size:0.88rem;">
+          <p style="color:var(--text-muted); font-size:0.88rem;">
             Below are the custom merchant patterns, UPI IDs, and payee keywords that Money Tracker has memorized. Future transactions matching any of these will be classified automatically.
           </p>
         </div>
@@ -720,19 +722,42 @@
               <span>Comprehensive Multi-Format Export Center</span>
             </div>
           </div>
-          <p style="color:#94a3b8; font-size:0.88rem; margin-bottom:20px;">
+          <p style="color:var(--text-muted); font-size:0.88rem; margin-bottom:20px;">
             Export calculated ledgers, categorized expenses, and high-resolution charts as Excel workbooks, raw CSVs, or full multi-page PDF executive summaries.
           </p>
 
           <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(260px, 1fr)); gap:16px;">
             
+            <!-- Full Backup Card (the only restorable export) -->
+            <div class="export-card export-card-primary">
+              <div>
+                <div style="width:40px; height:40px; border-radius:8px; background:rgba(59, 130, 246, 0.15); color:var(--color-primary); display:flex; align-items:center; justify-content:center; margin-bottom:12px;">
+                  <i data-lucide="shield-check" style="width:20px; height:20px;" aria-hidden="true"></i>
+                </div>
+                <h3 style="font-size:1.05rem; font-weight:700; margin-bottom:6px; color:var(--text-main);">Full Backup (JSON)</h3>
+                <p style="font-size:0.8rem; color:var(--text-muted); margin-bottom:16px;">
+                  The only export you can restore from: transactions, accounts, learned rules, budgets and categories. Keep a copy somewhere safe &mdash; your data lives only in this browser.
+                </p>
+              </div>
+              <div class="export-card-actions">
+                <button type="button" class="btn btn-primary btn-sm" onclick="exportEngine.exportBackupJSON()">
+                  <i data-lucide="download" style="width:14px; height:14px;" aria-hidden="true"></i> Download Backup
+                </button>
+                <input type="file" id="restoreBackupInput" class="visually-hidden" accept="application/json,.json" onchange="app.restoreBackupFromInput(this)">
+                <label for="restoreBackupInput" class="btn btn-secondary btn-sm restore-label">
+                  <i data-lucide="upload" style="width:14px; height:14px;" aria-hidden="true"></i> Restore from Backup&hellip;
+                </label>
+                <div id="restoreBackupStatus" class="restore-status" role="status" aria-live="polite"></div>
+              </div>
+            </div>
+
             <!-- Excel Export Card -->
             <div class="export-card">
               <div>
                 <div style="width:40px; height:40px; border-radius:8px; background:rgba(16, 185, 129, 0.15); color:#10b981; display:flex; align-items:center; justify-content:center; margin-bottom:12px;">
                   <i data-lucide="table" style="width:20px; height:20px;"></i>
                 </div>
-                <h4 style="font-size:1.05rem; font-weight:700; margin-bottom:6px; color:var(--text-main);">Multi-Sheet Excel (.xlsx)</h4>
+                <h3 style="font-size:1.05rem; font-weight:700; margin-bottom:6px; color:var(--text-main);">Multi-Sheet Excel (.xlsx)</h3>
                 <p style="font-size:0.8rem; color:var(--text-muted); margin-bottom:16px;">
                   Includes 4 structured sheets: Executive Summary, Transactions Register, Category Budgets, and Accounts Ledger.
                 </p>
@@ -748,7 +773,7 @@
                 <div style="width:40px; height:40px; border-radius:8px; background:rgba(244, 63, 94, 0.15); color:#f43f5e; display:flex; align-items:center; justify-content:center; margin-bottom:12px;">
                   <i data-lucide="file-text" style="width:20px; height:20px;"></i>
                 </div>
-                <h4 style="font-size:1.05rem; font-weight:700; margin-bottom:6px; color:var(--text-main);">Executive PDF Statement</h4>
+                <h3 style="font-size:1.05rem; font-weight:700; margin-bottom:6px; color:var(--text-main);">Executive PDF Statement</h3>
                 <p style="font-size:0.8rem; color:var(--text-muted); margin-bottom:16px;">
                   Generates an executive-ready multi-page PDF report with KPIs, accounts overview, and itemized ledger.
                 </p>
@@ -764,7 +789,7 @@
                 <div style="width:40px; height:40px; border-radius:8px; background:rgba(59, 130, 246, 0.15); color:#3b82f6; display:flex; align-items:center; justify-content:center; margin-bottom:12px;">
                   <i data-lucide="code" style="width:20px; height:20px;"></i>
                 </div>
-                <h4 style="font-size:1.05rem; font-weight:700; margin-bottom:6px; color:var(--text-main);">Raw Transactions (CSV)</h4>
+                <h3 style="font-size:1.05rem; font-weight:700; margin-bottom:6px; color:var(--text-main);">Raw Transactions (CSV)</h3>
                 <p style="font-size:0.8rem; color:var(--text-muted); margin-bottom:16px;">
                   Export cleaned, deduplicated, RFC4180 standard CSV file for external accounting software.
                 </p>
@@ -787,15 +812,15 @@
           </div>
           <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:16px;">
             <div>
-              <div style="font-size:0.75rem; color:#94a3b8; text-transform:uppercase;">Total Inflow</div>
-              <div style="font-size:1.4rem; font-weight:bold; color:#10b981; font-family:var(--font-mono);" id="reportIncomeVal">₹ 0</div>
+              <div style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase;">Total Inflow</div>
+              <div style="font-size:1.4rem; font-weight:bold; color:var(--text-income); font-family:var(--font-mono);" id="reportIncomeVal">₹ 0</div>
             </div>
             <div>
-              <div style="font-size:0.75rem; color:#94a3b8; text-transform:uppercase;">Total Outflow</div>
-              <div style="font-size:1.4rem; font-weight:bold; color:#f43f5e; font-family:var(--font-mono);" id="reportExpenseVal">₹ 0</div>
+              <div style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase;">Total Outflow</div>
+              <div style="font-size:1.4rem; font-weight:bold; color:var(--text-expense); font-family:var(--font-mono);" id="reportExpenseVal">₹ 0</div>
             </div>
             <div>
-              <div style="font-size:0.75rem; color:#94a3b8; text-transform:uppercase;">Net Retained Savings</div>
+              <div style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase;">Net Retained Savings</div>
               <div style="font-size:1.4rem; font-weight:bold; color:#3b82f6; font-family:var(--font-mono);" id="reportSavingsVal">₹ 0</div>
             </div>
           </div>
@@ -815,7 +840,7 @@
           </div>
           <h3 id="manualTxnModalTitle" style="font-size:1.15rem; font-weight:700;">Record Offline / Manual Transaction</h3>
         </div>
-        <button class="btn btn-ghost btn-sm btn-icon-only" id="btnCloseAddTxnModal">
+        <button class="btn btn-ghost btn-sm btn-icon-only" id="btnCloseAddTxnModal" type="button" aria-label="Close">
           <i data-lucide="x" style="width:18px; height:18px;"></i>
         </button>
       </div>
@@ -824,7 +849,7 @@
         <div class="modal-body">
           <div class="form-row">
             <div class="form-group">
-              <label class="form-label">Transaction Type</label>
+              <label class="form-label" for="mTxnType">Transaction Type</label>
               <select id="mTxnType" class="select-control">
                 <option value="expense">Expense (Debit)</option>
                 <option value="income">Income (Credit)</option>
@@ -832,7 +857,7 @@
               </select>
             </div>
             <div class="form-group">
-              <label class="form-label">Amount (INR ₹)</label>
+              <label class="form-label" for="mTxnAmount">Amount (INR ₹)</label>
               <input type="number" step="0.01" min="0.01" id="mTxnAmount" class="input-control" placeholder="0.00" required>
             </div>
           </div>
@@ -864,7 +889,7 @@
 
           <div class="form-row">
             <div class="form-group">
-              <label class="form-label">Account / Wallet</label>
+              <label class="form-label" for="mTxnAccount">Account / Wallet</label>
               <select id="mTxnAccount" class="select-control">
                 <option value="default_bank">Primary Bank Account</option>
                 <option value="default_cash">Cash / Wallet</option>
@@ -872,7 +897,7 @@
               </select>
             </div>
             <div class="form-group">
-              <label class="form-label">Category</label>
+              <label class="form-label" for="mTxnCategory">Category</label>
               <select id="mTxnCategory" class="select-control">
                 <!-- Dynamically populated -->
               </select>
@@ -880,13 +905,13 @@
           </div>
 
           <div class="form-group">
-            <label class="form-label">Description / Merchant Name</label>
+            <label class="form-label" for="mTxnDesc">Description / Merchant Name</label>
             <input type="text" id="mTxnDesc" class="input-control" placeholder="e.g. Local Tea Stall, Cash Groceries, Freelance Advance" required>
           </div>
 
           <div class="form-row">
             <div class="form-group">
-              <label class="form-label">Payment Mode</label>
+              <label class="form-label" for="mTxnMode">Payment Mode</label>
               <select id="mTxnMode" class="select-control">
                 <option value="UPI" selected>UPI (GPay / PhonePe / Paytm / BHIM)</option>
                 <option value="Debit Card">Debit Card</option>
@@ -902,13 +927,13 @@
               </select>
             </div>
             <div class="form-group">
-              <label class="form-label">Reference / UTR No (Optional)</label>
+              <label class="form-label" for="mTxnRef">Reference / UTR No (Optional)</label>
               <input type="text" id="mTxnRef" class="input-control" placeholder="e.g. UTR / Ref No">
             </div>
           </div>
 
           <div class="form-group">
-            <label class="form-label">Notes / Tags (Optional)</label>
+            <label class="form-label" for="mTxnNotes">Notes / Tags (Optional)</label>
             <input type="text" id="mTxnNotes" class="input-control" placeholder="e.g. Evening snacks with team, #cash">
           </div>
         </div>
@@ -933,7 +958,7 @@
           </div>
           <h3 id="editTxnModalTitle" style="font-size:1.15rem; font-weight:700;">Edit Transaction</h3>
         </div>
-        <button class="btn btn-ghost btn-sm btn-icon-only" id="btnCloseEditTxnModal">
+        <button class="btn btn-ghost btn-sm btn-icon-only" id="btnCloseEditTxnModal" type="button" aria-label="Close">
           <i data-lucide="x" style="width:18px; height:18px;"></i>
         </button>
       </div>
@@ -943,7 +968,7 @@
         <div class="modal-body">
           <div class="form-row">
             <div class="form-group">
-              <label class="form-label">Transaction Type</label>
+              <label class="form-label" for="eTxnType">Transaction Type</label>
               <select id="eTxnType" class="select-control">
                 <option value="expense">Expense (Debit)</option>
                 <option value="income">Income (Credit)</option>
@@ -951,7 +976,7 @@
               </select>
             </div>
             <div class="form-group">
-              <label class="form-label">Amount (INR ₹)</label>
+              <label class="form-label" for="eTxnAmount">Amount (INR ₹)</label>
               <input type="number" step="0.01" min="0.01" id="eTxnAmount" class="input-control" placeholder="0.00" required>
             </div>
           </div>
@@ -983,7 +1008,7 @@
 
           <div class="form-row">
             <div class="form-group">
-              <label class="form-label">Account / Wallet</label>
+              <label class="form-label" for="eTxnAccount">Account / Wallet</label>
               <select id="eTxnAccount" class="select-control">
                 <option value="default_bank">Primary Bank Account</option>
                 <option value="default_cash">Cash / Wallet</option>
@@ -991,7 +1016,7 @@
               </select>
             </div>
             <div class="form-group">
-              <label class="form-label">Category</label>
+              <label class="form-label" for="eTxnCategory">Category</label>
               <select id="eTxnCategory" class="select-control">
                 <!-- Dynamically populated -->
               </select>
@@ -999,13 +1024,13 @@
           </div>
 
           <div class="form-group">
-            <label class="form-label">Description / Merchant Name</label>
+            <label class="form-label" for="eTxnDesc">Description / Merchant Name</label>
             <input type="text" id="eTxnDesc" class="input-control" placeholder="e.g. Local Tea Stall" required>
           </div>
 
           <div class="form-row">
             <div class="form-group">
-              <label class="form-label">Payment Mode</label>
+              <label class="form-label" for="eTxnMode">Payment Mode</label>
               <select id="eTxnMode" class="select-control">
                 <option value="UPI">UPI (GPay / PhonePe / Paytm / BHIM)</option>
                 <option value="Debit Card">Debit Card</option>
@@ -1021,13 +1046,13 @@
               </select>
             </div>
             <div class="form-group">
-              <label class="form-label">Reference / UTR No</label>
+              <label class="form-label" for="eTxnRef">Reference / UTR No</label>
               <input type="text" id="eTxnRef" class="input-control" placeholder="e.g. UTR / Ref No">
             </div>
           </div>
 
           <div class="form-group">
-            <label class="form-label">Notes / Tags (Optional)</label>
+            <label class="form-label" for="eTxnNotes">Notes / Tags (Optional)</label>
             <input type="text" id="eTxnNotes" class="input-control" placeholder="e.g. Evening snacks with team, #cash">
           </div>
         </div>
@@ -1052,7 +1077,7 @@
           </div>
           <h3 style="font-size:1.15rem; font-weight:700;" id="accountModalTitle">Add Bank Account or Card</h3>
         </div>
-        <button class="btn btn-ghost btn-sm btn-icon-only" id="btnCloseAccountModal">
+        <button class="btn btn-ghost btn-sm btn-icon-only" id="btnCloseAccountModal" type="button" aria-label="Close">
           <i data-lucide="x" style="width:18px; height:18px;"></i>
         </button>
       </div>
@@ -1062,18 +1087,18 @@
         <div class="modal-body">
           <div class="form-row">
             <div class="form-group">
-              <label class="form-label">Account / Card Display Name</label>
+              <label class="form-label" for="accFormName">Account / Card Display Name</label>
               <input type="text" id="accFormName" class="input-control" placeholder="e.g. HDFC Salary A/c, ICICI Amazon Pay Card" required>
             </div>
             <div class="form-group">
-              <label class="form-label">Institution / Bank / Provider</label>
+              <label class="form-label" for="accFormBank">Institution / Bank / Provider</label>
               <input type="text" id="accFormBank" class="input-control" placeholder="e.g. HDFC Bank, SBI, ICICI, Google Pay" required>
             </div>
           </div>
 
           <div class="form-row">
             <div class="form-group">
-              <label class="form-label">Account / Instrument Type</label>
+              <label class="form-label" for="accFormType">Account / Instrument Type</label>
               <select id="accFormType" class="select-control" required>
                 <option value="bank">Bank Account (Savings / Current)</option>
                 <option value="credit_card">Credit Card (Visa / Mastercard / Amex)</option>
@@ -1083,29 +1108,29 @@
               </select>
             </div>
             <div class="form-group">
-              <label class="form-label">Last 4 Digits / ID</label>
+              <label class="form-label" for="accFormLast4">Last 4 Digits / ID</label>
               <input type="text" id="accFormLast4" class="input-control" placeholder="e.g. 8821 or UPI" maxlength="8">
             </div>
           </div>
 
           <div class="form-row" id="accBalanceRow">
             <div class="form-group">
-              <label class="form-label">Starting / Base Balance (₹)</label>
+              <label class="form-label" for="accFormBalance">Starting / Base Balance (₹)</label>
               <input type="number" step="0.01" id="accFormBalance" class="input-control" placeholder="0.00" value="0.00">
             </div>
             <div class="form-group" id="accCreditLimitGroup" style="display:none;">
-              <label class="form-label">Total Credit Limit (₹)</label>
+              <label class="form-label" for="accFormLimit">Total Credit Limit (₹)</label>
               <input type="number" step="0.01" id="accFormLimit" class="input-control" placeholder="100000.00" value="100000.00">
             </div>
           </div>
 
           <div class="form-row" id="accCardDetailsRow" style="display:none;">
             <div class="form-group">
-              <label class="form-label">Monthly Billing Cycle Day</label>
+              <label class="form-label" for="accFormBillingDay">Monthly Billing Cycle Day</label>
               <input type="number" min="1" max="31" id="accFormBillingDay" class="input-control" placeholder="15" value="15">
             </div>
             <div class="form-group">
-              <label class="form-label">Card Theme Gradient</label>
+              <label class="form-label" for="accFormColor">Card Theme Gradient</label>
               <select id="accFormColor" class="select-control">
                 <option value="#1e3a8a">Royal Navy Blue</option>
                 <option value="#065f46">Emerald Green</option>
@@ -1142,7 +1167,7 @@
             <span style="font-size:0.75rem; color:var(--text-muted);" id="pdfPasswordFileName">statement.pdf</span>
           </div>
         </div>
-        <button type="button" class="btn btn-ghost btn-icon-only" onclick="app.closePdfPasswordModal()">
+        <button type="button" class="btn btn-ghost btn-icon-only" onclick="app.closePdfPasswordModal()" aria-label="Close">
           <i data-lucide="x" style="width:18px; height:18px;"></i>
         </button>
       </div>
@@ -1153,7 +1178,7 @@
         </p>
 
         <div class="form-group" style="margin-bottom:12px;">
-          <label class="form-label" style="font-size:0.8rem; font-weight:600;">PDF Password</label>
+          <label class="form-label" for="pdfPasswordInput" style="font-size:0.8rem; font-weight:600;">PDF Password</label>
           <div style="position:relative;">
             <input
               type="password"
@@ -1246,18 +1271,19 @@
   </div><!-- end .app-container -->
 
   <!-- Application Logic Scripts -->
+  <script src="js/dateutil.js?v=1"></script>
   <script src="js/profiles.js?v=2"></script>
-  <script src="js/db.js?v=2"></script>
-  <script src="js/categorizer.js?v=2"></script>
-  <script src="js/parser.js?v=2"></script>
-  <script src="js/duplicateDetector.js?v=2"></script>
-  <script src="js/accounts.js?v=2"></script>
-  <script src="js/budgets.js?v=2"></script>
-  <script src="js/charts.js?v=2"></script>
-  <script src="js/export.js?v=2"></script>
+  <script src="js/db.js?v=3"></script>
+  <script src="js/categorizer.js?v=3"></script>
+  <script src="js/parser.js?v=5"></script>
+  <script src="js/duplicateDetector.js?v=3"></script>
+  <script src="js/accounts.js?v=4"></script>
+  <script src="js/budgets.js?v=3"></script>
+  <script src="js/charts.js?v=3"></script>
+  <script src="js/export.js?v=3"></script>
   <script src="js/calendar.js?v=3"></script>
   <script src="js/timepicker.js?v=5"></script>
-  <script src="js/app.js?v=4"></script>
+  <script src="js/app.js?v=5"></script>
 
 </body>
 </html>

@@ -40,7 +40,10 @@
   /* Typography */
   --text-main: #f8fafc;
   --text-muted: #94a3b8;
-  --text-dim: #64748b;
+  --text-dim: #8494ab;
+  --text-income: #10b981;
+  --text-expense: #fb7185;
+  --text-info: #22d3ee;
   --text-inverse: #090d16;
   
   /* Fonts */
@@ -112,6 +115,9 @@
   --text-main: #0f172a;
   --text-muted: #475569;
   --text-dim: #64748b;
+  --text-income: #047857;
+  --text-expense: #be123c;
+  --text-info: #0e7490;
   --text-inverse: #ffffff;
 }
 
@@ -365,9 +371,13 @@ body::before {
   .sidebar {
     transform: translateX(-100%);
     box-shadow: 20px 0 40px rgba(0, 0, 0, 0.8);
+    visibility: hidden; /* off-screen drawer links must not be tabbable */
+    transition: transform var(--transition-normal), visibility 0s linear var(--transition-normal-ms, 0.25s);
   }
   .sidebar.open {
     transform: translateX(0);
+    visibility: visible;
+    transition-delay: 0s;
   }
   .main-content {
     margin-left: 0;

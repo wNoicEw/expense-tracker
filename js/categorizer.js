@@ -36,7 +36,7 @@ class Categorizer {
       // Bills & Utilities
       {
         category: 'Bills & Utilities',
-        keywords: ['bescom', 'tata power', 'adani elec', 'mseb', 'uppcl', 'cesc', 'tneb', 'bwssb', 'water board', 'mahanagar gas', 'igl', 'adani gas', 'airtel', 'jio', 'vodafone', 'vi prepaid', 'vi postpaid', 'act fibernet', 'hathway', 'tata play', 'tatasky', 'dth', 'electricity', 'broadband', 'cylinder', 'indane', 'hp gas', 'bharat gas', 'bbps', 'billpay', 'utility'],
+        keywords: ['bescom', 'tata power', 'adani elec', 'mseb', 'uppcl', 'cesc', 'tneb', 'bwssb', 'water board', 'mahanagar gas', 'igl', 'adani gas', 'airtel', 'jio', 'vodafone', 'vi prepaid', 'vi postpaid', 'act fibernet', 'hathway', 'tata play', 'tatasky', 'dth', 'electricity', 'broadband', 'cylinder', 'indane', 'hp gas', 'bharat gas', 'bbps', 'billpay', 'utility', 'tuition', 'school fee', 'college fee', 'exam fee', 'challan'],
         cleanName: 'Bills & Utilities'
       },
       // Subscriptions & OTT
@@ -149,6 +149,16 @@ class Categorizer {
     return clean.split(' ').slice(0, 3).join(' ');
   }
 
+  orderRules(rules) {
+    if (!this._orderedRules) this._orderedRules = new WeakMap();
+    let ordered = this._orderedRules.get(rules);
+    if (!ordered || ordered.length !== rules.length) {
+      ordered = [...rules].sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+      this._orderedRules.set(rules, ordered);
+    }
+    return ordered;
+  }
+
   /**
    * Categorize transaction text and return category, clean title, and classification status
    */
@@ -156,9 +166,10 @@ class Categorizer {
     const text = (rawText || '').toLowerCase();
     const identifier = this.extractIdentifier(rawText);
 
-    // 1. Check user-defined learned rules FIRST (highest precedence)
+    // 1. Check user-defined learned rules FIRST (highest precedence). Newest rule wins, so
+    // re-teaching a merchant actually changes the outcome instead of losing to the old rule.
     if (customRules && customRules.length > 0) {
-      for (const rule of customRules) {
+      for (const rule of this.orderRules(customRules)) {
         const pattern = (rule.pattern || rule.keyword || '').toLowerCase();
         if (pattern && (text.includes(pattern) || (identifier && identifier.includes(pattern)))) {
           return {
@@ -231,14 +242,18 @@ class Categorizer {
   /**
    * Teach the engine a new classification rule and auto-reclassify existing matching transactions!
    */
-  async learnRuleAndReclassify(pattern, category, type = 'expense') {
+  async learnRuleAndReclassify(pattern, category, type = 'expense', reclassifyExisting = true) {
     if (!pattern || !category || category === 'Uncategorized') return { learnedCount: 0 };
 
     const cleanPattern = pattern.trim().toLowerCase();
+    // Very short patterns substring-match half the ledger ("bus" in "business"); don't learn them.
+    if (cleanPattern.length < 3) return { learnedCount: 0, reclassifiedCount: 0 };
 
-    // 1. Save rule to IndexedDB
+    // 1. Save rule to IndexedDB — one rule per pattern; re-teaching updates it in place
+    const existingRules = (await window.db.getAll('rules')) || [];
+    const existing = existingRules.find(r => (r.pattern || '').toLowerCase() === cleanPattern);
     const newRule = {
-      id: 'rule_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6),
+      id: existing ? existing.id : 'rule_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6),
       pattern: cleanPattern,
       category: category,
       type: type,
@@ -246,31 +261,34 @@ class Categorizer {
     };
     await window.db.put('rules', newRule);
 
-    // 2. Retroactively update all existing matching transactions in DB
+    if (!reclassifyExisting) return { rule: newRule, reclassifiedCount: 0 };
+
+    // 2. Retroactively update matching transactions, but never overwrite ones the user
+    // entered or edited by hand.
     const allTransactions = await window.db.getAll('transactions');
-    let reclassifiedCount = 0;
+    const changed = [];
 
     for (const t of allTransactions) {
+      if (t.confidence === 'manual') continue;
       const narr = (t.rawNarration || '').toLowerCase();
       const desc = (t.description || '').toLowerCase();
-      const ref = (t.referenceNo || '').toLowerCase();
 
-      if (narr.includes(cleanPattern) || desc.includes(cleanPattern) || ref.includes(cleanPattern)) {
+      if (narr.includes(cleanPattern) || desc.includes(cleanPattern)) {
         t.category = category;
         t.type = type;
         t.needsReview = false;
         t.confidence = 'learned';
-        reclassifiedCount++;
+        changed.push(t);
       }
     }
 
-    if (reclassifiedCount > 0) {
-      await window.db.putBatch('transactions', allTransactions);
+    if (changed.length > 0) {
+      await window.db.putBatch('transactions', changed);
     }
 
     return {
       rule: newRule,
-      reclassifiedCount: reclassifiedCount
+      reclassifiedCount: changed.length
     };
   }
 
@@ -417,7 +435,7 @@ class Categorizer {
     // 7. Insurance Survival Benefit
     if (/survival\s*benefit/i.test(raw)) return 'Insurance Survival Benefit Credit';
 
-    // 8. Reversal / Internal Transfer code (e.g. 009769... AT 00001 BRANCH)
+    // 8. Reversal / Internal Transfer code (e.g. 0099... AT 00001 BRANCH)
     if (/^\d{8,}\s+AT\s+\d+/i.test(raw)) {
       return transactionType === 'income' ? 'Instant Reversal / Refund' : 'Direct Account Transfer';
     }
@@ -449,4 +467,11 @@ class Categorizer {
 
 
 // Global instance
-window.categorizer = new Categorizer();
+if (typeof window !== 'undefined') {
+  window.categorizer = new Categorizer();
+}
+
+// Node/test export (does not affect browser <script> usage)
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = Categorizer;
+}

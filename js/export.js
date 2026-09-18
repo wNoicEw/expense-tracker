@@ -24,6 +24,73 @@ class ExportEngine {
   }
 
   /**
+   * 0. Full JSON backup — the only export that can be restored (accounts, rules, budgets,
+   * categories and statement history included, unlike the xlsx/csv/pdf reports).
+   */
+  async exportBackupJSON() {
+    const storeNames = ['transactions', 'accounts', 'categories', 'budgets', 'rules', 'statements'];
+    const stores = {};
+    for (const name of storeNames) {
+      stores[name] = await window.db.getAll(name);
+    }
+    const profile = window.profileManager && window.profileManager.getActiveProfile();
+    const payload = {
+      app: 'money-tracker',
+      schemaVersion: 1,
+      exportedAt: new Date().toISOString(),
+      profileName: profile ? profile.name : '',
+      stores
+    };
+
+    const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `MoneyTracker_Backup_${DateUtil.today()}.json`;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    this.markBackedUp();
+  }
+
+  /**
+   * Validate and restore a JSON backup, replacing the current profile's data in ONE
+   * IndexedDB transaction (all-or-nothing). Throws a user-readable Error on a bad file.
+   */
+  async restoreBackupFromFile(file) {
+    let payload;
+    try {
+      payload = JSON.parse(await file.text());
+    } catch (e) {
+      throw new Error('That file is not valid JSON, so it can’t be a Money Tracker backup.');
+    }
+    if (!payload || payload.app !== 'money-tracker' || typeof payload.stores !== 'object' || payload.stores === null) {
+      throw new Error('That file is not a Money Tracker backup.');
+    }
+    if (typeof payload.schemaVersion !== 'number' || payload.schemaVersion > 1) {
+      throw new Error('This backup was made by a newer version of Money Tracker. Update the app before restoring it.');
+    }
+
+    const allowed = ['transactions', 'accounts', 'categories', 'budgets', 'rules', 'statements'];
+    const data = {};
+    for (const name of allowed) {
+      const rows = payload.stores[name];
+      if (rows === undefined) continue;
+      if (!Array.isArray(rows) || rows.some(r => !r || typeof r !== 'object' || typeof r.id !== 'string')) {
+        throw new Error(`The backup's "${name}" data is damaged, so nothing was restored.`);
+      }
+      data[name] = rows;
+    }
+    if (!data.transactions) throw new Error('The backup contains no transactions section, so nothing was restored.');
+
+    await window.db.replaceStores(data);
+    return {
+      transactions: data.transactions.length,
+      accounts: (data.accounts || []).length,
+      rules: (data.rules || []).length
+    };
+  }
+
+  /**
    * 1. Export Complete Excel Workbook (.xlsx)
    */
   async exportExcel() {
@@ -104,7 +171,7 @@ class ExportEngine {
     XLSX.utils.book_append_sheet(wb, wsAccounts, 'Accounts');
 
     // Trigger Download
-    const fileName = `Expense_Report_${new Date().toISOString().split('T')[0]}.xlsx`;
+    const fileName = `Expense_Report_${DateUtil.today()}.xlsx`;
     XLSX.writeFile(wb, fileName);
     this.markBackedUp();
   }
@@ -127,12 +194,12 @@ class ExportEngine {
       ReferenceNo: t.referenceNo,
       SourceFile: t.sourceFile,
       Notes: t.notes
-    })));
+    })), { escapeFormulae: true });
 
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
-    link.download = `Transactions_${new Date().toISOString().split('T')[0]}.csv`;
+    link.download = `Transactions_${DateUtil.today()}.csv`;
     link.click();
     this.markBackedUp();
   }
@@ -234,7 +301,7 @@ class ExportEngine {
     // Use html2pdf to export
     const opt = {
       margin: 10,
-      filename: `Expense_Report_${new Date().toISOString().split('T')[0]}.pdf`,
+      filename: `Expense_Report_${DateUtil.today()}.pdf`,
       image: { type: 'jpeg', quality: 0.98 },
       html2canvas: { scale: 2, useCORS: true, backgroundColor: '#0b1120' },
       jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }

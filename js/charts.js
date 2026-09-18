@@ -50,9 +50,9 @@ class ChartsEngine {
     let numDays = 30;
     if (daysRange === 'all' || daysRange === 'ALL') {
       if (validTxns.length > 0) {
-        const validDates = validTxns.map(t => new Date(t.date).getTime()).filter(ts => !isNaN(ts));
+        const validDates = validTxns.map(t => DateUtil.parseLocal(t.date).getTime()).filter(ts => !isNaN(ts));
         if (validDates.length > 0) {
-          const earliest = new Date(Math.min(...validDates));
+          const earliest = new Date(validDates.reduce((m, v) => Math.min(m, v), Infinity));
           const diffMs = now.getTime() - earliest.getTime();
           numDays = Math.max(7, Math.ceil(diffMs / (1000 * 60 * 60 * 24)) + 1);
         }
@@ -65,7 +65,7 @@ class ChartsEngine {
     const dateMap = {};
     for (let i = numDays - 1; i >= 0; i--) {
       const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i);
-      const dateStr = d.toISOString().split('T')[0];
+      const dateStr = DateUtil.toISODate(d);
       dateMap[dateStr] = { 
         income: 0, 
         expense: 0, 
@@ -292,7 +292,7 @@ class ChartsEngine {
     if (numDays !== null) {
       const cutoff = new Date(now.getFullYear(), now.getMonth(), now.getDate() - numDays + 1);
       validTxns = validTxns.filter(t => {
-        const d = new Date(t.date);
+        const d = DateUtil.parseLocal(t.date);
         return !isNaN(d.getTime()) && d >= cutoff;
       });
     }

@@ -93,14 +93,18 @@ class AccountsManager {
       (!meta.isRuPay || a.isRuPay === meta.isRuPay)
     );
 
-    // 2. Match by exact bank / app name and type
+    // 2. Match by exact bank / app name and type. Two accounts (or cards) at one bank stay separate when both
+    //    carry a real, different last-4; the loose fallback is only for accounts without a usable last-4.
+    const specific = (v) => !!v && !['0000', 'UPI', 'CASH', 'RUPAY'].includes(String(v).toUpperCase());
     if (!match) {
       match = accounts.find(a => 
         a.bankName && 
         meta.bankName && 
         a.bankName.toLowerCase() === meta.bankName.toLowerCase() &&
         a.type === meta.type &&
-        (!meta.isRuPay || a.isRuPay === meta.isRuPay)
+        (!meta.isRuPay || a.isRuPay === meta.isRuPay) &&
+        !(specific(meta.last4) && specific(a.accountNumberLast4) &&
+          String(a.accountNumberLast4).toLowerCase() !== String(meta.last4).toLowerCase())
       );
     }
 
@@ -148,6 +152,12 @@ class AccountsManager {
     if (!accountData.id) {
       accountData.id = 'acc_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
       accountData.createdAt = new Date().toISOString();
+    } else {
+      // Editing: keep fields the form doesn't own (createdAt, isAutoDetected, …)
+      const existing = await window.db.getById('accounts', accountData.id);
+      const defined = Object.fromEntries(Object.entries(accountData).filter(([, v]) => v !== undefined));
+      accountData = { ...(existing || {}), ...defined };
+      if (accountData.type !== 'credit_card') { delete accountData.creditLimit; delete accountData.billingDay; }
     }
     await window.db.put('accounts', accountData);
     return accountData;

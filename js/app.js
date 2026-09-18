@@ -115,6 +115,11 @@ class App {
       // Initialize IndexedDB (uses active profile's isolated namespace)
       await window.db.init();
 
+      // Ask the browser not to evict this profile's data under storage pressure (best effort)
+      if (navigator.storage && navigator.storage.persist) {
+        navigator.storage.persist().catch(() => {});
+      }
+
       // Setup Event Listeners & UI
       this.bindNavigationEvents();
       this.bindDropzoneEvents();
@@ -138,7 +143,7 @@ class App {
       this.showToast('App initialized offline. All data is securely stored on your device.', 'info');
     } catch (err) {
       console.error('App init error:', err);
-      this.showToast('Error initializing application: ' + err.message, 'error');
+      this.showFatalError(err);
     }
   }
 
@@ -195,7 +200,9 @@ class App {
     const sidebar = document.querySelector('.sidebar');
     if (mobileBtn && sidebar) {
       mobileBtn.addEventListener('click', () => {
-        sidebar.classList.toggle('open');
+        const open = sidebar.classList.toggle('open');
+        mobileBtn.setAttribute('aria-expanded', String(open));
+        mobileBtn.setAttribute('aria-label', open ? 'Close navigation menu' : 'Open navigation menu');
       });
     }
 
@@ -251,9 +258,22 @@ class App {
       activePanel.classList.add('active');
     }
 
+    // Announce the new view: header title + document title (screen readers, history, tab strip)
+    const navLabel = document.querySelector(`.nav-item button[data-tab="${tabId}"] span`);
+    const heading = document.getElementById('pageTitle');
+    if (navLabel && heading) {
+      heading.textContent = navLabel.textContent.trim();
+      document.title = `${heading.textContent} · Money Tracker`;
+    }
+
     // Close mobile menu if open
     const sidebar = document.querySelector('.sidebar');
     if (sidebar) sidebar.classList.remove('open');
+    const menuBtn = document.getElementById('mobileMenuToggle');
+    if (menuBtn) {
+      menuBtn.setAttribute('aria-expanded', 'false');
+      menuBtn.setAttribute('aria-label', 'Open navigation menu');
+    }
 
     // Refresh view specific data
     this.refreshCurrentTab();
@@ -408,7 +428,7 @@ class App {
     if (recentTxnsContainer) {
       const validTxns = transactions
         .filter(t => t.duplicateStatus !== 'merged')
-        .sort((a, b) => new Date(b.date) - new Date(a.date))
+        .sort((a, b) => DateUtil.compareTxnDesc(a, b))
         .slice(0, 5);
 
       if (validTxns.length === 0) {
@@ -692,10 +712,12 @@ class App {
   bindFilterEvents() {
     const searchInput = document.getElementById('txnSearchInput');
     if (searchInput) {
+      let searchTimer;
       searchInput.addEventListener('input', (e) => {
         this.searchQuery = e.target.value.toLowerCase();
         this.transactionsPage = 1;
-        this.renderTransactionsTable();
+        clearTimeout(searchTimer);
+        searchTimer = setTimeout(() => this.renderTransactionsTable(), 150);
       });
     }
 
@@ -728,9 +750,11 @@ class App {
   }
 
   async renderTransactionsTable() {
+    const renderSeq = (this._txnRenderSeq = (this._txnRenderSeq || 0) + 1);
     const transactions = await window.db.getAll('transactions');
     const accounts = await window.accountsManager.getAccountsWithMetrics();
     const categories = await window.db.getAll('categories');
+    if (renderSeq !== this._txnRenderSeq) return; // a newer render superseded this one
 
     // Populate Category & Account Filter dropdowns
     const catSelect = document.getElementById('txnCategoryFilter');
@@ -772,7 +796,7 @@ class App {
       return true;
     });
 
-    filtered.sort((a, b) => new Date(b.date) - new Date(a.date));
+    filtered.sort((a, b) => DateUtil.compareTxnDesc(a, b));
 
     const totalCount = filtered.length;
     const totalPages = Math.ceil(totalCount / this.transactionsPerPage) || 1;
@@ -784,7 +808,14 @@ class App {
     const tbody = document.getElementById('transactionsTableBody');
     if (tbody) {
       if (pagedTxns.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:32px; color:var(--text-muted);">No matching transactions found.</td></tr>`;
+        const hasAny = transactions.some(t => t.duplicateStatus !== 'merged');
+        tbody.innerHTML = hasAny
+          ? `<tr><td colspan="7" style="text-align:center; padding:32px; color:var(--text-muted);">No transactions match these filters. Try clearing the search or filters.</td></tr>`
+          : `<tr><td colspan="7" style="text-align:center; padding:40px 16px; color:var(--text-muted);">
+              <div style="font-weight:600; color:var(--text-main); margin-bottom:6px;">No transactions yet</div>
+              <div style="margin-bottom:14px;">Import a bank or UPI statement, or add a transaction by hand.</div>
+              <button type="button" class="btn btn-primary btn-sm" onclick="app.switchTab('import')">Import a statement</button>
+            </td></tr>`;
       } else {
         tbody.innerHTML = pagedTxns.map(t => {
           const acc = accounts.find(a => a.id === t.accountId);
@@ -954,7 +985,7 @@ class App {
             <div class="duplicate-match-header">
               <div style="display:flex; align-items:center; gap:8px;">
                 <span class="badge-tag duplicate">Match Confidence: ${pair.confidence}%</span>
-                <span style="font-size:0.82rem; color:var(--text-muted);">${pair.reason}</span>
+                <span style="font-size:0.82rem; color:var(--text-muted);">${this.escape(pair.reason)}</span>
               </div>
               <div style="font-size:1.15rem; font-weight:700; font-family:var(--font-mono); color:#f59e0b;">
                 ₹ ${Number(pair.tx1.amount).toLocaleString('en-IN')}
@@ -1090,21 +1121,21 @@ class App {
       // Transactions for this account
       const accTxns = allTxns
         .filter(t => t.accountId === acc.id && t.duplicateStatus !== 'merged')
-        .sort((a, b) => new Date(b.date) - new Date(a.date));
+        .sort((a, b) => DateUtil.compareTxnDesc(a, b));
 
       const totalSpend = accTxns.filter(t => t.type === 'expense').reduce((s, t) => s + Math.abs(t.amount || 0), 0);
       const totalCredits = accTxns.filter(t => t.type === 'income' || t.type === 'transfer').reduce((s, t) => s + Math.abs(t.amount || 0), 0);
 
       // This Month Spend
       const thisMonthTxns = accTxns.filter(t => {
-        const d = new Date(t.date);
+        const d = DateUtil.parseLocal(t.date);
         return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && t.type === 'expense';
       });
       const thisMonthSpend = thisMonthTxns.reduce((s, t) => s + Math.abs(t.amount || 0), 0);
 
       // Last Month Spend
       const lastMonthTxns = accTxns.filter(t => {
-        const d = new Date(t.date);
+        const d = DateUtil.parseLocal(t.date);
         return d.getFullYear() === lastMonth.getFullYear() && d.getMonth() === lastMonth.getMonth() && t.type === 'expense';
       });
       const lastMonthSpend = lastMonthTxns.reduce((s, t) => s + Math.abs(t.amount || 0), 0);
@@ -1415,7 +1446,8 @@ class App {
         const type = isRuPay ? 'credit_card' : rawType;
         const accountNumberLast4 = document.getElementById('accFormLast4').value.trim() || (type === 'wallet' ? 'UPI' : (type === 'cash' ? 'CASH' : '0000'));
         const balance = parseFloat(document.getElementById('accFormBalance').value) || 0;
-        const creditLimit = parseFloat(document.getElementById('accFormLimit').value) || 100000;
+        const limitRaw = parseFloat(document.getElementById('accFormLimit').value);
+        const creditLimit = Number.isFinite(limitRaw) && limitRaw >= 0 ? limitRaw : 100000;
         const billingDay = parseInt(document.getElementById('accFormBillingDay').value) || 15;
         const color = document.getElementById('accFormColor').value || (isRuPay ? '#0f766e' : '#1e3a8a');
 
@@ -1467,13 +1499,18 @@ class App {
         e.preventDefault();
         dropzone.classList.remove('drag-over');
         if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-          await this.handleFileUpload(e.dataTransfer.files[0]);
+          for (const droppedFile of Array.from(e.dataTransfer.files)) {
+            await this.handleFileUpload(droppedFile);
+          }
         }
       });
 
       fileInput.addEventListener('change', async (e) => {
-        if (e.target.files && e.target.files.length > 0) {
-          await this.handleFileUpload(e.target.files[0]);
+        const picked = Array.from(e.target.files || []);
+        // Reset so picking the same file again (e.g. after fixing it) fires 'change' again
+        e.target.value = '';
+        for (const pickedFile of picked) {
+          await this.handleFileUpload(pickedFile);
         }
       });
     }
@@ -1883,9 +1920,9 @@ class App {
 
         await window.db.put('transactions', newTxn);
 
-        // Auto-learn rule for this manual merchant
+        // Learn the rule for future imports only; don't rewrite other existing transactions
         if (description.length > 2 && category !== 'Uncategorized') {
-          await window.categorizer.learnRuleAndReclassify(description, category, type);
+          await window.categorizer.learnRuleAndReclassify(description, category, type, false);
         }
 
         closeModal();
@@ -1949,11 +1986,12 @@ class App {
         txn.referenceNo = referenceNo;
         txn.notes = notes;
         txn.updatedAt = new Date().toISOString();
+        txn.confidence = 'manual';
 
         await window.db.put('transactions', txn);
 
         if (description.length > 2 && category !== 'Uncategorized') {
-          await window.categorizer.learnRuleAndReclassify(description, category, type);
+          await window.categorizer.learnRuleAndReclassify(description, category, type, false);
         }
 
         closeEditModal();
@@ -2475,7 +2513,75 @@ class App {
 
   // --- TOAST NOTIFICATIONS (Disabled per user request) ---
   showToast(message, type = 'info') {
-    // Popup notifications in the bottom right corner have been disabled
+    // Info/success popups are intentionally disabled; errors must never be silent.
+    if (type !== 'error') return;
+    let region = document.getElementById('appErrorToast');
+    if (!region) {
+      region = document.createElement('div');
+      region.id = 'appErrorToast';
+      region.className = 'app-error-toast';
+      region.setAttribute('role', 'alert');
+      document.body.appendChild(region);
+    }
+    region.textContent = message;
+    region.classList.add('show');
+    clearTimeout(this._errorToastTimer);
+    this._errorToastTimer = setTimeout(() => region.classList.remove('show'), 6000);
+  }
+
+  async restoreBackupFromInput(input) {
+    const file = input.files && input.files[0];
+    input.value = '';
+    if (!file) return;
+    const status = document.getElementById('restoreBackupStatus');
+    const say = (msg, ok) => {
+      if (!status) return;
+      status.textContent = msg;
+      status.className = 'restore-status ' + (ok ? 'ok' : 'error');
+    };
+    if (!window.confirm('Restoring replaces ALL current data in this profile (transactions, accounts, rules, budgets) with the contents of the backup. This can’t be undone. Continue?')) {
+      return;
+    }
+    try {
+      const counts = await window.exportEngine.restoreBackupFromFile(file);
+      say(`Restored ${counts.transactions} transactions, ${counts.accounts} accounts and ${counts.rules} learned rules.`, true);
+      await this.refreshAllViews();
+    } catch (err) {
+      say(err.message || 'The backup could not be restored.', false);
+    }
+  }
+
+  // Blocking failure (e.g. IndexedDB unavailable): say what happened, that data is safe, and how to recover.
+  showFatalError(err) {
+    const existing = document.getElementById('appFatalError');
+    if (existing) existing.remove();
+
+    const box = document.createElement('div');
+    box.id = 'appFatalError';
+    box.className = 'fatal-error-banner';
+    box.setAttribute('role', 'alert');
+
+    const title = document.createElement('h2');
+    title.textContent = "Money Tracker couldn't open its local storage";
+    const body = document.createElement('p');
+    body.textContent = 'Your data lives in this browser’s local database, and the browser refused to open it. '
+      + 'This usually happens in a private/incognito window, when device storage is full, or while another tab is updating the app. '
+      + 'Nothing has been deleted.';
+    const detail = document.createElement('p');
+    detail.className = 'fatal-error-detail';
+    detail.textContent = 'Details: ' + ((err && err.message) || String(err));
+    const actions = document.createElement('div');
+    actions.className = 'fatal-error-actions';
+    const retry = document.createElement('button');
+    retry.type = 'button';
+    retry.className = 'btn btn-primary btn-sm';
+    retry.textContent = 'Try again';
+    retry.addEventListener('click', () => window.location.reload());
+    actions.appendChild(retry);
+
+    box.append(title, body, detail, actions);
+    document.body.prepend(box);
+    retry.focus();
   }
 }
 

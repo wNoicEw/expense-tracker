@@ -74,19 +74,44 @@ class StatementParser {
 
     // Auto-resolve or dynamically create Account in database if not explicitly provided
     let resolvedAccountId = targetAccountId;
-    if (!resolvedAccountId && window.accountsManager) {
-      resolvedAccountId = await window.accountsManager.getOrCreateAccountFromStatement(accountMetadata);
-    }
-    if (!resolvedAccountId) {
-      resolvedAccountId = 'acc_cash_default';
-    }
+    const defaultAccountId = async () => {
+      if (!resolvedAccountId && window.accountsManager) {
+        resolvedAccountId = await window.accountsManager.getOrCreateAccountFromStatement(accountMetadata);
+      }
+      return resolvedAccountId || (resolvedAccountId = 'acc_cash_default');
+    };
+    // Multi-account UPI histories name the paying account on every row: Navi "State Bank of India - 2105",
+    // and for PhonePe / Google Pay / Paytm "HDFC Bank 1234", "HDFC Bank XXXX1234" or just "XXXXXXXX3863"
+    const upiApp = /phonepe|paytm|google pay|gpay/i.test(detectedProfile);
+    const rowAccountCache = new Map();
+    const accountFromRow = async (info) => {
+      const s = String(info || '').trim();
+      if (targetAccountId || !window.accountsManager || !s || /credit\s*card/i.test(s)) return null;
+      // Masked number without a bank name: no bank to key on, so the last 4 digits alone separate the accounts
+      const masked = upiApp && s.match(/^[Xx*•\s]+(\d{4})$/);
+      const m = masked
+        || s.match(/^(.*?[A-Za-z].*?)\s*-\s*([A-Za-z0-9]{4})$/)
+        || (upiApp && s.match(/^(.*?[A-Za-z].*?)\s+(?:(?:a\/c|acct?|account)\s*(?:no\.?)?\s*)?[Xx*•]*(\d{4})$/i));
+      if (!m) return null;
+      const last4 = masked ? masked[1] : m[2];
+      // bankName is also a match key in getOrCreateAccountFromStatement, so it carries the digits here
+      const bankName = masked ? `Bank A/c ${last4}` : (/state\s*bank|\bsbi\b/i.test(m[1]) ? 'State Bank of India (SBI)' : m[1].trim());
+      const key = `${bankName}|${last4}`;
+      if (!rowAccountCache.has(key)) {
+        rowAccountCache.set(key, await window.accountsManager.getOrCreateAccountFromStatement({
+          bankName, type: 'bank', last4, name: `${masked ? 'Bank' : bankName} Account (•••• ${last4})`,
+          color: /state\s*bank|\bsbi\b/i.test(bankName) ? '#065f46' : '#1e3a8a', creditLimit: 100000, billingDay: 15
+        }));
+      }
+      return rowAccountCache.get(key);
+    };
 
     // Categorize, normalize, and tag transactions
     const customRules = (await window.db.getAll('rules')) || [];
     const normalizedTransactions = [];
 
     // CC bill payment patterns for post-categorization safety net
-    const ccPaymentRegex = /\b(credit card payment|cc payment|card bill|card payment|cc bill|cred|billdesk.*card|billdesk.*cc|autopay.*card|autopay.*cc|nach.*card|nach.*cc|ecs.*card|ecs.*cc|hdfc card|sbi card|icici card|axis card|kotak card|amex.*payment|amex.*bill|card settlement|card outstanding|minimum due|total amount due)\b/i;
+    const ccPaymentRegex = /\b(bill\s*payment\s*of\s+[\w&.\s]{0,40}?credit\s*card|credit card payment|cc payment|card bill|card payment|cc bill|cred|billdesk.*card|billdesk.*cc|autopay.*card|autopay.*cc|nach.*card|nach.*cc|ecs.*card|ecs.*cc|hdfc card|sbi card|icici card|axis card|kotak card|amex.*payment|amex.*bill|card settlement|card outstanding|minimum due|total amount due)\b/i;
 
     for (let i = 0; i < rawRecords.length; i++) {
       const row = rawRecords[i];
@@ -105,10 +130,13 @@ class StatementParser {
 
       // --- UPI RUPAY CREDIT CARD INTELLIGENCE ---
       // Check if this specific row was paid using a linked RuPay Credit Card on UPI
-      let txnAccountId = resolvedAccountId;
+      let txnAccountId = await accountFromRow(accountInfo);
       let paymentMode = row.paymentMode || this.guessPaymentMode(narration, detectedProfile, accountMetadata?.type);
 
-      const ruPayMeta = this.detectRuPayCC(combinedInfo);
+      // (default account is resolved after the card override below, so it is only created when actually needed)
+      // A bill payment *of* a credit card is not a purchase made *with* one, even if the narration mentions UPI
+      const isCcBillPayment = ccPaymentRegex.test(narration.toLowerCase());
+      const ruPayMeta = (isCcBillPayment && !/rupay/i.test(accountInfo)) ? null : this.detectRuPayCC(combinedInfo);
       if (ruPayMeta && window.accountsManager) {
         // Automatically link this transaction to the RuPay Credit Card account
         txnAccountId = await window.accountsManager.getOrCreateAccountFromStatement(ruPayMeta);
@@ -127,13 +155,17 @@ class StatementParser {
         }
       }
 
+      if (!txnAccountId) txnAccountId = await defaultAccountId();
+
+      const dateUnreadable = !row.date;
+
       const txn = {
         id: 'txn_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
-        date: row.date || new Date().toISOString().split('T')[0],
+        date: row.date || this.localISODate(new Date()),
         amount: amount,
         type: txnType,
         category: txnCategory,
-        needsReview: categorization.needsReview || false,
+        needsReview: categorization.needsReview || dateUnreadable,
         confidence: categorization.confidence || 'medium',
         identifier: categorization.identifier || '',
         description: row.customDescription || categorization.cleanTitle,
@@ -146,7 +178,8 @@ class StatementParser {
         isDuplicate: false,
         duplicateWithId: null,
         duplicateStatus: 'none',
-        notes: ruPayMeta ? `Paid via RuPay Credit Card (${ruPayMeta.name}) on UPI` : `Imported from ${fileName} (${detectedProfile})`,
+        notes: (ruPayMeta ? `Paid via RuPay Credit Card (${ruPayMeta.name}) on UPI` : `Imported from ${fileName} (${detectedProfile})`)
+          + (dateUnreadable ? ' — date could not be read from the statement, defaulted to today; please verify' : ''),
         createdAt: new Date().toISOString()
       };
 
@@ -239,7 +272,8 @@ class StatementParser {
       result = this.parseNaviBlocks(spatialRows, fullText, accountMetadata);
 
     // --- 2. SBI Bank Account (Priority over generic keyword matching) ---
-    } else if (ft.includes('state bank') || ft.includes('sbi') || /sbi/i.test(fname) || ft.includes('wdl tfr') || ft.includes('dep tfr') || bankKey.includes('sbi') || bankKey.includes('state bank')) {
+    // Word-boundary match: a bare substring test also fires on IFSC codes (SBIN0001234) and VPAs (@oksbi)
+    } else if (ft.includes('state bank') || /\bsbi\b/.test(ft) || /sbi/i.test(fname) || ft.includes('wdl tfr') || ft.includes('dep tfr') || bankKey.includes('sbi') || bankKey.includes('state bank')) {
       result = this.parseSBICoordinates(spatialRows, fullText, accountMetadata);
 
     // --- 3. PhonePe & Paytm ---
@@ -350,7 +384,8 @@ class StatementParser {
       const line = lines[i];
       const dateM = line.match(dateRe);
       const amtM = line.match(amountRe);
-      const typeM = line.match(typeRe);
+      // The Type column sits right before the amount, so the LAST match is it ("Bill payment of HDFC Credit Card  DEBIT")
+      const typeM = [...line.matchAll(new RegExp(typeRe.source, 'gi'))].pop();
 
       if (!dateM || !amtM) continue;
 
@@ -362,25 +397,27 @@ class StatementParser {
       const explicitType = isCredit ? 'income' : 'expense';
 
       // Extract narration: everything between date and type/amount
-      let narration = line
+      let narration = (typeM ? line.slice(0, typeM.index) + line.slice(typeM.index + typeM[0].length) : line)
         .replace(dateM[0], '')
         .replace(amtM[0], '')
-        .replace(/\b(DEBIT|CREDIT|DR|CR)\b/gi, '')
         .replace(/\s+/g, ' ')
         .trim();
 
-      // Collect next 1-2 lines for txn ID / UTR
+      // Collect the following lines: txn ID / UTR, and the payer instrument ("Paid by XXXXXXXX3863")
       let txnId = '';
       let utr = '';
-      for (let j = i + 1; j <= Math.min(i + 3, lines.length - 1); j++) {
+      let accountInfo = '';
+      for (let j = i + 1; j <= Math.min(i + 5, lines.length - 1); j++) {
         const nxt = lines[j];
         if (nxt.match(dateRe) && nxt.match(amountRe)) break; // next transaction
         const tid = nxt.match(txnIdRe);
         if (tid) txnId = tid[1];
         const u = nxt.match(utrRe);
         if (u) utr = u[1];
+        const inst = this.upiInstrumentLine(nxt);
+        if (inst !== null) accountInfo = inst;
         // Append useful info to narration if not already there
-        if (!/^\d{1,2}:\d{2}/.test(nxt) && !tid && !u && nxt.length > 3 && nxt.length < 80) {
+        if (j <= i + 3 && inst === null && !/^\d{1,2}:\d{2}/.test(nxt) && !tid && !u && nxt.length > 3 && nxt.length < 80) {
           narration += ' ' + nxt;
         }
       }
@@ -391,6 +428,7 @@ class StatementParser {
         amount,
         explicitType,
         referenceNo: utr || txnId || this.extractRefNo(line),
+        accountInfo,
         paymentMode: 'UPI'
       });
     }
@@ -409,10 +447,9 @@ class StatementParser {
     const lines = spatialRows.map(r => r.words.map(w => w.text).join(' ').trim()).filter(l => l);
 
     const dateRe = /(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4}|\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\w*\s+\d{2,4})/i;
-    const amountRe = /(?:₹|Rs\.?|INR)?\s*([\d,]+(?:\.\d{1,2})?)/;
-
     // First try table format via generic parser
-    const tableResult = this.parseGenericTablePDF(spatialRows, fullText, accountMetadata);
+    // ("Your Account" column = the paying bank / wallet; its header wording is unverified, so unknown headers just yield no account)
+    const tableResult = this.parseGenericTablePDF(spatialRows, fullText, accountMetadata, { accountCol: /^(your\s*account|paid\s*(from|via|by)|payment\s*(mode|method)|instrument)$/i });
     if (tableResult.records && tableResult.records.length > 0) {
       tableResult.profile = 'Paytm Statement';
       return tableResult;
@@ -422,21 +459,25 @@ class StatementParser {
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
       const dateM = line.match(dateRe);
-      const amtM = line.match(amountRe);
-      if (!dateM || !amtM) continue;
+      if (!dateM) continue;
+      const amtM = this.extractAmount(line, dateM[0]);
+      if (!amtM) continue;
 
-      const amount = parseFloat(amtM[1].replace(/,/g, ''));
-      if (isNaN(amount) || amount <= 0) continue;
+      const amount = amtM.value;
 
-      const isCredit = /credit|received|cr\b|refund|cashback|added/i.test(line);
-      const isDebit = /debit|paid|sent|dr\b|debited|transferred|withdrawn/i.test(line);
+      const isCredit = this.upiIsIncome(line, /credit|received|\bcr\b|refund|cashback|added/i);
 
-      let narration = line.replace(dateM[0], '').replace(amtM[0], '').replace(/\s+/g, ' ').trim();
+      let narration = line.replace(dateM[0], '').replace(amtM.text, '').replace(/\s+/g, ' ').trim();
 
-      // Collect continuation line
+      // Collect continuation line; a "Paid from <bank> 1234" line within the block is the paying account
+      let accountInfo = '';
+      for (let j = i + 1; j <= Math.min(i + 3, lines.length - 1) && !lines[j].match(dateRe); j++) {
+        const inst = this.upiInstrumentLine(lines[j]);
+        if (inst !== null) accountInfo = inst;
+      }
       if (i + 1 < lines.length && !lines[i + 1].match(dateRe)) {
         const nxt = lines[i + 1];
-        if (nxt.length > 3 && nxt.length < 100) narration += ' ' + nxt;
+        if (nxt.length > 3 && nxt.length < 100 && this.upiInstrumentLine(nxt) === null) narration += ' ' + nxt;
       }
 
       records.push({
@@ -445,6 +486,7 @@ class StatementParser {
         amount,
         explicitType: isCredit ? 'income' : 'expense',
         referenceNo: this.extractRefNo(line),
+        accountInfo,
         paymentMode: 'UPI'
       });
     }
@@ -608,7 +650,7 @@ class StatementParser {
         // Continuation: skip point/intl/ref columns, add to narration
         if (/^\s*$/.test(rowText)) continue;
         const skipPatterns = /^(total|subtotal|opening|closing|due|page|\d{4,}|[A-Z]{2}\d{8,})/i;
-        if (skipPatterns.test(rowText.trim())) continue;
+        if (skipPatterns.test(rowText.trim()) || this.isColumnHeaderRow(rowText)) continue;
 
         const narrCont = words.filter(w => {
           const isAmt = /^[\d,]+\.\d{2}(CR)?$/.test(w.text.trim());
@@ -672,62 +714,68 @@ class StatementParser {
 
   parseNaviBlocks(spatialRows, fullText, accountMetadata) {
     const records = [];
-    // Flatten rows to text lines
-    const lines = spatialRows.map(r => r.words.map(w => w.text).join(' ').trim()).filter(l => l);
+    const DATE_RE = /^(\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\w*\s+\d{4})$/i;
+    const AMOUNT_RE = /^(?:₹|Rs\.?|INR)?\s*([\d,]+(?:\.\d{1,2})?)$/i;
+    // Columns from the real Navi layout: date x≈28, details x≈115, account x≈382, amount x≥500
+    const inCol = (w, lo, hi) => w.x >= lo && w.x < hi;
+    const join = (words) => words.map(w => w.text).join(' ').replace(/\s+/g, ' ').trim();
 
-    const anchorRe = /^(\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\w*\s+\d{4})\s+(Paid\s+to|Paid\s+for|Received\s+from|Refund\s+from)\s+(.+?)\s+[₹Rs.]*\s*([\d,]+(?:\.\d{1,2})?)$/i;
+    const anchorOf = (row) => {
+      const dateText = join(row.words.filter(w => inCol(w, 0, 100)));
+      const dm = dateText.match(DATE_RE);
+      const amtWord = row.words.find(w => w.x >= 500 && AMOUNT_RE.test(w.text.trim()));
+      if (!dm || !amtWord) return null;
+      return { rawDate: dm[1], amount: parseFloat(amtWord.text.match(AMOUNT_RE)[1].replace(/,/g, '')) };
+    };
 
-    for (let i = 0; i < lines.length; i++) {
-      const m = lines[i].match(anchorRe);
-      if (!m) continue;
+    for (let i = 0; i < spatialRows.length; i++) {
+      const row = spatialRows[i];
+      const anchor = anchorOf(row);
+      if (!anchor || isNaN(anchor.amount) || anchor.amount <= 0) continue;
 
-      const rawDate = m[1];
-      const direction = m[2].toLowerCase();
-      const payeeName = m[3].trim();
-      const rawAmount = m[4].replace(/,/g, '');
-      const amount = parseFloat(rawAmount);
-      if (isNaN(amount) || amount <= 0) continue;
+      // Any "Paid to / Paid for / Bill payment of / Recharge of …" row is an expense unless it is a receipt
+      let details = join(row.words.filter(w => inCol(w, 100, 350)));
+      if (!details) continue;
+      const isIncome = /^(received|refund)/i.test(details);
 
-      const isIncome = /received|refund/i.test(direction);
-      const explicitType = isIncome ? 'income' : 'expense';
-
-      // Collect next 1-3 lines for instrument / txn ID info
-      let bankInstrument = '';
+      let account = join(row.words.filter(w => inCol(w, 350, 500)));
       let txnId = '';
-      let accountInfo = '';
       let noteText = '';
 
-      for (let j = i + 1; j <= Math.min(i + 4, lines.length - 1); j++) {
-        const nextLine = lines[j];
-        if (/^\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)/i.test(nextLine)) break; // next transaction
-        if (/UPI\s+txn\s+ID/i.test(nextLine)) {
-          const idMatch = nextLine.match(/UPI\s+txn\s+ID[:\s]*(\d+)/i);
-          if (idMatch) txnId = idMatch[1];
-          const accMatch = nextLine.match(/(?:Credit\s+Card|Account|Savings)[^-]*-\s*([A-Za-z0-9]{4,})/i);
-          if (accMatch) accountInfo = accMatch[1];
-        } else if (/^Note:/i.test(nextLine)) {
-          noteText = nextLine.replace(/^Note:\s*/i, '').trim();
-        } else if (!bankInstrument && nextLine.length > 2 && nextLine.length < 60) {
-          bankInstrument = nextLine;
+      // Following rows: "6:24 PM | UPI txn ID: … | Credit Card - XX99" and "Note: …".
+      // Anything else (page header, user name, phone number) is ignored rather than glued into the narration.
+      for (let j = i + 1; j <= Math.min(i + 5, spatialRows.length - 1); j++) {
+        const next = spatialRows[j];
+        if (anchorOf(next)) break;
+        const nextDetails = join(next.words.filter(w => inCol(w, 100, 350)));
+        const nextAccount = join(next.words.filter(w => inCol(w, 350, 500)));
+        const isTimeRow = /^\d{1,2}:\d{2}\s*[AP]M$/i.test(join(next.words.filter(w => inCol(w, 0, 100))));
+        const idMatch = nextDetails.match(/UPI\s+txn\s+ID[:\s]*(\d+)/i);
+        if (idMatch) {
+          txnId = idMatch[1];
+        } else if (/^Note:/i.test(nextDetails)) {
+          noteText = nextDetails.replace(/^Note:\s*/i, '').trim();
+        } else if (isTimeRow && nextDetails) {
+          details = `${details} ${nextDetails}`; // long payee name wrapped onto the time row
         }
+        // "Credit Card - XX99" / "- 2105" continue the account column on the time or txn-ID row
+        if (nextAccount && (idMatch || isTimeRow)) account = `${account} ${nextAccount}`.trim();
       }
 
-      // Build full narration
-      const narration = `${isIncome ? 'Received from' : 'Paid to'} ${payeeName}` + (noteText ? ` — ${noteText}` : '') + (bankInstrument ? ` [${bankInstrument}]` : '');
+      const narration = details + (noteText ? ` — ${noteText}` : '');
 
       records.push({
-        date: this.normalizeDate(rawDate),
-        narration: narration,
-        amount: amount,
-        explicitType: explicitType,
-        referenceNo: txnId || this.extractRefNo(lines[i]),
-        accountInfo: accountInfo || bankInstrument,
-        paymentMode: /credit\s*card/i.test(bankInstrument) ? 'UPI (RuPay Credit Card)' : 'UPI'
+        date: this.normalizeDate(anchor.rawDate),
+        narration,
+        amount: anchor.amount,
+        explicitType: isIncome ? 'income' : 'expense',
+        referenceNo: txnId || null,
+        accountInfo: account,
+        paymentMode: /credit\s*card/i.test(account) ? 'UPI (RuPay Credit Card)' : 'UPI'
       });
     }
 
-    const detectedProfile = 'Navi UPI Statement';
-    return { records, profile: detectedProfile, accountMetadata };
+    return { records, profile: 'Navi UPI Statement', accountMetadata };
   }
 
   /**
@@ -761,7 +809,7 @@ class StatementParser {
       const rowText = words.map(w => w.text).join(' ');
 
       // Ignore summary / footer / header rows
-      if (/^(Account Summary|Statement From|Statement Summary|Page no\.)/i.test(rowText.trim())) {
+      if (/^(Account Summary|Statement From|Statement Summary|Page no\.)/i.test(rowText.trim()) || this.isColumnHeaderRow(rowText)) {
         continue;
       }
 
@@ -859,7 +907,7 @@ class StatementParser {
    *   3. For each subsequent row: if Date-band word exists → new transaction row
    *      else → append narration to current transaction (multi-line narration)
    */
-  parseGenericTablePDF(spatialRows, fullText, accountMetadata) {
+  parseGenericTablePDF(spatialRows, fullText, accountMetadata, opts = {}) {
     const records = [];
 
     // Column header synonym maps (covers HDFC, ICICI, Axis, Kotak, PNB, YES Bank, IndusInd, RBL etc.)
@@ -872,6 +920,9 @@ class StatementParser {
       ref:       /^(ref\.?\s*no\.?|chq\.?\/ref\.?\s*no\.?|chq\s*\/\s*ref\s*no|utr|cheque\s*no\.?|chq\.?|txn\.?\s*id|transaction\s*id|reference|ref|narr\.?\s*no\.?|instrument\s*no|instrument\s*id)$/i,
       balance:   /^(balance|closing\s*balance|avl\.?\s*bal\.?|running\s*balance|running\s*bal|outstanding\s*balance|ledger\s*balance)$/i,
     };
+    // Optional paying-account column (UPI apps); other banks never pass it, so their column bands are unchanged
+    if (opts.accountCol) colPatterns.account = opts.accountCol;
+    const accountOf = (t) => opts.accountCol ? { accountInfo: this.upiInstrumentText(t.accountParts.join(' ')) } : {};
 
     // Find header row
     let headerRowIdx = -1;
@@ -931,12 +982,14 @@ class StatementParser {
             narration: currentTxn.narrationParts.join(' ').replace(/\s+/g, ' ').trim() || 'Bank Transaction',
             amount: currentTxn.amount,
             explicitType: currentTxn.explicitType,
-            referenceNo: currentTxn.referenceNo
+            referenceNo: currentTxn.referenceNo,
+            ...accountOf(currentTxn)
           });
         }
 
         const narrWords = words.filter(w => getCol(w, 'narration')).map(w => w.text);
         const refWords = words.filter(w => getCol(w, 'ref')).map(w => w.text);
+        const accountParts = words.filter(w => getCol(w, 'account')).map(w => w.text);
 
         // Debit
         let txnAmount = 0;
@@ -959,7 +1012,8 @@ class StatementParser {
           if (!isNaN(v) && v > 0) {
             txnAmount = v;
             const narrText = narrWords.join(' ');
-            explicitType = /credit|deposit|salary|refund|received|cashback/i.test(narrText) ? 'income' : 'expense';
+            const incomeRe = /credit|deposit|salary|refund|received|cashback/i;
+            explicitType = (opts.accountCol ? this.upiIsIncome(narrText, incomeRe) : incomeRe.test(narrText)) ? 'income' : 'expense';
           }
         }
 
@@ -971,15 +1025,18 @@ class StatementParser {
           narrationParts: narrWords,
           amount: txnAmount,
           explicitType: explicitType,
-          referenceNo: refNo || null
+          referenceNo: refNo || null,
+          accountParts
         };
 
       } else if (currentTxn) {
         // Continuation row — append narration words
         const rowText = words.map(w => w.text).join(' ');
         // Skip rows that look like totals or page footers
-        if (/^(total|subtotal|page|opening|closing|grand|statement)/i.test(rowText.trim())) continue;
+        if (/^(total|subtotal|page|opening|closing|grand|statement)/i.test(rowText.trim()) || this.isColumnHeaderRow(rowText)) continue;
+        if (colBands.account) currentTxn.accountParts.push(...words.filter(w => getCol(w, 'account')).map(w => w.text));
         const narrContinuation = words.filter(w => {
+          if (colBands.account && getCol(w, 'account')) return false; // wrapped account text ("- 1234") is not narration
           // Add words in narration band OR anywhere that doesn't look like an amount/date
           const isDate = /\d{1,2}[\/\-\.]\d{1,2}[\/\-\.](\d{2}|\d{4})/.test(w.text);
           const isAmount = /^[\d,]+\.\d{2}$/.test(w.text);
@@ -1015,7 +1072,8 @@ class StatementParser {
         narration: currentTxn.narrationParts.join(' ').replace(/\s+/g, ' ').trim() || 'Bank Transaction',
         amount: currentTxn.amount,
         explicitType: currentTxn.explicitType,
-        referenceNo: currentTxn.referenceNo
+        referenceNo: currentTxn.referenceNo,
+        ...accountOf(currentTxn)
       });
     }
 
@@ -1024,36 +1082,78 @@ class StatementParser {
   }
 
   /**
+   * Payer instrument of a UPI-app row ("Paid by HDFC Bank 1234", "Debited from XXXXXXXX3863", "Paid to HDFC Bank 1234"
+   * on GPay received rows, or a bare "State Bank Of India - 1234") -> the accountInfo string, else null when the
+   * line is not an instrument line. '' means wallet / UPI Lite / no usable text: the row uses the default account.
+   */
+  upiInstrumentLine(line) {
+    const s = String(line || '').replace(/^\d{1,2}:\d{2}\s*(?:[AP]M)?\s+/i, '');
+    const m = s.match(/^paid\s+to\s+(.+)$/i)
+      || s.match(/(?:^|\s)(?:paid\s+(?:by|from|using|via)|debited\s+from|credited\s+to|payment\s+(?:method|mode))\b\s*:?\s*(.*)$/i);
+    if (m) return this.upiInstrumentText(m[1].replace(/\s*(?:UPI\s*)?(?:Transaction|Txn)\s*ID.*$|\s*UTR.*$/i, ''));
+    return /bank/i.test(s) && /^[A-Za-z][A-Za-z &.]{2,40}?\s*-\s*[Xx*•]*\d{4}$/.test(s) ? this.upiInstrumentText(s) : null;
+  }
+
+  // "Paid to / Bill payment of HDFC Credit Card" is money going out even though the line says "credit"
+  upiIsIncome(line, incomeRe) {
+    if (/\breceived\s+from\b/i.test(line)) return true;
+    return !/\b(?:paid\s+(?:to|for)|bill\s*payment|recharge)\b/i.test(line) && incomeRe.test(line);
+  }
+
+  upiInstrumentText(raw) {
+    const s = String(raw || '').replace(/^bank\s+account\s*/i, '').trim();
+    if (!s || /wallet|upi\s*lite|balance/i.test(s)) return '';
+    // detectRuPayCC only accepts a plain "credit card" when the text also ties it to UPI
+    return /credit\s*card|rupay/i.test(s) ? `${s} on UPI` : s;
+  }
+
+  /**
    * UPI App PDF Parser (PhonePe / Google Pay statement exports)
    * These have block-per-transaction format similar to Navi but with different anchor patterns.
    * PhonePe: "DATE  MERCHANT NAME  ₹AMOUNT  Debit/Credit"
-   * GPay: Varies; often "DATE  TIME  Description  ₹AMOUNT"
+   * GPay: 3 rows per transaction in Date | Details | Amount columns:
+   *   "01 Jan,  Paid to NAME  ₹100" / "2025  UPI Transaction ID: 123…" / "10:30 AM  Paid by HDFC Bank 1234"
+   *   (received rows carry "Paid to <bank> <last4>" as the account line). The year may wrap onto the 2nd row.
    */
   parseUPIAppPDF(spatialRows, fullText, accountMetadata) {
     const records = [];
     const lines = spatialRows.map(r => r.words.map(w => w.text).join(' ').trim()).filter(l => l);
 
-    const anchorRe = /(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4}|\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\w*\s+\d{2,4})/i;
-    const amountRe = /(?:₹|Rs\.?|INR)?\s*([\d,]+(?:\.\d{1,2})?)/;
+    // Re-join a date whose year wrapped onto the next row: "01 Jan," + "2025 UPI Transaction ID: …"
+    for (let k = 0; k + 1 < lines.length; k++) {
+      const wrapped = lines[k].match(/^(\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*),?(?!\w)(?!\s*\d{4}\b)/i);
+      const year = wrapped && lines[k + 1].match(/^((?:19|20)\d{2})\b\s*/);
+      if (year) {
+        lines[k] = `${wrapped[1]} ${year[1]}${lines[k].slice(wrapped[0].length)}`;
+        lines[k + 1] = lines[k + 1].slice(year[0].length);
+      }
+    }
 
+    const anchorRe = /(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4}|\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\w*,?\s+\d{2,4})/i;
     let i = 0;
     while (i < lines.length) {
       const line = lines[i];
       const dateM = line.match(anchorRe);
-      const amtM = line.match(amountRe);
+      const amtM = dateM ? this.extractAmount(line, dateM[0]) : null;
 
       if (dateM && amtM) {
-        const amount = parseFloat(amtM[1].replace(/,/g, ''));
-        if (!isNaN(amount) && amount > 0) {
-          const isIncome = /credit|received|refund|cashback|cr\b/i.test(line);
-          const isDebit = /debit|paid|sent|dr\b|debited/i.test(line);
+        const amount = amtM.value;
+        {
+          const isIncome = this.upiIsIncome(line, /credit|received|refund|cashback|\bcr\b/i);
 
-          // Collect next 1-2 lines as narration supplement
-          let narration = line.replace(dateM[0], '').replace(amtM[0], '').replace(/\s+/g, ' ').trim();
-          for (let j = i + 1; j <= Math.min(i + 2, lines.length - 1); j++) {
+          // Collect next 1-2 lines as narration supplement; the payer account line and txn ID (up to 4 rows down) are kept apart
+          let narration = line.replace(dateM[0], '').replace(amtM.text, '').replace(/\s+/g, ' ').trim();
+          let accountInfo = '';
+          let txnId = '';
+          for (let j = i + 1; j <= Math.min(i + 4, lines.length - 1); j++) {
             const nextLine = lines[j];
-            if (nextLine.match(anchorRe) && nextLine.match(amountRe)) break;
-            if (nextLine.length > 3 && nextLine.length < 100) {
+            const nextDate = nextLine.match(anchorRe);
+            if (nextDate && this.extractAmount(nextLine, nextDate[0])) break;
+            const inst = this.upiInstrumentLine(nextLine);
+            if (inst !== null) accountInfo = inst;
+            const tid = nextLine.match(/(?:UPI\s*)?Transaction\s*ID[:\s]*([A-Za-z0-9]{8,30})/i);
+            if (tid) txnId = tid[1];
+            if (j <= i + 2 && inst === null && !tid && !/^\d{1,2}:\d{2}\s*(?:[AP]M)?$/i.test(nextLine) && nextLine.length > 3 && nextLine.length < 100) {
               narration += ' ' + nextLine;
             }
           }
@@ -1062,8 +1162,9 @@ class StatementParser {
             date: this.normalizeDate(dateM[0]),
             narration: narration || 'UPI Transaction',
             amount: amount,
-            explicitType: isIncome ? 'income' : (isDebit ? 'expense' : 'expense'),
-            referenceNo: this.extractRefNo(line),
+            explicitType: isIncome ? 'income' : 'expense',
+            referenceNo: txnId || this.extractRefNo(line),
+            accountInfo,
             paymentMode: 'UPI'
           });
         }
@@ -1180,8 +1281,8 @@ class StatementParser {
 
     const dateCol = headers.find(h => /date|txn.?date|time/i.test(h));
     const descCol = headers.find(h => /narration|desc|particular|remark|details|payee|paid to|party/i.test(h));
-    const debitCol = headers.find(h => /debit|withdrawal|dr|paid out/i.test(h));
-    const creditCol = headers.find(h => /credit|deposit|cr|paid in/i.test(h));
+    const debitCol = headers.find(h => this.isDebitHeader(h));
+    const creditCol = headers.find(h => this.isCreditHeader(h));
     const amountCol = headers.find(h => /amount|total|sum/i.test(h));
     const refCol = headers.find(h => /ref|utr|txn.?id|cheque|chq|order/i.test(h));
     const instrumentCol = headers.find(h => /account|instrument|mode|method|paid.?via|paid.?from|card/i.test(h));
@@ -1195,21 +1296,12 @@ class StatementParser {
       const refNo = refCol ? r[refCol] : null;
       const accountInfo = instrumentCol ? r[instrumentCol] : null;
 
-      let amount = 0;
-      let explicitType = 'expense';
-
-      if (debitCol && r[debitCol] && parseFloat(String(r[debitCol]).replace(/,/g, '')) > 0) {
-        amount = parseFloat(String(r[debitCol]).replace(/,/g, ''));
-        explicitType = 'expense';
-      } else if (creditCol && r[creditCol] && parseFloat(String(r[creditCol]).replace(/,/g, '')) > 0) {
-        amount = parseFloat(String(r[creditCol]).replace(/,/g, ''));
-        explicitType = 'income';
-      } else if (amountCol && r[amountCol]) {
-        const rawNum = parseFloat(String(r[amountCol]).replace(/,/g, ''));
-        amount = Math.abs(rawNum);
-        if (rawNum < 0) explicitType = 'expense';
-        else if (/credit|deposit|salary|refund/i.test(narration)) explicitType = 'income';
-      }
+      const { amount, explicitType } = this.resolveAmountCells(
+        debitCol ? r[debitCol] : null,
+        creditCol ? r[creditCol] : null,
+        amountCol ? r[amountCol] : null,
+        narration
+      );
 
       if (amount > 0 && rawDate) {
         records.push({
@@ -1235,14 +1327,14 @@ class StatementParser {
     rows.forEach(row => {
       const line = row.join(' ');
       const dateMatch = line.match(/(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4})/);
-      const amountMatch = line.match(/(?:₹|Rs\.?|INR)?\s*([0-9]{1,3}(?:,[0-9]{2,3})*(?:\.[0-9]{1,2}))\b/);
+      const amt = dateMatch ? this.extractAmount(line, dateMatch[0]) : null;
 
-      if (dateMatch && amountMatch) {
+      if (dateMatch && amt) {
         records.push({
           date: this.normalizeDate(dateMatch[0]),
           narration: line,
-          amount: parseFloat(amountMatch[1].replace(/,/g, '')),
-          explicitType: /cr|credit|deposit/i.test(line) ? 'income' : 'expense'
+          amount: amt.value,
+          explicitType: /\bdr\b/i.test(line) ? 'expense' : (/\b(cr|credit|deposit)\b/i.test(line) ? 'income' : null)
         });
       }
     });
@@ -1276,8 +1368,8 @@ class StatementParser {
     const headers = (jsonData[headerIdx] || []).map(h => String(h).trim());
     const dateIdx = headers.findIndex(h => /date|txn.?date|time/i.test(h));
     const descIdx = headers.findIndex(h => /narration|desc|particular|remark|details|payee|paid to/i.test(h));
-    const debitIdx = headers.findIndex(h => /debit|withdrawal|dr|paid out/i.test(h));
-    const creditIdx = headers.findIndex(h => /credit|deposit|cr|paid in/i.test(h));
+    const debitIdx = headers.findIndex(h => this.isDebitHeader(h));
+    const creditIdx = headers.findIndex(h => this.isCreditHeader(h));
     const amountIdx = headers.findIndex(h => /amount|total|sum/i.test(h));
     const refIdx = headers.findIndex(h => /ref|utr|txn.?id|cheque|chq/i.test(h));
     const instIdx = headers.findIndex(h => /account|instrument|mode|method|paid.?via|paid.?from|card/i.test(h));
@@ -1293,21 +1385,12 @@ class StatementParser {
       const refNo = refIdx >= 0 ? row[refIdx] : null;
       const accountInfo = instIdx >= 0 ? row[instIdx] : null;
 
-      let amount = 0;
-      let explicitType = 'expense';
-
-      if (debitIdx >= 0 && row[debitIdx] && parseFloat(String(row[debitIdx]).replace(/,/g, '')) > 0) {
-        amount = parseFloat(String(row[debitIdx]).replace(/,/g, ''));
-        explicitType = 'expense';
-      } else if (creditIdx >= 0 && row[creditIdx] && parseFloat(String(row[creditIdx]).replace(/,/g, '')) > 0) {
-        amount = parseFloat(String(row[creditIdx]).replace(/,/g, ''));
-        explicitType = 'income';
-      } else if (amountIdx >= 0 && row[amountIdx]) {
-        const rawNum = parseFloat(String(row[amountIdx]).replace(/,/g, ''));
-        amount = Math.abs(rawNum);
-        if (rawNum < 0) explicitType = 'expense';
-        else if (/credit|deposit|salary|refund/i.test(narration)) explicitType = 'income';
-      }
+      const { amount, explicitType } = this.resolveAmountCells(
+        debitIdx >= 0 ? row[debitIdx] : null,
+        creditIdx >= 0 ? row[creditIdx] : null,
+        amountIdx >= 0 ? row[amountIdx] : null,
+        narration
+      );
 
       if (amount > 0 && rawDate) {
         records.push({
@@ -1337,12 +1420,12 @@ class StatementParser {
     let bankName = 'Primary Bank';
     let color = '#1e3a8a';
     
-    if (fn.includes('sbi') || fn.includes('state bank') || header.includes('state bank of india') || /\bsbin\b/i.test(header) || header.includes('wdl tfr') || header.includes('dep tfr')) {
-      bankName = 'State Bank of India (SBI)';
-      color = '#065f46';
-    } else if (fn.includes('navi') || header.includes('paid via navi') || header.includes('navi technologies')) {
+    if (fn.includes('navi') || header.includes('paid via navi') || header.includes('navi technologies')) {
       bankName = 'Navi UPI';
       color = '#2563eb';
+    } else if (fn.includes('sbi') || fn.includes('state bank') || header.includes('state bank of india') || /\bsbin\b/i.test(header) || header.includes('wdl tfr') || header.includes('dep tfr')) {
+      bankName = 'State Bank of India (SBI)';
+      color = '#065f46';
     } else if (fn.includes('phonepe') || header.includes('phonepe')) {
       bankName = 'PhonePe';
       color = '#6b21a8';
@@ -1385,7 +1468,7 @@ class StatementParser {
     } else if (text.includes('hdfc bank') && !text.includes('wdl tfr')) {
       bankName = 'HDFC Bank';
       color = '#1e3a8a';
-    } else if (text.includes('state bank') || text.includes('sbi')) {
+    } else if (text.includes('state bank') || /\bsbi\b/.test(text)) {
       bankName = 'State Bank of India (SBI)';
       color = '#065f46';
     } else {
@@ -1399,7 +1482,7 @@ class StatementParser {
     const isBankStatement = text.includes('wdl tfr') || text.includes('dep tfr') || text.includes('savings account') || text.includes('current account') || text.includes('clear balance');
     if (!isBankStatement && (text.includes('credit card statement') || text.includes('minimum amount due') || text.includes('total amount due') || text.includes('card statement') || text.includes('card ending in'))) {
       type = 'credit_card';
-    } else if (text.includes('google pay') || text.includes('gpay') || text.includes('phonepe') || text.includes('paytm wallet') || text.includes('amazon pay wallet') || text.includes('upi history') || text.includes('upi statement')) {
+    } else if (!isBankStatement && (bankName === 'Navi UPI' || text.includes('google pay') || text.includes('gpay') || text.includes('phonepe') || text.includes('paytm wallet') || text.includes('amazon pay wallet') || text.includes('upi history') || text.includes('upi statement'))) {
       type = 'wallet';
     } else if (text.includes('cash')) {
       type = 'cash';
@@ -1420,8 +1503,12 @@ class StatementParser {
     }
 
     if (!last4 && (bankName.includes('SBI') || bankName.includes('State Bank'))) {
-      const sbiAccMatch = fullText.match(/\b([0-9]{11})\b/);
-      if (sbiAccMatch) last4 = sbiAccMatch[1].slice(-4);
+      const nums = [...fullText.matchAll(/\b(\d{11})\b/g)].map(m => m[1]);
+      const cifAt = fullText.search(/cif\s*(?:number|no)/i);
+      const accAt = fullText.search(/account\s*(?:number|no)/i);
+      // CIF number precedes the account number in the header, so with both labels present the second value is the account
+      const pick = (cifAt >= 0 && accAt > cifAt && nums.length > 1) ? nums[1] : nums[0];
+      if (pick) last4 = pick.slice(-4);
     }
 
     if (!last4) {
@@ -1446,7 +1533,7 @@ class StatementParser {
     if (type === 'credit_card') {
       name = `${bankName} Credit Card` + (last4 ? ` (•••• ${last4})` : '');
     } else if (type === 'wallet') {
-      name = `${bankName} UPI Wallet`;
+      name = /upi/i.test(bankName) ? `${bankName} Wallet` : `${bankName} UPI Wallet`;
     } else if (type === 'cash') {
       name = 'Cash in Hand';
     } else {
@@ -1516,7 +1603,8 @@ class StatementParser {
 
     // Detect last 4 digits (e.g. RuPay Credit Card **4589 or ending in 4589)
     let last4 = '';
-    const numMatch = str.match(/(?:card|rupay|cc|ending(?:\s*in)?|xx|[*X]{2,12}|a\/c)[\s#:-]*([0-9]{4})\b/i);
+    const numMatch = str.match(/(?:card|rupay|cc|ending(?:\s*in)?|xx|[*X]{2,12}|a\/c)[\s#:-]*([0-9]{4})\b/i)
+      || str.match(/\b[xX*]{2,}\s*([0-9]{2,4})\b/);
     if (numMatch && numMatch[1]) {
       last4 = numMatch[1];
     } else {
@@ -1539,31 +1627,153 @@ class StatementParser {
     };
   }
 
+  localISODate(d) {
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  }
+
+  buildISODate(year, month, day) {
+    const maxYear = new Date().getFullYear() + 1;
+    if (year < 1990 || year > maxYear) return null;
+    const probe = new Date(year, month - 1, day);
+    if (probe.getFullYear() !== year || probe.getMonth() !== month - 1 || probe.getDate() !== day) return null;
+    return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  }
+
+  /**
+   * Returns a local-calendar 'YYYY-MM-DD' string, or null when the input can't be read
+   * as a real date. Never converts through UTC (that shifts dates a day back in UTC+ zones).
+   */
   normalizeDate(rawDate) {
-    if (!rawDate) return new Date().toISOString().split('T')[0];
+    if (rawDate === null || rawDate === undefined || rawDate === '') return null;
+    if (rawDate instanceof Date) return isNaN(rawDate.getTime()) ? null : this.localISODate(rawDate);
 
     const str = String(rawDate).trim();
 
     if (/^\d{5}$/.test(str)) {
-      const d = new Date((parseInt(str) - (25567 + 2)) * 86400 * 1000);
-      return d.toISOString().split('T')[0];
+      const d = new Date(Date.UTC(1899, 11, 30) + parseInt(str, 10) * 86400000);
+      return this.buildISODate(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate());
     }
 
-    const dmyMatch = str.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})/);
-    if (dmyMatch) {
-      let day = dmyMatch[1].padStart(2, '0');
-      let month = dmyMatch[2].padStart(2, '0');
-      let year = dmyMatch[3];
-      if (year.length === 2) year = '20' + year;
-      return `${year}-${month}-${day}`;
+    const isoMatch = str.match(/^(\d{4})[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})(?!\d)/);
+    if (isoMatch) return this.buildISODate(+isoMatch[1], +isoMatch[2], +isoMatch[3]);
+
+    const numMatch = str.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2}|\d{4})(?!\d)/);
+    if (numMatch) {
+      let first = +numMatch[1];
+      let second = +numMatch[2];
+      let year = +numMatch[3];
+      if (numMatch[3].length === 2) year += 2000;
+      // Indian statements are day-first; only swap when day-first is impossible (e.g. 01/15/2024).
+      if (second > 12 && first <= 12) [first, second] = [second, first];
+      return this.buildISODate(year, second, first);
     }
 
-    const parsed = new Date(str);
-    if (!isNaN(parsed.getTime())) {
-      return parsed.toISOString().split('T')[0];
+    const months = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12 };
+    const dayFirst = str.match(/^(\d{1,2})[\s\-\/\.]+([A-Za-z]{3,9})\.?,?[\s\-\/\.]+(\d{2}|\d{4})(?!\d)/);
+    if (dayFirst && months[dayFirst[2].slice(0, 3).toLowerCase()]) {
+      let year = +dayFirst[3];
+      if (dayFirst[3].length === 2) year += 2000;
+      return this.buildISODate(year, months[dayFirst[2].slice(0, 3).toLowerCase()], +dayFirst[1]);
+    }
+    const monthFirst = str.match(/^([A-Za-z]{3,9})\.?\s+(\d{1,2}),?\s+(\d{4})(?!\d)/);
+    if (monthFirst && months[monthFirst[1].slice(0, 3).toLowerCase()]) {
+      return this.buildISODate(+monthFirst[3], months[monthFirst[1].slice(0, 3).toLowerCase()], +monthFirst[2]);
     }
 
-    return new Date().toISOString().split('T')[0];
+    return null;
+  }
+
+  /**
+   * Find the transaction amount in a statement line. The date and any time-of-day are
+   * removed first so "15 Jan 2024 ... Rs. 1,250.00" yields 1250, not 15. Bare integers are
+   * ignored (too easily an ID); an amount needs a currency prefix, thousands commas or decimals.
+   */
+  extractAmount(line, dateText = '') {
+    let s = dateText ? String(line).replace(dateText, ' ') : String(line);
+    s = s.replace(/\b\d{1,2}:\d{2}(?::\d{2})?\s*(?:AM|PM)?/gi, ' ');
+    let m = s.match(/(?:₹|Rs\.?|INR)\s*([\d,]+(?:\.\d{1,2})?)/i);
+    let value;
+    let text;
+    if (m) {
+      value = parseFloat(m[1].replace(/,/g, ''));
+      text = m[0];
+    } else {
+      m = s.match(/(?:^|[^\w.])(\d{1,3}(?:,\d{2,3})+(?:\.\d{1,2})?|\d+\.\d{1,2})(?![\w.])/);
+      if (!m) return null;
+      value = parseFloat(m[1].replace(/,/g, ''));
+      text = m[1];
+    }
+    if (isNaN(value) || value <= 0) return null;
+    return { value, text };
+  }
+
+  /**
+   * True for a repeated table-header row ("Date  Narration  Chq./Ref.No.  Withdrawal  Deposit  Balance").
+   * Banks reprint it at the top of every page; without this guard it is glued onto the previous
+   * transaction's narration as if it were a wrapped line. Needs 3+ distinct column-header terms,
+   * so a real narration that merely contains one of these words is never dropped.
+   */
+  isColumnHeaderRow(text) {
+    const terms = [/\bdate\b/i, /\bvalue\s*d(?:t|ate)\b/i, /\b(?:narration|description|particulars|details|remarks)\b/i,
+      /\b(?:chq|cheque|ref)\b/i, /\b(?:debit|withdrawal|dr)\b/i, /\b(?:credit|deposit|cr)\b/i, /\bbalance\b/i, /\bamount\b/i];
+    return terms.filter(re => re.test(text)).length >= 3;
+  }
+
+  // Anchored so "Description" (des-CR-iption) or "Address" (ad-DR-ess) never count as credit/debit columns.
+  isDebitHeader(h) {
+    return /(^|[\s_\-.])(debits?|withdrawals?|dr|paid\s*out)(\b|$)/i.test(String(h));
+  }
+
+  isCreditHeader(h) {
+    return /(^|[\s_\-.])(credits?|deposits?|cr|paid\s*in)(\b|$)/i.test(String(h));
+  }
+
+  /**
+   * Resolve one CSV/Excel row's amount and direction. When the direction can't be known
+   * (single unsigned Amount column) explicitType is null so the categorizer decides,
+   * instead of forcing every such row to 'expense' (which turned salary into spending).
+   */
+  resolveAmountCells(debitCell, creditCell, amountCell, narration) {
+    const debit = this.parseAmountCell(debitCell).value;
+    if (debit > 0) return { amount: debit, explicitType: 'expense' };
+
+    const credit = this.parseAmountCell(creditCell).value;
+    if (credit > 0) return { amount: credit, explicitType: 'income' };
+
+    if (amountCell !== null && amountCell !== undefined && amountCell !== '') {
+      const { value, suffix } = this.parseAmountCell(amountCell);
+      if (!isNaN(value) && value !== 0) {
+        let explicitType = null;
+        if (value < 0 || suffix === 'dr') explicitType = 'expense';
+        else if (suffix === 'cr' || /\b(credit|deposit|salary|refund)\b/i.test(narration || '')) explicitType = 'income';
+        return { amount: Math.abs(value), explicitType };
+      }
+    }
+    return { amount: 0, explicitType: null };
+  }
+
+  /**
+   * Parse a spreadsheet amount cell: handles currency symbols, thousands commas,
+   * accounting-style negatives "(1,234.00)" and Cr/Dr suffixes.
+   */
+  parseAmountCell(raw) {
+    if (raw === null || raw === undefined) return { value: NaN, suffix: null };
+    let s = String(raw).trim();
+    let negative = false;
+    if (/^\(.*\)$/.test(s)) {
+      negative = true;
+      s = s.slice(1, -1);
+    }
+    let suffix = null;
+    const suffixMatch = s.match(/\s*(cr|dr)\.?$/i);
+    if (suffixMatch) {
+      suffix = suffixMatch[1].toLowerCase();
+      s = s.slice(0, suffixMatch.index);
+    }
+    let value = parseFloat(s.replace(/₹|Rs\.?|INR|,|\s/gi, ''));
+    if (!isNaN(value) && negative) value = -value;
+    return { value, suffix };
   }
 
   extractRefNo(text) {
@@ -1608,4 +1818,11 @@ class StatementParser {
 }
 
 // Global instance
-window.statementParser = new StatementParser();
+if (typeof window !== 'undefined') {
+  window.statementParser = new StatementParser();
+}
+
+// Node/test export (does not affect browser <script> usage)
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = StatementParser;
+}
