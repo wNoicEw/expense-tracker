@@ -4,6 +4,71 @@ All notable changes to **Money Tracker (Offline AI Expense Tracker & Financial I
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.2] - 2026-09-18
+
+Found by running the real parser against an actual SBI account statement and a Navi UPI history (kept local, never committed).
+
+### Fixed
+- **Navi UPI import silently dropped rows (web + Android)**: every "Bill payment of …" row (credit-card bills, electricity) was skipped because only "Paid to / Received from" rows were recognised. In the sample, 5 of 104 transactions were lost, including a large card bill. All 104 now import.
+- **Credit-card bill payments double-counted**: a bill paid *of* a credit card was recorded as spending on top of the card's own purchases. They are now transfers (`Transfers & CC Bill`) on both platforms, and no longer create a phantom RuPay card account.
+- **Navi rows on the wrong account / polluted names (web)**: the paying account column was glued into the payee ("Paid to X HDFC Bank RuPay"), the user's own name leaked in from the page header, and everything landed on one wrongly-typed "State Bank of India Account (0000)". The parser now reads the details / account / amount columns by position, so each row goes to the account that paid it ("State Bank of India - 2105" and "Credit Card - XX99"). SBI-paid rows land on the same account as an imported SBI statement, which lets cross-statement duplicate detection work. Long payee names that wrap onto the time row are joined correctly.
+- **SBI statement typed as a UPI wallet with the wrong account number (web + Android)**: narrations containing "gpay"/"paytm" made a bank statement a wallet, and the first 11-digit number (the CIF number) was used instead of the Account Number. Bank statements are never wallets now, and the value labelled Account Number is used. Navi is identified before SBI so its "Account" column can't claim the whole file.
+- **Repeated table-header rows leaking into narrations (web)**: a per-page header row (`Date Narration … Withdrawal Deposit Balance`) is now recognised and skipped in the generic, SBI and credit-card table parsers instead of being appended to the previous transaction.
+- **Two accounts at one bank merged into one (web)**: a second account or card at the same bank silently reused the first because of a bank-name fallback. Accounts with different real last-4 digits now stay separate; the fallback only applies when a last-4 is missing or a placeholder.
+- **PhonePe / Google Pay / Paytm direction (web)**: "Bill payment of HDFC **Credit** Card" was read as income because the first CREDIT/DEBIT word (or any line containing "credit") decided the direction. The type column now wins, and "Paid to / Bill payment / Recharge" rows are outgoing.
+- **Google Pay dates split across rows** ("01 Jan," / "2025") are re-joined.
+- **Two-digit masked card suffixes** such as `XX99` are now captured as the card's last digits.
+- **Android restore picker** no longer hides backups saved as `text/plain` or `application/octet-stream` (uses `OpenDocument`; content is still validated on restore).
+- **Android US-order dates**: `01/15/2025` is now read as 15 January when day-first is impossible. Ambiguous dates such as `05/06/2025` stay day-first (Indian convention) and unreadable ones are still flagged rather than guessed.
+
+### Added
+- **Per-row account detection for UPI histories (web + Android)**: one statement that mixes several bank accounts, a UPI-linked RuPay credit card and the app wallet now splits into separate accounts, each keyed by its last four digits, instead of landing on one account. Covers Navi (verified on a real statement), and PhonePe, Google Pay and Paytm (built from public descriptions of their layouts, **not verified on real PDFs**). A row with no readable account line falls back to the file's default account and is never dropped. On Android the hints flow from the parser to the importer in memory only, with no database change.
+
+### Changed
+- **APK archive retention 10 → 5** (build script, README, project rules): each debug APK is ~26 MB, so ten fallback versions plus the root APK dominated the repository size. `ExpenseTracker.apk` is no longer kept in git history; only the current archive lives in the tree.
+- **Categorizer**: removed hyper-local merchant/institution title entries and added generic fee terms (`tuition`, `school fee`, `college fee`, `exam fee`, `challan`) to Bills & Utilities on web and Android. Manual corrections keep teaching the app your own merchants.
+- **Repository hygiene**: history no longer contains local tooling files, local SDK paths or personal identifiers; commits use the GitHub noreply address.
+
+### Verified against the real files
+- SBI statement: 118 of 118 rows match the PDF's own debit/credit/balance columns, with both totals identical to the paisa and an unbroken running balance.
+- Navi statement: 104 transaction IDs in the PDF, 104 records with unique IDs.
+
+### Tests
+- Web regression suite 13 → 27 (Navi block layout, per-app account splitting for PhonePe / Google Pay / Paytm with mixed banks, cards and wallet, same-bank account separation, header-row guard, masked card suffix). Android unit tests 31 → 42.
+
+### Known gaps
+- PhonePe, Google Pay and Paytm account detection has only been exercised on synthetic layouts; how those apps label credit-card, wallet and UPI Lite payments is unconfirmed. Unknown wording simply falls back to the default account.
+- Android reads flattened PDF text lines, so its Navi/UPI account parsing is tolerant of several glue orders but has not been tried against real PDFBox output on a device. A Navi row split across a page break is still dropped on Android. The repeated-header guard is web-only.
+- Android gives a UPI-linked card without a four-digit suffix (`XX99`) last-4 "0000"; the card is matched by bank name.
+
+## [1.4.1] - 2026-09-18
+
+### Fixed — data correctness
+- **Wrong amounts (web parser)**: the amount was taken from the first digit run on a line, so `15 Jan 2024 … Rs. 1,250.00` could import as ₹15. Amounts now come from `extractAmount`, which strips the date/time first and ignores bare integers; the raw-table path uses it too.
+- **Dropped income (web)**: an unsigned single `Amount` column was forced to *expense*, and unanchored `cr`/`dr` matching treated "Description"/"Address" as credit/debit columns. Direction is now left undetermined for the categorizer, and headers are anchored.
+- **Date shifts**: `new Date('YYYY-MM-DD')` / `toISOString()` moved dates back a day in UTC+ zones (IST). New `js/dateutil.js` keeps everything in the local calendar across dashboard, charts, budgets, export and duplicate detection. Unreadable dates are no longer silently "today": the row is kept and flagged for review (web and Android; Android heuristic parsers skip such rows).
+- **Over-eager de-duplication**: two identical rides in one statement no longer collapse; cross-statement fuzzy matches go to manual review instead of being dropped on import; a debit and a credit are never merged; transfer legs are never auto-deleted; merges are one atomic IndexedDB write.
+- **Learned rules**: newest rule wins, and learning from a manual add/edit no longer rewrites every matching transaction.
+- **Accounts**: editing keeps `createdAt`/auto-detected flags; a credit limit of 0 is accepted.
+
+### Added — backup & safety
+- **Web Full Backup (JSON)** card in Reports: download and restore (atomic, schema-checked, confirmation before replacing data). Requests persistent storage.
+- **Android**: backups written through the system save dialog (timestamp recorded only after a successful write), version-checked restore, CSV/JSON export fixes (quoting, formula-injection guard, no `1.25E7`), Room schema export, explicit destructive-migration scope, delete-transaction confirmation, state that survives rotation, KPI range selector, profile delete now closes and removes its database.
+- CSV export escapes formula starters on web too.
+
+### Security
+- Escaped the duplicate-pair reason text (stored XSS); a failed IndexedDB open now shows a recovery screen instead of a blank app.
+
+### Accessibility & design
+- **Web**: skip link, labelled landmarks, announced menu state and page title, labels for all form controls, accessible names for icon buttons and charts, closed modals/drawer removed from tab order, 44px touch targets on touch devices, contrast tokens replace hard-coded greys, empty-state call to action, debounced search.
+- **Android (HIG)**: calendar cells and rows have roles, descriptions and selected state; 48dp targets; light-theme semantic colours darkened to ≥4.5:1; calendar parity (compact amounts, ledger edit/delete, month rollover, midnight refresh).
+
+### Tests
+- New `tests/test_web_regressions.js` (13 checks, run with `TZ=Asia/Kolkata`); Android unit tests now 31 (calendar aggregation, backup reminder policy, strict dates).
+
+### Known gaps
+- Repeated PDF header rows can still leak into narration text; US-order `MM/DD` dates on Android are flagged/skipped rather than guessed; Android restore uses `GetContent("application/json")`, which some pickers filter.
+
 ## [1.4.0] - 2026-09-18
 
 ### Added

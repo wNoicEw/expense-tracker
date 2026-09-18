@@ -1,7 +1,7 @@
 # 💎 Money Tracker — Offline AI Expense Tracker & Financial Intelligence
 
-[![Version](https://img.shields.io/badge/version-1.4.0-10b981.svg?style=flat-square)](https://github.com/wNoicEw/expense-tracker/releases/tag/v1.4.0)
-[![Android](https://img.shields.io/badge/android-v1.4.0%20(SDK%2035)-3DDC84.svg?style=flat-square&logo=android&logoColor=white)](#-native-android-application-v140)
+[![Version](https://img.shields.io/badge/version-1.4.2-10b981.svg?style=flat-square)](https://github.com/wNoicEw/expense-tracker/releases/tag/v1.4.2)
+[![Android](https://img.shields.io/badge/android-v1.4.2%20(SDK%2035)-3DDC84.svg?style=flat-square&logo=android&logoColor=white)](#-native-android-application-v142)
 [![Privacy](https://img.shields.io/badge/privacy-100%25%20On--Device-6366f1.svg?style=flat-square)](#-privacy--security-guarantee)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg?style=flat-square)](LICENSE)
 
@@ -9,7 +9,7 @@ An executive-grade, **local-first financial intelligence suite** and offline exp
 
 ---
 
-## 📱 Native Android Application (v1.4.0)
+## 📱 Native Android Application (v1.4.2)
 
 The native Android app brings 100% feature parity with the browser application into a modern mobile experience:
 
@@ -22,7 +22,7 @@ The native Android app brings 100% feature parity with the browser application i
 - **Category Budgets & Health Scoring**: Visual progress allowances and real-time Financial Health Score (0–100).
 - **Direct APK Distribution**:
   - **Main Root (Always Latest)**: [**`ExpenseTracker.apk`**](ExpenseTracker.apk)
-  - **Version Archive**: [**`apks/`**](apks/) (Last 10 emergency fallback versions: `v1.1.2`, `v1.1.3`, `v1.1.4`, `v1.2.0`, `v1.2.1`, `v1.3.0`, `v1.3.1`, `v1.3.2`, `v1.3.3`, `v1.4.0`)
+  - **Version Archive**: [**`apks/`**](apks/) (Last 5 emergency fallback versions: `v1.3.2`, `v1.3.3`, `v1.4.0`, `v1.4.1`, `v1.4.2`)
 
 ---
 
@@ -97,7 +97,7 @@ The compiled APK will automatically be placed at the root [`ExpenseTracker.apk`]
 
 All notable changes and architectural updates are recorded in [**CHANGELOG.md**](CHANGELOG.md).
 
-- **Current Release:** [`v1.3.3`](https://github.com/wNoicEw/expense-tracker/releases/tag/v1.3.3) — *Stored-XSS and Android ANR fixes, modal accessibility across the app, a real mobile-overflow fix, and Android brought back to parity with the web app's balance-sign and duplicate-detection corrections.*
+- **Current Release:** [`v1.4.2`](https://github.com/wNoicEw/expense-tracker/releases/tag/v1.4.2) — *Real-statement fixes (Navi bill payments no longer dropped, SBI account detection, credit-card bill payments as transfers), plus the data-correctness, backup/restore and accessibility work from 1.4.1.*
 
 ---
 
