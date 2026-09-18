@@ -4,6 +4,55 @@ All notable changes to **Money Tracker (Offline AI Expense Tracker & Financial I
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.2] - 2026-09-18
+
+### Fixed
+- **Accessibility (P0)**: the new calendar and timepicker popovers were completely keyboard-inoperable (no `tabindex`/`role`/`aria-*`, replacing the native `<input type="date">`/`type="time">` this feature removed, which *was* keyboard-operable). Both popovers now expose `role="dialog"` with initial focus on open and focus-restore on close; calendar day cells use a roving-tabindex grid with arrow-key/Home/End navigation and Enter/Space to select; the timepicker dial ticks are keyboard-steppable the same way, including when the current time doesn't land on an exact displayed tick (`js/calendar.js`, `js/timepicker.js`).
+- **Design consistency**: the timepicker's hardcoded emerald green (`#10b981`/`#059669`) didn't match the calendar's blue `--color-primary` sitting right next to it in the same row, in both themes — now uses the app's actual accent color (`css/components.css`).
+- **UX**: added a "Clear" action to the calendar popover footer (previously no way to unset a date without reopening and picking a new one), and made the year label clickable to type a year directly instead of stepping one year per click.
+- **Security**: `t.id` was interpolated unescaped into an inline `onclick` string in the calendar's day-ledger popup; switched to `data-txn-id` attributes with delegated listeners (`js/calendar.js`).
+- **Reliability**: removed a duplicate click handler on the date field that fired `openDatePicker` twice per click (masked today by an unrelated debounce, but fragile); the wrapper's own `onclick` is now the only binding (`js/app.js`).
+- **Test coverage**: `tests/test_web_edit_transaction.js` previously reimplemented fake logic and never exercised the real `calendar.js`/`timepicker.js`, and used a UTC-bug-prone date fallback that didn't match the app's actual `toLocaleDateString('en-CA')` logic. Both files are now Node-testable (guarded browser-only instantiation) and the suite asserts leap-year/days-in-month/date-format math and 12h↔24h time conversion directly.
+- **Caching**: `<script>` tags had no cache-busting version query (unlike the CSS `<link>` tags, which already used `?v=`), so a browser could silently keep serving stale JS after an update ships. All script tags now carry a version query matching the stylesheet convention.
+
+## [1.3.1] - 2026-09-18
+
+### Fixed
+- **Segmented Control Light Mode Text & Icon Contrast (`css/components.css`)**:
+  - Fixed an issue where the active pill button in `.segmented-control` (e.g. `[ Table | Calendar ]` toggle on the Transactions view) had dark grey text and icon on a blue background in Light Mode.
+  - Corrected selector specificity and explicitly enforced high-contrast pure white (`#ffffff`) text and SVG icon stroke for `.segmented-control button.btn-primary *` and `.segmented-control button.active *`.
+  - Inactive segmented buttons retain clean, readable slate (`#475569`) styling without overriding the active state.
+
+## [1.3.0] - 2026-09-18
+
+### Added
+- **Materialize-Style Themed Time Picker Suite (`js/timepicker.js`, `css/components.css`)**:
+  - Replaced browser-native time pickers with an interactive analog clock-dial timepicker inspired by Materialize CSS and classic analog watch design.
+  - **Real Analog Clock Arms**: Features dedicated Hour and Minute clock hands with counterbalance tails, center metallic pivot hub, and high-visibility neon emerald active styling with subtle glow. Both hands remain simultaneously visible just like a real mechanical clock face.
+  - **Smooth View Transitions**: Selecting an hour automatically smoothly advances the dial to the minutes view. Users can also tap the large digital readout (`HH : MM`) in the header to jump back and forth.
+  - **AM / PM Segment Switcher**: Supports seamless 12-hour selection with instant AM/PM toggle while outputting standard 24-hour `HH:mm` format for 100% backward database and test compatibility.
+  - **Quick Action Buttons**: Includes 1-tap "Now" (current time), "Cancel", and "OK" actions with keyboard accessibility (Escape to close, Enter to submit).
+  - **Dual Theme Support**: Custom styled for OLED Dark Mode (`#090d16` with radiant `#10b981` accents) and Luxury Light Theme (`#ffffff` frosted card with forest emerald `#059669` accents).
+  - **Removed Old/Native Time Pickers**: Completely eliminated `<input type="time">` indicators and native browser pickers from Add and Edit Transaction modals.
+
+## [1.2.1] - 2026-09-18
+
+### Changed & Cleaned Up
+- **Removed Old/Native Browser Date Picker (`index.html`, `components.css`, `js/calendar.js`)**:
+  - Fully removed the native browser date picker indicator and its browser-specific popups from `#mTxnDate` (Add Transaction modal) and `#eTxnDate` (Edit Transaction modal).
+  - Consolidated the date input into a clean, unified interactive component with a single calendar icon that opens exclusively the custom Money Tracker calendar popover.
+  - Suppressed `-webkit-calendar-picker-indicator` across the application so no native OS pickers conflict or appear.
+
+## [1.2.0] - 2026-09-18
+
+### Added
+- **Financial Calendar & Themed DatePicker (`js/calendar.js`, `css/components.css`)**:
+  - Adapted core calendar logic from `trananhtuat/js-calendar` (leap-year calculations, 3x4 month overlay grid, year stepper, day formatting) into an offline, zero-dependency financial calendar engine.
+  - **Themed DatePicker Popover**: Replaced plain browser date pickers with an anchored glassmorphic calendar popover for `#mTxnDate` (Add Transaction) and `#eTxnDate` (Edit Transaction). Supports instant date selection, quick presets (`Today`, `Yesterday`), animated month overlay switcher, and year navigation.
+  - **Transactions Calendar View**: Added `Table | Calendar` segmented view toggle on the Transactions tab. Displays monthly financial summary pills (Total Inflow, Total Outflow, Net Cashflow) and daily expense/income badges on calendar day cells.
+  - **Interactive Day Ledger**: Clicking any calendar date expands an itemized day ledger displaying transactions, totals, quick edit/delete actions, and a 1-tap "+ Add for this Date" shortcut.
+  - **Full Dark & Light Theme Synchronization**: Calendar styling automatically binds to the application's global design tokens (`[data-theme="light"]` and OLED dark mode) with high-contrast day numbers, crisp borders, and subtle glassmorphic glow.
+
 ## [1.1.4] - 2026-09-18
 
 ### Fixed

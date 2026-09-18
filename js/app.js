@@ -16,6 +16,7 @@ class App {
     this.typeFilter = 'all';
     this.chartViewMode = 'cumulative';
     this.theme = 'dark';
+    this.txnViewMode = 'table';
   }
 
   escape(str) {
@@ -233,7 +234,11 @@ class App {
         await this.renderReviewView();
         break;
       case 'transactions':
-        await this.renderTransactionsTable();
+        if (this.txnViewMode === 'calendar') {
+          await this.renderTxnCalendar();
+        } else {
+          await this.renderTransactionsTable();
+        }
         break;
       case 'duplicates':
         await this.renderDuplicatesView();
@@ -810,6 +815,55 @@ class App {
       this.showToast('Transaction deleted successfully', 'info');
       await this.refreshAllViews();
     }
+  }
+
+  deleteTxn(id) {
+    return this.deleteTransaction(id);
+  }
+
+  setTxnViewMode(mode) {
+    this.txnViewMode = mode;
+    const btnTable = document.getElementById('btnTxnViewTable');
+    const btnCal = document.getElementById('btnTxnViewCalendar');
+    const tableContainer = document.getElementById('txnTableViewContainer');
+    const calContainer = document.getElementById('txnCalendarViewContainer');
+
+    if (mode === 'calendar') {
+      if (btnTable) {
+        btnTable.classList.remove('btn-primary');
+        btnTable.classList.add('btn-ghost');
+      }
+      if (btnCal) {
+        btnCal.classList.remove('btn-ghost');
+        btnCal.classList.add('btn-primary');
+      }
+      if (tableContainer) tableContainer.style.display = 'none';
+      if (calContainer) {
+        calContainer.style.display = 'block';
+        this.renderTxnCalendar();
+      }
+    } else {
+      if (btnTable) {
+        btnTable.classList.remove('btn-ghost');
+        btnTable.classList.add('btn-primary');
+      }
+      if (btnCal) {
+        btnCal.classList.remove('btn-primary');
+        btnCal.classList.add('btn-ghost');
+      }
+      if (tableContainer) tableContainer.style.display = 'block';
+      if (calContainer) calContainer.style.display = 'none';
+      this.renderTransactionsTable();
+    }
+    if (window.lucide) lucide.createIcons();
+  }
+
+  async renderTxnCalendar() {
+    const calContainer = document.getElementById('txnCalendarViewContainer');
+    if (!calContainer || !window.calendarEngine) return;
+    const transactions = await window.db.getAll('transactions');
+    const activeTxns = transactions.filter(t => t.duplicateStatus !== 'merged');
+    window.calendarEngine.renderFinancialCalendar(calContainer, activeTxns);
   }
 
   // --- DUPLICATE RESOLVER VIEW ---
@@ -1729,7 +1783,10 @@ class App {
       });
     }
 
-    const closeModal = () => modal && modal.classList.remove('active');
+    const closeModal = () => {
+      if (modal) modal.classList.remove('active');
+      if (window.calendarEngine) window.calendarEngine.closeDatePicker();
+    };
     if (closeBtn) closeBtn.addEventListener('click', closeModal);
     if (cancelBtn) cancelBtn.addEventListener('click', closeModal);
 
@@ -1796,7 +1853,10 @@ class App {
     const cancelEditBtn = document.getElementById('btnCancelEditTxn');
     const editForm = document.getElementById('editTxnForm');
 
-    const closeEditModal = () => editModal && editModal.classList.remove('active');
+    const closeEditModal = () => {
+      if (editModal) editModal.classList.remove('active');
+      if (window.calendarEngine) window.calendarEngine.closeDatePicker();
+    };
     if (closeEditBtn) closeEditBtn.addEventListener('click', closeEditModal);
     if (cancelEditBtn) cancelEditBtn.addEventListener('click', closeEditModal);
 
@@ -1875,7 +1935,7 @@ class App {
     }
   }
 
-  async openManualTxnModal(accountId = null) {
+  async openManualTxnModal(accountId = null, prefillDate = null) {
     const modal = document.getElementById('manualTxnModal');
     if (!modal) return;
     await this.populateModalAccountOptions();
@@ -1885,8 +1945,22 @@ class App {
     }
     const modeSelect = document.getElementById('mTxnMode');
     if (modeSelect) modeSelect.value = 'UPI';
+
+    const dateInput = document.getElementById('mTxnDate');
+    if (dateInput) {
+      if (prefillDate) {
+        dateInput.value = prefillDate;
+      } else if (!dateInput.value) {
+        dateInput.value = new Date().toLocaleDateString('en-CA');
+      }
+    }
+
     modal.classList.add('active');
     if (window.lucide) lucide.createIcons();
+  }
+
+  openAddTxnModal(prefillDate = null) {
+    this.openManualTxnModal(null, prefillDate);
   }
 
   async openEditTxnModal(txnId) {

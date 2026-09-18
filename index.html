@@ -13,9 +13,9 @@
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800;900&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   
   <!-- CSS Stylesheets -->
-  <link rel="stylesheet" href="css/main.css?v=5">
-  <link rel="stylesheet" href="css/components.css?v=5">
-  <link rel="stylesheet" href="css/print.css?v=5">
+  <link rel="stylesheet" href="css/main.css?v=7">
+  <link rel="stylesheet" href="css/components.css?v=7">
+  <link rel="stylesheet" href="css/print.css?v=7">
 
   <!-- Core Offline Libraries -->
   <script src="https://cdn.jsdelivr.net/npm/lucide@1.47.0/dist/umd/lucide.js" integrity="sha384-L0vkqT/Xajy/BJR61WFLBDKJc60ZKKigF3gXZcWzQvDyEcwwCWK8vA3lcppKlbmE" crossorigin="anonymous"></script>
@@ -204,7 +204,7 @@
               <i data-lucide="help-circle" style="width:22px; height:22px;"></i>
             </div>
             <div>
-              <div style="font-weight:700; font-size:0.98rem; color:var(--text-main);" id="dashboardReviewBannerTitle">
+              <div style="font-weight:700; font-size:1.05rem; color:var(--text-main);" id="dashboardReviewBannerTitle">
                 Undetected Expenses Need Classification
               </div>
               <div style="font-size:0.82rem; color:var(--text-muted); margin-top:2px;">
@@ -224,7 +224,7 @@
               <i data-lucide="shield-alert" style="width:22px; height:22px;"></i>
             </div>
             <div>
-              <div style="font-weight:700; font-size:0.98rem; color:var(--text-main);" id="dashboardBackupBannerTitle">
+              <div style="font-weight:700; font-size:1.05rem; color:var(--text-main);" id="dashboardBackupBannerTitle">
                 Back Up Your Financial Data
               </div>
               <div style="font-size:0.82rem; color:var(--text-muted); margin-top:2px;">
@@ -598,8 +598,25 @@
           <button class="btn btn-secondary btn-sm" onclick="exportEngine.exportCSV()">
             <i data-lucide="download" style="width:14px; height:14px;"></i> Export CSV
           </button>
+
+          <!-- View Mode: Table vs Calendar -->
+          <div class="segmented-control" style="margin-left:auto;">
+            <button type="button" class="btn btn-primary btn-sm" id="btnTxnViewTable" onclick="app.setTxnViewMode('table')">
+              <i data-lucide="list" style="width:14px; height:14px;"></i> Table
+            </button>
+            <button type="button" class="btn btn-ghost btn-sm" id="btnTxnViewCalendar" onclick="app.setTxnViewMode('calendar')">
+              <i data-lucide="calendar" style="width:14px; height:14px;"></i> Calendar
+            </button>
+          </div>
         </div>
 
+        <!-- Transactions Calendar View Container -->
+        <div id="txnCalendarViewContainer" style="display:none;">
+          <!-- Dynamically rendered by calendarEngine -->
+        </div>
+
+        <!-- Transactions Table View Container -->
+        <div id="txnTableViewContainer">
         <!-- Transactions Table -->
         <div class="glass-card" style="padding:0; overflow:hidden;">
           <div class="table-container" style="border:none; border-radius:0;">
@@ -629,6 +646,7 @@
             </div>
           </div>
         </div>
+        </div><!-- end #txnTableViewContainer -->
 
       </section>
 
@@ -833,13 +851,13 @@
               </div>
             </div>
             <div class="datetime-inputs-grid">
-              <div class="datetime-input-box">
+              <div class="datetime-input-box" onclick="calendarEngine.openDatePicker(document.getElementById('mTxnDate'))" style="cursor:pointer;" title="Click to choose date">
                 <i data-lucide="calendar" class="datetime-icon"></i>
-                <input type="date" id="mTxnDate" class="input-control" title="Transaction Date">
+                <input type="text" id="mTxnDate" class="input-control" placeholder="YYYY-MM-DD" readonly style="cursor:pointer;" title="Click to choose date">
               </div>
-              <div class="datetime-input-box">
+              <div class="datetime-input-box" onclick="timePickerEngine.openTimePicker(document.getElementById('mTxnTime'))" style="cursor:pointer;" title="Click to choose time">
                 <i data-lucide="clock" class="datetime-icon"></i>
-                <input type="time" id="mTxnTime" class="input-control" title="Transaction Time">
+                <input type="text" id="mTxnTime" class="input-control" placeholder="HH:MM" readonly style="cursor:pointer;" title="Click to choose time">
               </div>
             </div>
           </div>
@@ -952,13 +970,13 @@
               </div>
             </div>
             <div class="datetime-inputs-grid">
-              <div class="datetime-input-box">
+              <div class="datetime-input-box" onclick="calendarEngine.openDatePicker(document.getElementById('eTxnDate'))" style="cursor:pointer;" title="Click to choose date">
                 <i data-lucide="calendar" class="datetime-icon"></i>
-                <input type="date" id="eTxnDate" class="input-control" required title="Transaction Date">
+                <input type="text" id="eTxnDate" class="input-control" placeholder="YYYY-MM-DD" readonly required style="cursor:pointer;" title="Click to choose date">
               </div>
-              <div class="datetime-input-box">
+              <div class="datetime-input-box" onclick="timePickerEngine.openTimePicker(document.getElementById('eTxnTime'))" style="cursor:pointer;" title="Click to choose time">
                 <i data-lucide="clock" class="datetime-icon"></i>
-                <input type="time" id="eTxnTime" class="input-control" title="Transaction Time">
+                <input type="text" id="eTxnTime" class="input-control" placeholder="HH:MM" readonly required style="cursor:pointer;" title="Click to choose time">
               </div>
             </div>
           </div>
@@ -1228,16 +1246,18 @@
   </div><!-- end .app-container -->
 
   <!-- Application Logic Scripts -->
-  <script src="js/profiles.js"></script>
-  <script src="js/db.js"></script>
-  <script src="js/categorizer.js"></script>
-  <script src="js/parser.js"></script>
-  <script src="js/duplicateDetector.js"></script>
-  <script src="js/accounts.js"></script>
-  <script src="js/budgets.js"></script>
-  <script src="js/charts.js"></script>
-  <script src="js/export.js"></script>
-  <script src="js/app.js"></script>
+  <script src="js/profiles.js?v=2"></script>
+  <script src="js/db.js?v=2"></script>
+  <script src="js/categorizer.js?v=2"></script>
+  <script src="js/parser.js?v=2"></script>
+  <script src="js/duplicateDetector.js?v=2"></script>
+  <script src="js/accounts.js?v=2"></script>
+  <script src="js/budgets.js?v=2"></script>
+  <script src="js/charts.js?v=2"></script>
+  <script src="js/export.js?v=2"></script>
+  <script src="js/calendar.js?v=2"></script>
+  <script src="js/timepicker.js?v=4"></script>
+  <script src="js/app.js?v=2"></script>
 
 </body>
 </html>

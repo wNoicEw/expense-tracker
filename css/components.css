@@ -487,27 +487,23 @@ input[type="number"] {
   -moz-appearance: textfield;
 }
 
-/* Polished native calendar and clock indicators */
+/* Suppress old/native browser calendar & time pickers */
 input[type="date"]::-webkit-calendar-picker-indicator,
 input[type="time"]::-webkit-calendar-picker-indicator {
+  display: none !important;
+  -webkit-appearance: none !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+.datetime-input-box {
   cursor: pointer;
-  filter: invert(0.85);
-  opacity: 0.7;
-  padding: 3px;
-  border-radius: 4px;
-  transition: opacity 0.15s ease, transform 0.15s ease, background-color 0.15s ease;
 }
 
-input[type="date"]::-webkit-calendar-picker-indicator:hover,
-input[type="time"]::-webkit-calendar-picker-indicator:hover {
-  opacity: 1;
-  transform: scale(1.1);
-  background: rgba(59, 130, 246, 0.2);
-}
-
-[data-theme="light"] input[type="date"]::-webkit-calendar-picker-indicator,
-[data-theme="light"] input[type="time"]::-webkit-calendar-picker-indicator {
-  filter: invert(0.2);
+.datetime-input-box input[readonly] {
+  cursor: pointer;
+  background: transparent;
+  user-select: none;
 }
 
 .input-control:focus, .select-control:focus {
@@ -1629,15 +1625,52 @@ input[type="time"]::-webkit-calendar-picker-indicator:hover {
   border: 1px solid #e2e8f0;
 }
 
-[data-theme="light"] .segmented-control button {
-  color: #64748b;
+/* Default / Inactive segmented buttons in Light Mode */
+[data-theme="light"] .segmented-control button,
+[data-theme="light"] .segmented-control button.btn-ghost {
+  color: #475569;
+  background: transparent;
 }
 
-[data-theme="light"] .segmented-control button.active {
-  background: #ffffff;
+[data-theme="light"] .segmented-control button i,
+[data-theme="light"] .segmented-control button svg,
+[data-theme="light"] .segmented-control button.btn-ghost i,
+[data-theme="light"] .segmented-control button.btn-ghost svg {
+  color: #475569;
+  stroke: #475569;
+}
+
+[data-theme="light"] .segmented-control button:hover:not(.btn-primary):not(.active),
+[data-theme="light"] .segmented-control button.btn-ghost:hover {
   color: #0f172a;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
-  font-weight: 600;
+  background: rgba(0, 0, 0, 0.05);
+}
+
+[data-theme="light"] .segmented-control button:hover:not(.btn-primary):not(.active) i,
+[data-theme="light"] .segmented-control button:hover:not(.btn-primary):not(.active) svg,
+[data-theme="light"] .segmented-control button.btn-ghost:hover i,
+[data-theme="light"] .segmented-control button.btn-ghost:hover svg {
+  color: #0f172a;
+  stroke: #0f172a;
+}
+
+/* Active segmented button (Crisp High-Contrast White on Blue) */
+.segmented-control button.btn-primary,
+.segmented-control button.active,
+[data-theme="light"] .segmented-control button.btn-primary,
+[data-theme="light"] .segmented-control button.active {
+  background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%) !important;
+  color: #ffffff !important;
+  box-shadow: 0 2px 6px rgba(37, 99, 235, 0.3) !important;
+  font-weight: 600 !important;
+}
+
+.segmented-control button.btn-primary *,
+.segmented-control button.active *,
+[data-theme="light"] .segmented-control button.btn-primary *,
+[data-theme="light"] .segmented-control button.active * {
+  color: #ffffff !important;
+  stroke: #ffffff !important;
 }
 
 [data-theme="light"] .input-control,
@@ -2750,3 +2783,1175 @@ input[type="time"]::-webkit-calendar-picker-indicator:hover {
   background: #fff;
   color: #0f172a;
 }
+
+/* ==========================================================================
+   MONEY TRACKER - FINANCIAL CALENDAR & THEMED DATEPICKER
+   (Adapted & Enhanced from trananhtuat/js-calendar)
+   ========================================================================== */
+
+/* DatePicker Floating Popover */
+.mt-calendar-popover {
+  position: fixed;
+  z-index: 1100;
+  width: 310px;
+  background: var(--bg-card-solid);
+  border: 1px solid var(--glass-border-hover);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55), 0 0 0 1px var(--glass-border);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  animation: mtCalendarPop 0.18s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  overflow: hidden;
+}
+
+@keyframes mtCalendarPop {
+  0% {
+    opacity: 0;
+    transform: translateY(6px) scale(0.97);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* Calendar Base Component */
+.mt-calendar {
+  position: relative;
+  width: 100%;
+  user-select: none;
+}
+
+.mt-calendar-compact {
+  padding: 12px;
+}
+
+/* Calendar Header */
+.mt-calendar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+  gap: 8px;
+}
+
+.mt-month-picker-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--glass-border);
+  color: var(--text-main);
+  padding: 5px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 0.88rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.mt-month-picker-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.mt-year-stepper {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.mt-year-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--glass-border);
+  color: var(--text-main);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.mt-year-btn:hover {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: #fff;
+}
+
+.mt-year-display {
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: var(--text-main);
+  min-width: 44px;
+  text-align: center;
+  font-family: var(--font-numbers);
+  background: none;
+  border: none;
+  border-radius: 4px;
+  padding: 2px 4px;
+  cursor: pointer;
+}
+
+.mt-year-display:hover,
+.mt-year-display:focus-visible {
+  background: rgba(255, 255, 255, 0.08);
+  outline: none;
+}
+
+.mt-year-input {
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: var(--text-main);
+  min-width: 56px;
+  width: 56px;
+  text-align: center;
+  font-family: var(--font-numbers);
+  background: var(--bg-card-solid, rgba(255, 255, 255, 0.06));
+  border: 1px solid var(--color-primary);
+  border-radius: 4px;
+  padding: 2px 4px;
+}
+
+/* Weekday Row */
+.mt-calendar-weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px;
+  margin-bottom: 6px;
+  text-align: center;
+}
+
+.mt-calendar-weekdays div {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 4px 0;
+}
+
+/* Days Grid */
+.mt-calendar-days {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 3px;
+}
+
+.mt-day-cell {
+  position: relative;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-main);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  border: 1px solid transparent;
+}
+
+.mt-day-cell:hover:not(.empty) {
+  background: var(--bg-card-hover);
+  border-color: var(--glass-border-hover);
+  transform: translateY(-1px);
+}
+
+.mt-day-cell.curr-date {
+  border-color: var(--color-primary);
+  background: rgba(59, 130, 246, 0.12);
+  color: var(--color-primary);
+  font-weight: 800;
+}
+
+.mt-day-cell.selected-date {
+  background: linear-gradient(135deg, var(--color-primary), #2563eb) !important;
+  color: #fff !important;
+  border-color: var(--color-primary) !important;
+  box-shadow: 0 4px 12px var(--color-primary-glow);
+}
+
+.mt-day-cell.empty {
+  cursor: default;
+  pointer-events: none;
+}
+
+/* Month List Overlay (animated scale adapted from trananhtuat/js-calendar) */
+.mt-month-list-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: var(--bg-card-solid);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  z-index: 10;
+  transform: scale(0.85);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  border-radius: var(--radius-lg);
+}
+
+.mt-month-list-overlay.show {
+  transform: scale(1);
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+}
+
+.mt-month-list-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+  font-weight: 700;
+  font-size: 0.9rem;
+  color: var(--text-main);
+}
+
+.mt-month-list-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+
+.mt-month-item {
+  padding: 8px 4px;
+  text-align: center;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--glass-border);
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-main);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.mt-month-item:hover {
+  background: var(--bg-card-hover);
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.mt-month-item.selected {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: #fff;
+}
+
+/* Popover Footer */
+.mt-calendar-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--glass-border);
+}
+
+.mt-quick-shortcuts {
+  display: flex;
+  gap: 4px;
+}
+
+.mt-shortcut-btn {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--glass-border);
+  color: var(--text-muted);
+  border-radius: var(--radius-sm);
+  padding: 3px 7px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.mt-shortcut-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-main);
+  border-color: var(--glass-border-hover);
+}
+
+.mt-shortcut-btn.close {
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+}
+
+.mt-shortcut-btn.close:hover {
+  color: var(--color-expense);
+}
+
+/* Calendar Trigger Button Inside Input Box */
+.mt-calendar-launcher-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--transition-fast);
+}
+
+.mt-calendar-launcher-btn:hover {
+  color: var(--color-primary);
+  background: rgba(59, 130, 246, 0.12);
+}
+
+/* ==========================================================================
+   FINANCIAL CALENDAR VIEW (FOR TRANSACTIONS TAB)
+   ========================================================================== */
+
+.mt-financial-calendar-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.mt-fin-calendar-header-card {
+  background: var(--bg-card);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  padding: 16px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+  box-shadow: var(--glass-shadow);
+}
+
+.mt-fin-calendar-nav {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.mt-fin-month-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--glass-border);
+  color: var(--text-main);
+  padding: 8px 14px;
+  border-radius: var(--radius-md);
+  font-size: 1.05rem;
+  font-weight: 800;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.mt-fin-month-btn:hover {
+  background: var(--bg-card-hover);
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.mt-fin-nav-arrows {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.mt-fin-summary-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.mt-fin-summary-pill {
+  display: flex;
+  flex-direction: column;
+  padding: 6px 14px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--glass-border);
+  min-width: 120px;
+}
+
+.mt-fin-summary-pill .pill-label {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+}
+
+.mt-fin-summary-pill .pill-val {
+  font-size: 0.95rem;
+  font-weight: 800;
+  font-family: var(--font-numbers);
+  margin-top: 2px;
+}
+
+.mt-fin-summary-pill.income {
+  background: var(--color-income-bg);
+  border-color: rgba(16, 185, 129, 0.3);
+}
+.mt-fin-summary-pill.income .pill-val {
+  color: var(--color-income);
+}
+
+.mt-fin-summary-pill.expense {
+  background: var(--color-expense-bg);
+  border-color: rgba(244, 63, 94, 0.3);
+}
+.mt-fin-summary-pill.expense .pill-val {
+  color: var(--color-expense);
+}
+
+.mt-fin-summary-pill.net.positive {
+  background: rgba(59, 130, 246, 0.12);
+  border-color: rgba(59, 130, 246, 0.3);
+}
+.mt-fin-summary-pill.net.positive .pill-val {
+  color: var(--color-primary);
+}
+
+.mt-fin-summary-pill.net.negative {
+  background: var(--color-warning-bg);
+  border-color: rgba(245, 158, 11, 0.3);
+}
+.mt-fin-summary-pill.net.negative .pill-val {
+  color: var(--color-warning);
+}
+
+/* Full Financial Calendar Grid */
+.mt-calendar-full {
+  background: var(--bg-card);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  padding: 16px;
+  box-shadow: var(--glass-shadow);
+}
+
+.mt-calendar-full .mt-calendar-days {
+  gap: 6px;
+}
+
+.fin-day-cell {
+  min-height: 70px;
+  flex-direction: column;
+  justify-content: flex-start;
+  align-items: stretch;
+  padding: 6px 8px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+}
+
+.fin-day-cell:hover:not(.empty) {
+  background: var(--bg-card-hover);
+  border-color: var(--glass-border-hover);
+}
+
+.fin-day-cell.curr-date {
+  border-color: rgba(59, 130, 246, 0.4);
+  background: rgba(59, 130, 246, 0.06);
+}
+
+.fin-day-cell.selected-date {
+  border-color: var(--color-primary) !important;
+  box-shadow: 0 0 0 2px var(--color-primary-glow) !important;
+  background: rgba(59, 130, 246, 0.15) !important;
+}
+
+.fin-day-cell.selected-date .mt-day-number {
+  color: var(--color-primary) !important;
+  font-weight: 800;
+}
+
+.mt-day-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+}
+
+.mt-day-number {
+  font-size: 0.85rem;
+  font-weight: 700;
+  font-family: var(--font-numbers);
+}
+
+.mt-day-txn-badge {
+  font-size: 0.65rem;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: var(--radius-full);
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-muted);
+}
+
+.mt-day-fin-badges {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 4px;
+}
+
+.mt-day-badge {
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 1px 4px;
+  border-radius: 4px;
+  font-family: var(--font-numbers);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mt-day-badge.expense {
+  background: var(--color-expense-bg);
+  color: var(--color-expense);
+}
+
+.mt-day-badge.income {
+  background: var(--color-income-bg);
+  color: var(--color-income);
+}
+
+/* Day Ledger Details Box */
+.mt-day-ledger-card {
+  background: var(--bg-card);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  padding: 16px 20px;
+  box-shadow: var(--glass-shadow);
+  animation: fadeIn 0.2s ease forwards;
+}
+
+.mt-day-ledger-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--glass-border);
+  margin-bottom: 12px;
+}
+
+.mt-day-ledger-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.mt-ledger-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  transition: all var(--transition-fast);
+}
+
+.mt-ledger-item:hover {
+  background: var(--bg-card-hover);
+  border-color: var(--glass-border-hover);
+}
+
+.mt-ledger-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.mt-ledger-desc {
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.mt-ledger-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.mt-ledger-right {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.mt-ledger-amount {
+  font-size: 0.95rem;
+  font-weight: 800;
+  font-family: var(--font-numbers);
+}
+
+.mt-ledger-amount.expense {
+  color: var(--color-expense);
+}
+
+.mt-ledger-amount.income {
+  color: var(--color-income);
+}
+
+.mt-ledger-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.mt-empty-day-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 24px 0;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+/* Light Mode Overrides for Calendar */
+[data-theme="light"] .mt-calendar-popover {
+  background: #ffffff;
+  border-color: #e2e8f0;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.12), 0 0 0 1px #e2e8f0;
+}
+
+[data-theme="light"] .mt-month-picker-btn,
+[data-theme="light"] .mt-year-btn,
+[data-theme="light"] .mt-month-item,
+[data-theme="light"] .mt-shortcut-btn {
+  background: #f8fafc;
+  border-color: #e2e8f0;
+  color: #0f172a;
+}
+
+[data-theme="light"] .mt-month-picker-btn:hover,
+[data-theme="light"] .mt-month-item:hover {
+  background: #f1f5f9;
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+[data-theme="light"] .mt-day-cell {
+  color: #0f172a;
+}
+
+[data-theme="light"] .mt-day-cell:hover:not(.empty) {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+}
+
+[data-theme="light"] .mt-month-list-overlay {
+  background: #ffffff;
+}
+
+[data-theme="light"] .mt-fin-calendar-header-card,
+[data-theme="light"] .mt-calendar-full,
+[data-theme="light"] .mt-day-ledger-card {
+  background: #ffffff;
+  border-color: #e2e8f0;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.04);
+}
+
+[data-theme="light"] .mt-fin-month-btn {
+  background: #f8fafc;
+  border-color: #e2e8f0;
+  color: #0f172a;
+}
+
+[data-theme="light"] .fin-day-cell {
+  background: #f8fafc;
+  border-color: #e2e8f0;
+}
+
+[data-theme="light"] .fin-day-cell:hover:not(.empty) {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+}
+
+[data-theme="light"] .mt-ledger-item {
+  background: #f8fafc;
+  border-color: #e2e8f0;
+}
+
+/* ============================================================================
+ * MATERIALIZE-STYLE THEMED TIME PICKER COMPONENT (CLOCK ARMS & DARK/LIGHT THEME)
+ * ============================================================================ */
+
+.mt-timepicker-popover {
+  position: fixed;
+  z-index: 1100;
+  width: 290px;
+  background: var(--bg-card-solid);
+  border: 1px solid var(--glass-border-hover);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.65), 0 0 0 1px var(--glass-border);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  animation: mtCalendarPop 0.18s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  overflow: hidden;
+  user-select: none;
+}
+
+.mt-timepicker-container {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Digital Display Header */
+.mt-timepicker-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  background: rgba(59, 130, 246, 0.09);
+  border-bottom: 1px solid var(--glass-border);
+}
+
+.mt-timepicker-digits {
+  display: flex;
+  align-items: baseline;
+  gap: 2px;
+}
+
+.mt-timepicker-digit-btn {
+  background: transparent;
+  border: none;
+  font-size: 2.3rem;
+  font-weight: 800;
+  line-height: 1;
+  color: #94a3b8;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: var(--radius-sm);
+  transition: all 0.15s ease;
+  font-variant-numeric: tabular-nums;
+}
+
+.mt-timepicker-digit-btn:hover {
+  color: #f8fafc;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.mt-timepicker-digit-btn.active {
+  color: #3b82f6;
+  text-shadow: 0 0 16px rgba(59, 130, 246, 0.55);
+}
+
+.mt-timepicker-colon {
+  font-size: 2rem;
+  font-weight: 700;
+  color: #64748b;
+  line-height: 1;
+  margin: 0 2px;
+  user-select: none;
+}
+
+.mt-timepicker-ampm {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.mt-timepicker-ampm-btn {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--glass-border);
+  color: #94a3b8;
+  font-size: 0.76rem;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.mt-timepicker-ampm-btn:hover {
+  color: #f8fafc;
+  border-color: var(--glass-border-hover);
+}
+
+.mt-timepicker-ampm-btn.active {
+  background: #3b82f6;
+  color: #ffffff;
+  border-color: #3b82f6;
+  box-shadow: 0 0 10px rgba(59, 130, 246, 0.45);
+}
+
+/* Analog Clock Plate (Dark Mode default) */
+.mt-timepicker-body {
+  padding: 16px 14px 14px 14px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.mt-timepicker-plate {
+  position: relative;
+  width: 260px;
+  height: 260px;
+  border-radius: 50%;
+  background: radial-gradient(circle, #15203b 0%, #0c1324 100%);
+  border: 1.5px solid rgba(255, 255, 255, 0.14);
+  box-shadow: inset 0 2px 10px rgba(0, 0, 0, 0.6), 0 6px 20px rgba(0, 0, 0, 0.4);
+  cursor: pointer;
+  touch-action: none;
+}
+
+.mt-timepicker-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+/* Real Analog Clock Arms (Hour & Minute Hands) */
+.mt-tp-hand-group {
+  transition: opacity 0.2s ease;
+}
+
+/* Active Hand (Prominent, High-Visibility Glow in Dark Mode) */
+.mt-tp-hand-group.active-arm {
+  opacity: 1;
+}
+
+.mt-tp-hand-group.active-arm .mt-tp-hour-arm {
+  stroke: #3b82f6;
+  stroke-width: 5;
+  stroke-linecap: round;
+  filter: drop-shadow(0 0 6px rgba(59, 130, 246, 0.85));
+}
+
+.mt-tp-hand-group.active-arm .mt-tp-hour-tail {
+  stroke: #3b82f6;
+  stroke-width: 4;
+  stroke-linecap: round;
+  opacity: 0.85;
+}
+
+.mt-tp-hand-group.active-arm .mt-tp-minute-arm {
+  stroke: #3b82f6;
+  stroke-width: 3.2;
+  stroke-linecap: round;
+  filter: drop-shadow(0 0 6px rgba(59, 130, 246, 0.85));
+}
+
+.mt-tp-hand-group.active-arm .mt-tp-minute-tail {
+  stroke: #3b82f6;
+  stroke-width: 2.8;
+  stroke-linecap: round;
+  opacity: 0.85;
+}
+
+/* Inactive Hand (Clearly visible secondary arm) */
+.mt-tp-hand-group.inactive-arm {
+  opacity: 0.7;
+}
+
+.mt-tp-hand-group.inactive-arm .mt-tp-hour-arm {
+  stroke: #94a3b8;
+  stroke-width: 4.2;
+  stroke-linecap: round;
+}
+
+.mt-tp-hand-group.inactive-arm .mt-tp-hour-tail {
+  stroke: #64748b;
+  stroke-width: 3.5;
+  stroke-linecap: round;
+}
+
+.mt-tp-hand-group.inactive-arm .mt-tp-minute-arm {
+  stroke: #94a3b8;
+  stroke-width: 2.6;
+  stroke-linecap: round;
+}
+
+.mt-tp-hand-group.inactive-arm .mt-tp-minute-tail {
+  stroke: #64748b;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+}
+
+/* Halo Selection Heads */
+.mt-tp-hour-head,
+.mt-tp-minute-head {
+  fill: rgba(59, 130, 246, 0.28);
+  stroke: #3b82f6;
+  stroke-width: 2;
+  filter: drop-shadow(0 0 8px rgba(59, 130, 246, 0.65));
+}
+
+.mt-tp-hour-head-dot,
+.mt-tp-minute-head-dot {
+  fill: #ffffff;
+}
+
+/* Center Hub (Real Dual Metallic Watch Pivot) */
+.mt-tp-hub-outer {
+  fill: #3b82f6;
+  filter: drop-shadow(0 0 5px rgba(59, 130, 246, 0.8));
+}
+
+.mt-tp-hub-inner {
+  fill: #ffffff;
+}
+
+.mt-timepicker-dial {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+@keyframes mtTpDialFade {
+  0% {
+    opacity: 0;
+    transform: scale(0.92);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.mt-tp-tick {
+  position: absolute;
+  width: 32px;
+  height: 32px;
+  margin-left: -16px;
+  margin-top: -16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #e2e8f0;
+  border-radius: 50%;
+  pointer-events: none;
+  transition: color 0.15s, transform 0.15s;
+  user-select: none;
+}
+
+.mt-tp-tick.active {
+  color: #ffffff;
+  font-weight: 800;
+  transform: scale(1.18);
+  text-shadow: 0 0 8px rgba(59, 130, 246, 0.8);
+}
+
+/* Footer Actions */
+.mt-timepicker-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-top: 1px solid var(--glass-border);
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.mt-tp-footer-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mt-tp-action-btn {
+  background: transparent;
+  border: none;
+  font-size: 0.84rem;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.mt-tp-now-btn {
+  color: #3b82f6;
+  font-weight: 700;
+  padding-left: 6px;
+  padding-right: 6px;
+}
+
+.mt-tp-now-btn:hover {
+  text-decoration: underline;
+}
+
+.mt-tp-cancel-btn {
+  color: #94a3b8;
+}
+
+.mt-tp-cancel-btn:hover {
+  color: #f8fafc;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.mt-tp-ok-btn {
+  background: #3b82f6;
+  color: #ffffff;
+  box-shadow: 0 2px 10px rgba(59, 130, 246, 0.4);
+}
+
+.mt-tp-ok-btn:hover {
+  background: #2563eb;
+  transform: translateY(-1px);
+}
+
+/* ----------------------------------------------------------------------------
+ * LIGHT THEME ADAPTATIONS
+ * ---------------------------------------------------------------------------- */
+[data-theme="light"] .mt-timepicker-popover {
+  background: #ffffff;
+  border-color: #e2e8f0;
+  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.14), 0 0 0 1px rgba(0, 0, 0, 0.05);
+}
+
+[data-theme="light"] .mt-timepicker-header {
+  background: rgba(37, 99, 235, 0.06);
+  border-bottom-color: #e2e8f0;
+}
+
+[data-theme="light"] .mt-timepicker-digit-btn {
+  color: #64748b;
+}
+
+[data-theme="light"] .mt-timepicker-digit-btn:hover {
+  color: #0f172a;
+  background: rgba(0, 0, 0, 0.04);
+}
+
+[data-theme="light"] .mt-timepicker-digit-btn.active {
+  color: #2563eb;
+  text-shadow: none;
+}
+
+[data-theme="light"] .mt-timepicker-colon {
+  color: #94a3b8;
+}
+
+[data-theme="light"] .mt-timepicker-ampm-btn {
+  background: #f1f5f9;
+  border-color: #e2e8f0;
+  color: #64748b;
+}
+
+[data-theme="light"] .mt-timepicker-ampm-btn:hover {
+  color: #0f172a;
+  border-color: #cbd5e1;
+}
+
+[data-theme="light"] .mt-timepicker-ampm-btn.active {
+  background: #2563eb;
+  color: #ffffff;
+  border-color: #2563eb;
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.3);
+}
+
+[data-theme="light"] .mt-timepicker-plate {
+  background: radial-gradient(circle, #ffffff 0%, #f1f5f9 100%);
+  border: 1.5px solid #e2e8f0;
+  box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.04), 0 2px 10px rgba(0, 0, 0, 0.05);
+}
+
+[data-theme="light"] .mt-tp-hand-group.active-arm .mt-tp-hour-arm,
+[data-theme="light"] .mt-tp-hand-group.active-arm .mt-tp-minute-arm {
+  stroke: #2563eb;
+  filter: drop-shadow(0 2px 4px rgba(37, 99, 235, 0.35));
+}
+
+[data-theme="light"] .mt-tp-hand-group.active-arm .mt-tp-hour-tail,
+[data-theme="light"] .mt-tp-hand-group.active-arm .mt-tp-minute-tail {
+  stroke: #2563eb;
+}
+
+[data-theme="light"] .mt-tp-hand-group.inactive-arm .mt-tp-hour-arm,
+[data-theme="light"] .mt-tp-hand-group.inactive-arm .mt-tp-minute-arm {
+  stroke: #94a3b8;
+}
+
+[data-theme="light"] .mt-tp-hand-group.inactive-arm .mt-tp-hour-tail,
+[data-theme="light"] .mt-tp-hand-group.inactive-arm .mt-tp-minute-tail {
+  stroke: #cbd5e1;
+}
+
+[data-theme="light"] .mt-tp-hour-head,
+[data-theme="light"] .mt-tp-minute-head {
+  fill: rgba(37, 99, 235, 0.18);
+  stroke: #2563eb;
+  filter: drop-shadow(0 2px 6px rgba(37, 99, 235, 0.25));
+}
+
+[data-theme="light"] .mt-tp-hour-head-dot,
+[data-theme="light"] .mt-tp-minute-head-dot {
+  fill: #2563eb;
+}
+
+[data-theme="light"] .mt-tp-hub-outer {
+  fill: #2563eb;
+  filter: drop-shadow(0 2px 4px rgba(37, 99, 235, 0.3));
+}
+
+[data-theme="light"] .mt-tp-hub-inner {
+  fill: #ffffff;
+}
+
+[data-theme="light"] .mt-tp-tick {
+  color: #334155;
+}
+
+[data-theme="light"] .mt-tp-tick.active {
+  color: #2563eb;
+  font-weight: 800;
+  text-shadow: none;
+}
+
+[data-theme="light"] .mt-timepicker-footer {
+  background: #f8fafc;
+  border-top-color: #e2e8f0;
+}
+
+[data-theme="light"] .mt-tp-now-btn {
+  color: #2563eb;
+}
+
+[data-theme="light"] .mt-tp-cancel-btn {
+  color: #64748b;
+}
+
+[data-theme="light"] .mt-tp-cancel-btn:hover {
+  color: #0f172a;
+  background: #f1f5f9;
+}
+
+[data-theme="light"] .mt-tp-ok-btn {
+  background: #2563eb;
+  color: #ffffff;
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.25);
+}
+
+[data-theme="light"] .mt-tp-ok-btn:hover {
+  background: #1d4ed8;
+}
+
+
