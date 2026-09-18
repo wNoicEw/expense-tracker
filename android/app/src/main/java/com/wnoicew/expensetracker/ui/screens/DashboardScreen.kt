@@ -15,6 +15,7 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -30,7 +31,9 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlin.math.roundToInt
@@ -38,7 +41,11 @@ import com.wnoicew.expensetracker.data.model.AccountEntity
 import com.wnoicew.expensetracker.data.model.CategoryBreakdownItem
 import com.wnoicew.expensetracker.data.model.TransactionEntity
 import com.wnoicew.expensetracker.data.model.TransactionType
+import com.wnoicew.expensetracker.ui.DayClock
+import com.wnoicew.expensetracker.ui.KpiMath
+import com.wnoicew.expensetracker.ui.KpiRange
 import com.wnoicew.expensetracker.ui.MainViewModel
+import com.wnoicew.expensetracker.ui.rememberExportLaunchers
 import com.wnoicew.expensetracker.ui.components.HigGlassCard
 import com.wnoicew.expensetracker.ui.components.HigInsetGroup
 import com.wnoicew.expensetracker.ui.components.HigSegmentedControl
@@ -48,7 +55,9 @@ import com.wnoicew.expensetracker.ui.theme.PrimaryBlue
 import com.wnoicew.expensetracker.ui.theme.TransferViolet
 import com.wnoicew.expensetracker.ui.theme.AccentCyan
 import com.wnoicew.expensetracker.ui.theme.WarningAmber
+import com.wnoicew.expensetracker.ui.theme.WarningAmberFill
 import java.text.NumberFormat
+import java.time.LocalDate
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -74,24 +83,32 @@ fun DashboardScreen(
     onNavigateToAccounts: () -> Unit,
     onNavigateToReview: () -> Unit,
     onNavigateToUpload: () -> Unit,
-    onOpenAddTransaction: () -> Unit,
-    onNavigateToReports: () -> Unit = {}
+    onOpenAddTransaction: () -> Unit
 ) {
     val activeProfile by viewModel.activeProfile
     val isDarkMode by viewModel.isDarkMode
     val netWorth by viewModel.totalNetWorth.collectAsState()
-    val inflow by viewModel.totalInflow30D.collectAsState()
-    val outflow by viewModel.totalOutflow30D.collectAsState()
-    val savingsRate by viewModel.netSavingsRate.collectAsState()
     val categoryBreakdown by viewModel.categoryBreakdown.collectAsState()
     val transactions by viewModel.transactions.collectAsState()
     val accounts by viewModel.accounts.collectAsState()
     val needsReviewCount by viewModel.needsReviewCount.collectAsState()
     val shouldShowBackupReminder by viewModel.shouldShowBackupReminder.collectAsState()
 
-    var chartModeIndex by remember { mutableIntStateOf(0) } // 0: Cumulative, 1: Unified
-    var chartRangeIndex by remember { mutableIntStateOf(1) } // 0: 7D, 1: 30D, 2: 3M, 3: 6M, 4: 1Y, 5: ALL
-    var pieChartRangeIndex by remember { mutableIntStateOf(1) } // 0: 7D, 1: 30D, 2: 3M, 3: 6M, 4: 1Y, 5: ALL
+    val launchers = rememberExportLaunchers(viewModel)
+
+    var chartModeIndex by rememberSaveable { mutableIntStateOf(0) } // 0: Cumulative, 1: Unified
+    var chartRangeIndex by rememberSaveable { mutableIntStateOf(1) } // 0: 7D, 1: 30D, 2: 3M, 3: 6M, 4: 1Y, 5: ALL
+    var pieChartRangeIndex by rememberSaveable { mutableIntStateOf(1) } // 0: 7D, 1: 30D, 2: 3M, 3: 6M, 4: 1Y, 5: ALL
+    var kpiRangeIndex by rememberSaveable { mutableIntStateOf(KpiRange.D30.ordinal) }
+
+    val today by produceState(LocalDate.now()) { DayClock.today().collect { value = it } }
+    val kpiRange = KpiRange.values()[kpiRangeIndex]
+    val kpiTotals = remember(transactions, kpiRange, today) { KpiMath.totals(transactions, kpiRange, today) }
+    val inflow = kpiTotals.inflow
+    val outflow = kpiTotals.outflow
+    val savingsRate = kpiTotals.savingsRatePercent
+    val chartRange = KpiRange.values()[chartRangeIndex]
+    val chartTotals = remember(transactions, chartRange, today) { KpiMath.totals(transactions, chartRange, today) }
 
     val currencyFormat = remember {
         NumberFormat.getCurrencyInstance(Locale("en", "IN")).apply {
@@ -136,13 +153,13 @@ fun DashboardScreen(
                     IconButton(
                         onClick = { viewModel.toggleTheme() },
                         modifier = Modifier
-                            .size(38.dp)
+                            .size(48.dp)
                             .clip(CircleShape)
                             .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.8f))
                     ) {
                         Icon(
                             imageVector = if (isDarkMode) Icons.Default.WbSunny else Icons.Default.NightlightRound,
-                            contentDescription = "Toggle Theme",
+                            contentDescription = if (isDarkMode) "Switch to light mode" else "Switch to dark mode",
                             tint = if (isDarkMode) WarningAmber else PrimaryBlue,
                             modifier = Modifier.size(18.dp)
                         )
@@ -153,7 +170,9 @@ fun DashboardScreen(
                         Surface(
                             shape = RoundedCornerShape(14.dp),
                             color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
-                            modifier = Modifier.clickable(onClick = onOpenProfileManager)
+                            modifier = Modifier
+                                .heightIn(min = 48.dp)
+                                .clickable(onClick = onOpenProfileManager)
                         ) {
                             Row(
                                 modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
@@ -240,8 +259,9 @@ fun DashboardScreen(
                         Button(
                             onClick = onNavigateToReview,
                             shape = RoundedCornerShape(10.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = WarningAmber),
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                            colors = ButtonDefaults.buttonColors(containerColor = WarningAmberFill),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                            modifier = Modifier.heightIn(min = 48.dp)
                         ) {
                             Text("Review & Teach AI", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.Black)
                         }
@@ -305,7 +325,7 @@ fun DashboardScreen(
                         ) {
                             TextButton(
                                 onClick = { viewModel.dismissBackupReminder() },
-                                modifier = Modifier.height(36.dp),
+                                modifier = Modifier.heightIn(min = 48.dp),
                                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
                             ) {
                                 Text(
@@ -317,11 +337,11 @@ fun DashboardScreen(
                             }
                             Spacer(modifier = Modifier.width(8.dp))
                             Button(
-                                onClick = onNavigateToReports,
+                                onClick = launchers.exportBackup,
                                 shape = RoundedCornerShape(10.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = WarningAmber),
+                                colors = ButtonDefaults.buttonColors(containerColor = WarningAmberFill),
                                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                                modifier = Modifier.height(36.dp)
+                                modifier = Modifier.heightIn(min = 48.dp)
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.FileDownload,
@@ -372,7 +392,7 @@ fun DashboardScreen(
                         )
                     }
 
-                    IconButton(onClick = onNavigateToAccounts, modifier = Modifier.size(28.dp)) {
+                    IconButton(onClick = onNavigateToAccounts, modifier = Modifier.size(48.dp)) {
                         Icon(
                             imageVector = Icons.Default.AccountBalanceWallet,
                             contentDescription = "Accounts",
@@ -406,13 +426,13 @@ fun DashboardScreen(
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Text(
-                        text = "Inflow: ${currencyFormat.format(inflow)}",
+                        text = "Inflow (${kpiRange.label}): ${currencyFormat.format(inflow)}",
                         fontSize = 12.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = IncomeGreen
                     )
                     Text(
-                        text = "Outflow: ${currencyFormat.format(outflow)}",
+                        text = "Outflow (${kpiRange.label}): ${currencyFormat.format(outflow)}",
                         fontSize = 12.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = ExpenseRose
@@ -448,12 +468,21 @@ fun DashboardScreen(
 
         // 4. 3 Quick KPI Stat Tiles (Matching Web App bento-stats-column)
         item {
+            HigSegmentedControl(
+                items = KpiRange.values().map { it.label },
+                selectedIndex = kpiRangeIndex,
+                onItemSelected = { kpiRangeIndex = it },
+                itemDescriptions = KpiRange.values().map { if (it.days > 0) "Last ${it.label}" else "All time" }
+            )
+        }
+
+        item {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 KpiStatTile(
-                    title = "TOTAL INFLOW (30D)",
+                    title = "TOTAL INFLOW (${kpiRange.label})",
                     subtitle = "Salary & Credits",
                     value = currencyFormat.format(inflow),
                     color = IncomeGreen,
@@ -461,7 +490,7 @@ fun DashboardScreen(
                     modifier = Modifier.weight(1f)
                 )
                 KpiStatTile(
-                    title = "TOTAL OUTFLOW (30D)",
+                    title = "TOTAL OUTFLOW (${kpiRange.label})",
                     subtitle = "Excl. Duplicates",
                     value = currencyFormat.format(outflow),
                     color = ExpenseRose,
@@ -504,15 +533,16 @@ fun DashboardScreen(
                         )
                     }
 
+                    val chartNet = chartTotals.inflow - chartTotals.outflow
                     Surface(
                         shape = RoundedCornerShape(6.dp),
-                        color = if (inflow >= outflow) IncomeGreen.copy(alpha = 0.15f) else ExpenseRose.copy(alpha = 0.15f)
+                        color = if (chartNet >= 0) IncomeGreen.copy(alpha = 0.15f) else ExpenseRose.copy(alpha = 0.15f)
                     ) {
                         Text(
-                            text = if (inflow >= outflow) "+${currencyFormat.format(inflow - outflow)}" else "-${currencyFormat.format(outflow - inflow)}",
+                            text = if (chartNet >= 0) "+${currencyFormat.format(chartNet)}" else "-${currencyFormat.format(-chartNet)}",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
-                            color = if (inflow >= outflow) IncomeGreen else ExpenseRose,
+                            color = if (chartNet >= 0) IncomeGreen else ExpenseRose,
                             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                         )
                     }
@@ -979,10 +1009,12 @@ fun TransactionRowItem(
     val prefix = if (isIncome) "+" else if (isTransfer) "" else "-"
 
     val dateFormat = remember { SimpleDateFormat("MMM dd", Locale.getDefault()) }
+    val directionLabel = if (isIncome) "Income" else if (isTransfer) "Transfer" else "Expense"
 
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            .semantics(mergeDescendants = true) {}
             .padding(horizontal = 16.dp, vertical = 12.dp)
     ) {
         Row(
@@ -1004,20 +1036,22 @@ fun TransactionRowItem(
                 ) {
                     Icon(
                         imageVector = if (isIncome) Icons.Default.ArrowDownward else if (isTransfer) Icons.Default.SyncAlt else Icons.Default.ArrowUpward,
-                        contentDescription = null,
+                        contentDescription = directionLabel,
                         tint = amountColor,
                         modifier = Modifier.size(18.dp)
                     )
                 }
 
-                Column {
+                Column(modifier = Modifier.weight(1f)) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text(
                             text = transaction.description,
                             fontWeight = FontWeight.SemiBold,
                             fontSize = 14.sp,
                             color = MaterialTheme.colorScheme.onSurface,
-                            maxLines = 1
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false)
                         )
                         if (transaction.needsReview) {
                             Surface(
@@ -1026,7 +1060,7 @@ fun TransactionRowItem(
                             ) {
                                 Text(
                                     text = "REVIEW",
-                                    fontSize = 9.sp,
+                                    fontSize = 10.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = WarningAmber,
                                     modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
@@ -1037,7 +1071,9 @@ fun TransactionRowItem(
                     Text(
                         text = "${dateFormat.format(Date(transaction.date))} · ${transaction.category} · ${transaction.paymentMode}",
                         fontSize = 11.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
             }
@@ -1221,6 +1257,9 @@ private fun InteractiveCashflowGraph(
 
         Spacer(modifier = Modifier.height(10.dp))
 
+        val incomeLineColor = IncomeGreen
+        val expenseLineColor = ExpenseRose
+
         // Interactive Canvas
         Box(
             modifier = Modifier
@@ -1308,7 +1347,7 @@ private fun InteractiveCashflowGraph(
                         }
 
                         val isSurplus = totalNet >= 0
-                        val curveColor = if (isSurplus) IncomeGreen else ExpenseRose
+                        val curveColor = if (isSurplus) incomeLineColor else expenseLineColor
                         val gradFill = Brush.verticalGradient(
                             listOf(curveColor.copy(alpha = 0.35f), curveColor.copy(alpha = 0.05f), Color.Transparent),
                             startY = if (isSurplus) 0f else zeroY,
@@ -1336,7 +1375,7 @@ private fun InteractiveCashflowGraph(
                                 center = activeCoord
                             )
                             drawCircle(
-                                color = if (points[idx].cumulative >= 0) IncomeGreen else ExpenseRose,
+                                color = if (points[idx].cumulative >= 0) incomeLineColor else expenseLineColor,
                                 radius = 4.dp.toPx(),
                                 center = activeCoord
                             )
@@ -1396,12 +1435,12 @@ private fun InteractiveCashflowGraph(
                         drawPath(
                             incFill,
                             brush = Brush.verticalGradient(
-                                listOf(IncomeGreen.copy(alpha = 0.35f), Color.Transparent),
+                                listOf(incomeLineColor.copy(alpha = 0.35f), Color.Transparent),
                                 startY = 0f,
                                 endY = zeroY
                             )
                         )
-                        drawPath(incPath, color = IncomeGreen, style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round))
+                        drawPath(incPath, color = incomeLineColor, style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round))
                     }
 
                     // Draw Expense Curve (-ve)
@@ -1424,12 +1463,12 @@ private fun InteractiveCashflowGraph(
                         drawPath(
                             expFill,
                             brush = Brush.verticalGradient(
-                                listOf(Color.Transparent, ExpenseRose.copy(alpha = 0.35f)),
+                                listOf(Color.Transparent, expenseLineColor.copy(alpha = 0.35f)),
                                 startY = zeroY,
                                 endY = height
                             )
                         )
-                        drawPath(expPath, color = ExpenseRose, style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round))
+                        drawPath(expPath, color = expenseLineColor, style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round))
                     }
 
                     // Active Cursor
@@ -1446,11 +1485,11 @@ private fun InteractiveCashflowGraph(
                             )
                             if (points[idx].income > 0) {
                                 drawCircle(color = Color.White, radius = 5.dp.toPx(), center = activeInc)
-                                drawCircle(color = IncomeGreen, radius = 3.5.dp.toPx(), center = activeInc)
+                                drawCircle(color = incomeLineColor, radius = 3.5.dp.toPx(), center = activeInc)
                             }
                             if (points[idx].expense > 0) {
                                 drawCircle(color = Color.White, radius = 5.dp.toPx(), center = activeExp)
-                                drawCircle(color = ExpenseRose, radius = 3.5.dp.toPx(), center = activeExp)
+                                drawCircle(color = expenseLineColor, radius = 3.5.dp.toPx(), center = activeExp)
                             }
                         }
                     }

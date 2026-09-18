@@ -1,6 +1,5 @@
 package com.wnoicew.expensetracker.ui.screens
 
-import android.content.Intent
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
@@ -18,6 +17,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -31,14 +31,15 @@ import com.wnoicew.expensetracker.data.model.TransactionEntity
 import com.wnoicew.expensetracker.data.model.TransactionType
 import com.wnoicew.expensetracker.ui.ALL_CATEGORIES
 import com.wnoicew.expensetracker.ui.MainViewModel
+import com.wnoicew.expensetracker.ui.rememberExportLaunchers
 import com.wnoicew.expensetracker.ui.components.CalendarMonthView
+import com.wnoicew.expensetracker.ui.components.DeleteTransactionDialog
 import com.wnoicew.expensetracker.ui.components.HigGlassCard
 import com.wnoicew.expensetracker.ui.components.HigInsetGroup
 import com.wnoicew.expensetracker.ui.components.HigSegmentedControl
 import com.wnoicew.expensetracker.ui.theme.IncomeGreen
 import com.wnoicew.expensetracker.ui.theme.ExpenseRose
 import com.wnoicew.expensetracker.ui.theme.PrimaryBlue
-import kotlinx.coroutines.launch
 import java.text.NumberFormat
 import java.text.SimpleDateFormat
 import java.util.*
@@ -48,35 +49,55 @@ import java.util.*
 fun TransactionsScreen(
     viewModel: MainViewModel
 ) {
-    val context = LocalContext.current
-    val coroutineScope = rememberCoroutineScope()
+    val launchers = rememberExportLaunchers(viewModel)
 
     val transactions by viewModel.transactions.collectAsState()
     val accounts by viewModel.accounts.collectAsState()
     val needsReviewCount by viewModel.needsReviewCount.collectAsState()
 
-    var searchQuery by remember { mutableStateOf("") }
-    var filterTypeIndex by remember { mutableIntStateOf(0) } // 0: All, 1: Expenses, 2: Income, 3: Transfers, 4: Review
-    var selectedCategoryFilter by remember { mutableStateOf<String?>(null) }
-    var selectedAccountFilter by remember { mutableStateOf<String?>(null) }
-    var viewModeIndex by remember { mutableIntStateOf(0) } // 0: List, 1: Calendar
-    var prefillDateMillis by remember { mutableStateOf<Long?>(null) }
+    var searchQuery by rememberSaveable { mutableStateOf("") }
+    var filterTypeIndex by rememberSaveable { mutableIntStateOf(0) } // 0: All, 1: Expenses, 2: Income, 3: Transfers, 4: Review
+    var selectedCategoryFilter by rememberSaveable { mutableStateOf<String?>(null) }
+    var selectedAccountFilter by rememberSaveable { mutableStateOf<String?>(null) }
+    var viewModeIndex by rememberSaveable { mutableIntStateOf(0) } // 0: List, 1: Calendar
+    var prefillDateMillis by rememberSaveable { mutableStateOf<Long?>(null) }
 
-    var showAddSheet by remember { mutableStateOf(false) }
-    var selectedTxnForDetail by remember { mutableStateOf<TransactionEntity?>(null) }
+    var showAddSheet by rememberSaveable { mutableStateOf(false) }
+    var selectedTxnId by rememberSaveable { mutableStateOf<String?>(null) }
+    var detailStartsEditing by rememberSaveable { mutableStateOf(false) }
+    val selectedTxnForDetail = selectedTxnId?.let { id -> transactions.firstOrNull { it.id == id } }
+    var pendingDelete by remember { mutableStateOf<TransactionEntity?>(null) }
+
+    fun openDetail(txn: TransactionEntity, editing: Boolean) {
+        detailStartsEditing = editing
+        selectedTxnId = txn.id
+    }
 
     BackHandler(enabled = showAddSheet || selectedTxnForDetail != null) {
         if (showAddSheet) {
             showAddSheet = false
             prefillDateMillis = null
         }
-        if (selectedTxnForDetail != null) selectedTxnForDetail = null
+        if (selectedTxnForDetail != null) selectedTxnId = null
     }
 
     val currencyFormat = remember {
         NumberFormat.getCurrencyInstance(Locale("en", "IN")).apply {
             maximumFractionDigits = 0
         }
+    }
+
+    pendingDelete?.let { txn ->
+        DeleteTransactionDialog(
+            transaction = txn,
+            currencyFormat = currencyFormat,
+            onConfirm = {
+                viewModel.deleteTransaction(txn)
+                if (selectedTxnId == txn.id) selectedTxnId = null
+                pendingDelete = null
+            },
+            onDismiss = { pendingDelete = null }
+        )
     }
 
     val filteredList = remember(transactions, searchQuery, filterTypeIndex, selectedCategoryFilter, selectedAccountFilter) {
@@ -141,19 +162,7 @@ fun TransactionsScreen(
                     }
 
                     // Export CSV Button (Matching Web App)
-                    IconButton(
-                        onClick = {
-                            coroutineScope.launch {
-                                val csv = viewModel.exportCsvString()
-                                val sendIntent = Intent(Intent.ACTION_SEND).apply {
-                                    putExtra(Intent.EXTRA_TEXT, csv)
-                                    putExtra(Intent.EXTRA_TITLE, "Money_Tracker_Ledger.csv")
-                                    type = "text/csv"
-                                }
-                                context.startActivity(Intent.createChooser(sendIntent, "Export CSV"))
-                            }
-                        }
-                    ) {
+                    IconButton(onClick = launchers.exportCsv) {
                         Icon(Icons.Default.FileDownload, contentDescription = "Export CSV", tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
@@ -174,12 +183,11 @@ fun TransactionsScreen(
                     CalendarMonthView(
                         transactions = transactions,
                         currencyFormat = currencyFormat,
-                        onSelectTransaction = { selectedTxnForDetail = it },
-                        onAddTransactionForDate = { dateStr ->
-                            val parsed = try {
-                                SimpleDateFormat("yyyy-MM-dd", Locale.ENGLISH).parse(dateStr)
-                            } catch (e: Exception) { null }
-                            prefillDateMillis = parsed?.time ?: System.currentTimeMillis()
+                        onSelectTransaction = { openDetail(it, editing = false) },
+                        onEditTransaction = { openDetail(it, editing = true) },
+                        onDeleteTransaction = { pendingDelete = it },
+                        onAddTransactionForDate = { millis ->
+                            prefillDateMillis = millis
                             showAddSheet = true
                         }
                     )
@@ -307,7 +315,7 @@ fun TransactionsScreen(
                             shape = shape,
                             color = MaterialTheme.colorScheme.surface
                         ) {
-                            Box(modifier = Modifier.clickable { selectedTxnForDetail = txn }) {
+                            Box(modifier = Modifier.clickable { openDetail(txn, editing = false) }) {
                                 TransactionRowItem(
                                     transaction = txn,
                                     currencyFormat = currencyFormat,
@@ -352,23 +360,21 @@ fun TransactionsScreen(
                 transaction = txn,
                 accounts = accounts.map { it.name },
                 currencyFormat = currencyFormat,
-                onDismiss = { selectedTxnForDetail = null },
+                startInEditMode = detailStartsEditing,
+                onDismiss = { selectedTxnId = null },
                 onUpdateCategory = { newCat, learnRule ->
                     val updated = txn.copy(category = newCat, needsReview = false)
                     viewModel.updateTransaction(updated)
                     if (learnRule) {
                         viewModel.learnRuleAndReclassify(txn.description, newCat, txn.type)
                     }
-                    selectedTxnForDetail = null
+                    selectedTxnId = null
                 },
                 onUpdateTransaction = { updated ->
                     viewModel.updateTransaction(updated)
-                    selectedTxnForDetail = null
+                    selectedTxnId = null
                 },
-                onDelete = {
-                    viewModel.deleteTransaction(txn)
-                    selectedTxnForDetail = null
-                }
+                onDelete = { pendingDelete = txn }
             )
         }
     }
@@ -383,17 +389,17 @@ fun AddTransactionBottomSheet(
     initialDateMillis: Long? = null
 ) {
     val context = LocalContext.current
-    var description by remember { mutableStateOf("") }
-    var amountText by remember { mutableStateOf("") }
-    var selectedTypeIndex by remember { mutableIntStateOf(0) } // 0: Expense, 1: Income, 2: Transfer
-    var selectedCategory by remember { mutableStateOf(ALL_CATEGORIES.first()) }
-    var selectedAccount by remember { mutableStateOf(accounts.firstOrNull() ?: "Main Account") }
-    var paymentMode by remember { mutableStateOf("UPI") }
-    var notes by remember { mutableStateOf("") }
-    var selectedTimestamp by remember(initialDateMillis) {
+    var description by rememberSaveable { mutableStateOf("") }
+    var amountText by rememberSaveable { mutableStateOf("") }
+    var selectedTypeIndex by rememberSaveable { mutableIntStateOf(0) } // 0: Expense, 1: Income, 2: Transfer
+    var selectedCategory by rememberSaveable { mutableStateOf(ALL_CATEGORIES.first()) }
+    var selectedAccount by rememberSaveable { mutableStateOf(accounts.firstOrNull() ?: "Main Account") }
+    var paymentMode by rememberSaveable { mutableStateOf("UPI") }
+    var notes by rememberSaveable { mutableStateOf("") }
+    var selectedTimestamp by rememberSaveable(initialDateMillis) {
         mutableLongStateOf(initialDateMillis ?: System.currentTimeMillis())
     }
-    var errorMessage by remember { mutableStateOf<String?>(null) }
+    var errorMessage by rememberSaveable { mutableStateOf<String?>(null) }
 
     val dateDisplayFormat = remember { SimpleDateFormat("dd MMM yyyy", Locale.getDefault()) }
     val timeDisplayFormat = remember { SimpleDateFormat("hh:mm a", Locale.getDefault()) }
@@ -710,10 +716,11 @@ fun TransactionDetailBottomSheet(
     onDismiss: () -> Unit,
     onUpdateCategory: (String, Boolean) -> Unit,
     onUpdateTransaction: (TransactionEntity) -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    startInEditMode: Boolean = false
 ) {
     val context = LocalContext.current
-    var isEditing by remember { mutableStateOf(false) }
+    var isEditing by remember { mutableStateOf(startInEditMode) }
 
     // Edit states
     var editDescription by remember(transaction) { mutableStateOf(transaction.description) }
@@ -1190,7 +1197,7 @@ fun TransactionDetailBottomSheet(
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
                         modifier = Modifier.height(48.dp)
                     ) {
-                        Icon(Icons.Default.Delete, contentDescription = "Delete", modifier = Modifier.size(18.dp))
+                        Icon(Icons.Default.Delete, contentDescription = "Delete Transaction", modifier = Modifier.size(18.dp))
                     }
                 }
             }

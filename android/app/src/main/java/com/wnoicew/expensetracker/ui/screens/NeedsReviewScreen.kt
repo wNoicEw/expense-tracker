@@ -23,6 +23,7 @@ import com.wnoicew.expensetracker.data.model.TransactionEntity
 import com.wnoicew.expensetracker.data.model.TransactionType
 import com.wnoicew.expensetracker.ui.ALL_CATEGORIES
 import com.wnoicew.expensetracker.ui.MainViewModel
+import com.wnoicew.expensetracker.ui.components.DeleteTransactionDialog
 import com.wnoicew.expensetracker.ui.components.HigGlassCard
 import com.wnoicew.expensetracker.ui.theme.IncomeGreen
 import com.wnoicew.expensetracker.ui.theme.ExpenseRose
@@ -46,6 +47,19 @@ fun NeedsReviewScreen(
     }
 
     val dateFormat = remember { SimpleDateFormat("EEEE, dd MMM yyyy", Locale.getDefault()) }
+    var pendingDelete by remember { mutableStateOf<TransactionEntity?>(null) }
+
+    pendingDelete?.let { txn ->
+        DeleteTransactionDialog(
+            transaction = txn,
+            currencyFormat = currencyFormat,
+            onConfirm = {
+                viewModel.deleteTransaction(txn)
+                pendingDelete = null
+            },
+            onDismiss = { pendingDelete = null }
+        )
+    }
 
     LazyColumn(
         modifier = Modifier
@@ -143,9 +157,7 @@ fun NeedsReviewScreen(
                         viewModel.updateTransaction(updated)
                         viewModel.learnRuleAndReclassify(txn.description, selectedCat, txnType)
                     },
-                    onDelete = {
-                        viewModel.deleteTransaction(txn)
-                    }
+                    onDelete = { pendingDelete = txn }
                 )
             }
         }

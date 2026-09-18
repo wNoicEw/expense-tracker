@@ -18,7 +18,7 @@ import java.util.concurrent.ConcurrentHashMap
         StatementUploadEntity::class
     ],
     version = 3,
-    exportSchema = false
+    exportSchema = true
 )
 abstract class ExpenseTrackerDatabase : RoomDatabase() {
     abstract fun transactionDao(): TransactionDao
@@ -29,6 +29,10 @@ abstract class ExpenseTrackerDatabase : RoomDatabase() {
     companion object {
         private val instances = ConcurrentHashMap<String, ExpenseTrackerDatabase>()
 
+        fun closeAndForget(profileId: String) {
+            instances.remove(profileId)?.close()
+        }
+
         fun getDatabase(context: Context, profileId: String): ExpenseTrackerDatabase {
             return instances.computeIfAbsent(profileId) { id ->
                 Room.databaseBuilder(
@@ -36,7 +40,7 @@ abstract class ExpenseTrackerDatabase : RoomDatabase() {
                     ExpenseTrackerDatabase::class.java,
                     "ExpenseTrackerDB_$id"
                 )
-                .fallbackToDestructiveMigration()
+                .fallbackToDestructiveMigrationFrom(1, 2)
                 .build()
             }
         }

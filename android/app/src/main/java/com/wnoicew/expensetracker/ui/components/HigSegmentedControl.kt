@@ -3,7 +3,8 @@ package com.wnoicew.expensetracker.ui.components
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -15,7 +16,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -30,7 +35,8 @@ fun HigSegmentedControl(
     items: List<String>,
     selectedIndex: Int,
     onItemSelected: (Int) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    itemDescriptions: List<String>? = null
 ) {
     val cornerRadius = 12.dp
     val trackBg = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
@@ -39,10 +45,11 @@ fun HigSegmentedControl(
     BoxWithConstraints(
         modifier = modifier
             .fillMaxWidth()
-            .height(40.dp)
+            .height(48.dp)
             .clip(RoundedCornerShape(cornerRadius))
             .background(trackBg)
             .padding(3.dp)
+            .selectableGroup()
     ) {
         val segmentWidth = maxWidth / items.size
         val indicatorOffset by animateDpAsState(
@@ -73,14 +80,20 @@ fun HigSegmentedControl(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxHeight()
-                        .clickable(
+                        .selectable(
+                            selected = isSelected,
                             interactionSource = remember { MutableInteractionSource() },
-                            indication = null
-                        ) { onItemSelected(index) },
+                            indication = null,
+                            role = Role.Tab,
+                            onClick = { onItemSelected(index) }
+                        )
+                        .semantics { itemDescriptions?.getOrNull(index)?.let { contentDescription = it } },
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
                         text = title,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                         fontSize = 13.sp,
                         fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
                         color = if (isSelected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,

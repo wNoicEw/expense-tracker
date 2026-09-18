@@ -2,12 +2,15 @@ package com.wnoicew.expensetracker.data
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.os.Handler
+import android.os.Looper
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import org.json.JSONArray
 import org.json.JSONObject
+import com.wnoicew.expensetracker.data.db.ExpenseTrackerDatabase
 import java.util.UUID
 
 data class UserProfile(
@@ -140,8 +143,6 @@ class ProfileManager(private val context: Context) {
     }
 
     fun deleteProfile(id: String) {
-        // Delete database file for this profile
-        context.deleteDatabase("ExpenseTrackerDB_$id")
         profiles.removeAll { it.id == id }
         saveProfiles()
         if (activeProfile.value?.id == id) {
@@ -153,5 +154,17 @@ class ProfileManager(private val context: Context) {
                 prefs.edit().remove("active_profile_id").apply()
             }
         }
+
+        context.getSharedPreferences("backup_reminder_prefs", Context.MODE_PRIVATE).edit()
+            .remove("lastBackupAt_$id")
+            .remove("backupReminderDismissedUntil_$id")
+            .apply()
+
+        // Live Room flows on the active profile are cancelled asynchronously after the switch above;
+        // closing immediately could fail an in-flight query.
+        Handler(Looper.getMainLooper()).postDelayed({
+            ExpenseTrackerDatabase.closeAndForget(id)
+            context.deleteDatabase("ExpenseTrackerDB_$id")
+        }, 500)
     }
 }

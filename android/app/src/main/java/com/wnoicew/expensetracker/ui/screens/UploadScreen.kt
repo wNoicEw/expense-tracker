@@ -619,7 +619,8 @@ fun UploadScreen(
                             fileName = currentImportFileName,
                             detectedBank = parsed.detectedProfile,
                             accountMetadata = parsed.accountMetadata,
-                            transactionsToInsert = parsed.transactions
+                            transactionsToInsert = parsed.transactions,
+                            rowAccounts = parsed.rowAccounts
                         )
                         Toast.makeText(context, "Successfully imported ${parsed.transactions.size} transactions to ${parsed.accountMetadata?.name ?: "account"}!", Toast.LENGTH_SHORT).show()
                         parseResultToPreview = null

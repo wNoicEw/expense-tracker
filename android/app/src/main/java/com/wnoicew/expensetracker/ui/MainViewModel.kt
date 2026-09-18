@@ -2,6 +2,7 @@ package com.wnoicew.expensetracker.ui
 
 import android.app.Application
 import android.content.Context
+import android.net.Uri
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.snapshotFlow
@@ -10,14 +11,29 @@ import androidx.lifecycle.viewModelScope
 import com.wnoicew.expensetracker.data.ProfileManager
 import com.wnoicew.expensetracker.data.UserProfile
 import com.wnoicew.expensetracker.data.db.ExpenseTrackerDatabase
+import com.wnoicew.expensetracker.data.engine.BackupFormatException
+import com.wnoicew.expensetracker.data.engine.BackupReminderPolicy
 import com.wnoicew.expensetracker.data.engine.CategorizerEngine
 import com.wnoicew.expensetracker.data.engine.DuplicateDetectorEngine
 import com.wnoicew.expensetracker.data.engine.ExportEngine
 import com.wnoicew.expensetracker.data.engine.StatementParserEngine
 import com.wnoicew.expensetracker.data.model.*
+import androidx.room.withTransaction
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.IOException
+import java.time.LocalDate
+import java.time.ZoneId
+
+enum class ExportKind(val mimeType: String, val extension: String, val baseName: String) {
+    CSV("text/csv", "csv", "Money_Tracker_Transactions"),
+    JSON("application/json", "json", "MoneyTracker_Profile_Backup");
+
+    fun defaultFileName(today: LocalDate = LocalDate.now()) = "${baseName}_$today.$extension"
+}
 
 val ALL_CATEGORIES = listOf(
     "Food & Dining",
@@ -57,13 +73,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun dismissBackupReminder() {
         val profileId = activeProfile.value?.id ?: return
-        val sevenDaysMs = 7L * 24 * 60 * 60 * 1000L
-        backupPrefs.edit().putLong("backupReminderDismissedUntil_$profileId", System.currentTimeMillis() + sevenDaysMs).apply()
+        backupPrefs.edit().putLong("backupReminderDismissedUntil_$profileId", System.currentTimeMillis() + BackupReminderPolicy.SNOOZE_MS).apply()
         backupStateVersion.value++
     }
 
-    fun recordBackupCompleted() {
-        val profileId = activeProfile.value?.id ?: return
+    private fun recordBackupCompleted(profileId: String) {
         backupPrefs.edit().putLong("lastBackupAt_$profileId", System.currentTimeMillis()).apply()
         backupStateVersion.value++
     }
@@ -89,19 +103,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         snapshotFlow { profileManager.activeProfile.value },
         backupStateVersion
     ) { txnList, profile, _ ->
-        if (txnList.isEmpty() || profile == null) {
+        if (profile == null) {
             false
         } else {
-            val profileId = profile.id
-            val now = System.currentTimeMillis()
-            val dismissedUntil = backupPrefs.getLong("backupReminderDismissedUntil_$profileId", 0L)
-            if (now < dismissedUntil) {
-                false
-            } else {
-                val lastBackupAt = backupPrefs.getLong("lastBackupAt_$profileId", 0L)
-                val thirtyDaysMs = 30L * 24 * 60 * 60 * 1000L
-                (now - lastBackupAt) > thirtyDaysMs
-            }
+            BackupReminderPolicy.shouldShow(
+                txnCount = txnList.count { it.duplicateStatus != "merged" },
+                lastBackupAt = backupPrefs.getLong("lastBackupAt_${profile.id}", 0L),
+                snoozedUntil = backupPrefs.getLong("backupReminderDismissedUntil_${profile.id}", 0L),
+                now = System.currentTimeMillis()
+            )
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
@@ -196,24 +206,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         list.sumOf { if (it.account.type.equals("Credit Card", ignoreCase = true)) -it.outstandingDues else it.computedBalance }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0.0)
 
-    val totalInflow30D = transactions.map { list ->
-        val thirtyDaysAgo = System.currentTimeMillis() - (30L * 24 * 60 * 60 * 1000)
-        list.filter { it.date >= thirtyDaysAgo && it.type == TransactionType.INCOME && it.duplicateStatus != "merged" }
-            .sumOf { it.amount }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0.0)
+    private val totals30D: Flow<KpiTotals> = combine(transactions, DayClock.today()) { list, today ->
+        KpiMath.totals(list, KpiRange.D30, today, ZoneId.systemDefault())
+    }
 
-    val totalOutflow30D = transactions.map { list ->
-        val thirtyDaysAgo = System.currentTimeMillis() - (30L * 24 * 60 * 60 * 1000)
-        list.filter { it.date >= thirtyDaysAgo && it.type == TransactionType.EXPENSE && it.duplicateStatus != "merged" }
-            .sumOf { it.amount }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0.0)
+    val totalInflow30D = totals30D.map { it.inflow }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0.0)
 
-    val netSavingsRate = combine(totalInflow30D, totalOutflow30D) { inflow, outflow ->
-        if (inflow > 0) {
-            val saved = inflow - outflow
-            ((saved / inflow) * 100).coerceAtLeast(0.0)
-        } else 0.0
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0.0)
+    val totalOutflow30D = totals30D.map { it.outflow }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0.0)
 
     // Expense by Category Breakdown (matching web app donut breakdown)
     val categoryBreakdown: StateFlow<List<CategoryBreakdownItem>> = transactions.map { txns ->
@@ -238,18 +239,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         viewModelScope.launch {
-            transactions.collect { list ->
-                val detected = DuplicateDetectorEngine.scanDuplicates(list)
-                duplicatePairs.clear()
-                duplicatePairs.addAll(detected)
-            }
+            transactions
+                .map { DuplicateDetectorEngine.scanDuplicates(it) }
+                .flowOn(Dispatchers.Default)
+                .collect { detected ->
+                    duplicatePairs.clear()
+                    duplicatePairs.addAll(detected)
+                }
         }
     }
 
     fun rescanDuplicates() {
-        val detected = DuplicateDetectorEngine.scanDuplicates(transactions.value)
-        duplicatePairs.clear()
-        duplicatePairs.addAll(detected)
+        viewModelScope.launch {
+            val detected = withContext(Dispatchers.Default) { DuplicateDetectorEngine.scanDuplicates(transactions.value) }
+            duplicatePairs.clear()
+            duplicatePairs.addAll(detected)
+        }
     }
 
     // ==========================================
@@ -414,13 +419,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         accountName: String = "",
         password: String? = null
     ): StatementParseResult {
-        val profile = activeProfile.value ?: throw IllegalStateException("No active profile")
+        if (activeProfile.value == null) throw IllegalStateException("No active profile")
         val customRules = rules.value
         return StatementParserEngine.parseStatementStream(inputStream, fileName, accountId, accountName, customRules, password)
     }
 
     fun parseCsvStatement(lines: List<String>, fileName: String, accountId: String = "", accountName: String = ""): StatementParseResult {
-        val profile = activeProfile.value ?: return StatementParseResult("Unknown", emptyList(), 0.0, 0.0)
+        if (activeProfile.value == null) return StatementParseResult("Unknown", emptyList(), 0.0, 0.0)
         val customRules = rules.value
         return StatementParserEngine.parseCsvLines(lines, fileName, accountId, accountName, customRules)
     }
@@ -430,7 +435,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         fileName: String,
         detectedBank: String,
         accountMetadata: AccountMetadata?,
-        transactionsToInsert: List<TransactionEntity>
+        transactionsToInsert: List<TransactionEntity>,
+        rowAccounts: List<AccountMetadata?> = emptyList()
     ) {
         val profile = activeProfile.value ?: return
         viewModelScope.launch {
@@ -438,7 +444,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val existingAccounts = db.accountDao().getAllAccountsSnapshot().toMutableList()
 
             // Helper function to dynamically resolve or create an account
-            suspend fun getOrCreateAccount(meta: AccountMetadata): AccountEntity {
+            // strict: the last 4 digits came from the row itself, so a different account of the same bank must not absorb it
+            suspend fun getOrCreateAccount(meta: AccountMetadata, strict: Boolean = false): AccountEntity {
                 // 1. Match by last 4 digits and matching type
                 var match = existingAccounts.find { a ->
                     a.type.equals(meta.type, ignoreCase = true) &&
@@ -449,7 +456,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
 
                 // 2. Match by exact bank name and type
-                if (match == null) {
+                if (match == null && !strict) {
                     match = existingAccounts.find { a ->
                         a.bankName.isNotBlank() &&
                         meta.bankName.isNotBlank() &&
@@ -485,26 +492,33 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 return newAcc
             }
 
-            // Resolve main account
-            val mainAccount = if (accountMetadata != null) {
-                getOrCreateAccount(accountMetadata)
-            } else {
-                existingAccounts.firstOrNull() ?: getOrCreateAccount(
-                    AccountMetadata(
-                        bankName = detectedBank,
-                        type = "Bank Account",
-                        lastFour = "0000",
-                        name = "$detectedBank Account"
+            // File-level account, created only if some row actually falls back to it (a Navi file whose rows all name their own account never needs the wallet)
+            var mainAccountCache: AccountEntity? = null
+            suspend fun mainAccount(): AccountEntity = mainAccountCache ?: run {
+                if (accountMetadata != null) {
+                    getOrCreateAccount(accountMetadata)
+                } else {
+                    existingAccounts.firstOrNull() ?: getOrCreateAccount(
+                        AccountMetadata(
+                            bankName = detectedBank,
+                            type = "Bank Account",
+                            lastFour = "0000",
+                            name = "$detectedBank Account"
+                        )
                     )
-                )
-            }
+                }
+            }.also { mainAccountCache = it }
 
-            // Link all transactions to their respective account (including per-row RuPay credit cards)
-            val resolvedTransactions = transactionsToInsert.map { txn ->
-                var targetAcc = mainAccount
-                val ruPayMeta = StatementParserEngine.detectRuPayCC(txn.rawNarration)
-                if (ruPayMeta != null) {
-                    targetAcc = getOrCreateAccount(ruPayMeta)
+            // Per-row hints are positional; a length mismatch means the list is stale, so ignore it rather than misassign
+            val hints = if (rowAccounts.size == transactionsToInsert.size) rowAccounts else emptyList()
+
+            // Link each transaction to the account that paid it: the row's own account (bank / RuPay card), else the file-level one
+            val resolvedTransactions = transactionsToInsert.mapIndexed { i, txn ->
+                val rowMeta = StatementParserEngine.rowAccountFor(txn, hints.getOrNull(i))
+                val targetAcc = if (rowMeta != null) {
+                    getOrCreateAccount(rowMeta, strict = rowMeta.type == "Bank Account" && rowMeta.lastFour.length == 4 && rowMeta.lastFour != "0000")
+                } else {
+                    mainAccount()
                 }
 
                 txn.copy(
@@ -532,38 +546,61 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     // Export & Backup
-    suspend fun exportCsvString(): String {
-        val txns = transactions.value
-        val accs = accounts.value
-        return ExportEngine.generateCsv(txns, accs)
-    }
-
-    suspend fun exportJsonBackupString(): String {
-        val profile = activeProfile.value ?: return "{}"
-        val txns = transactions.value
-        val accs = accounts.value
-        val r = rules.value
-        recordBackupCompleted()
-        return ExportEngine.generateJsonBackup(profile.name, txns, accs, r)
-    }
-
-    fun restoreJsonBackup(jsonStr: String, onComplete: (Boolean, String) -> Unit) {
+    // Reads DAO snapshots rather than the WhileSubscribed StateFlows, which are empty when nothing is collecting.
+    fun saveExport(uri: Uri, kind: ExportKind, onComplete: (Boolean, String) -> Unit) {
         val profile = activeProfile.value ?: run {
             onComplete(false, "No active profile selected")
             return
         }
         viewModelScope.launch {
             try {
-                val data = ExportEngine.parseJsonBackup(jsonStr)
-                val db = ExpenseTrackerDatabase.getDatabase(getApplication(), profile.id)
-                if (data.transactions.isNotEmpty()) db.transactionDao().insertTransactions(data.transactions)
-                if (data.accounts.isNotEmpty()) db.accountDao().insertAccounts(data.accounts)
-                if (data.rules.isNotEmpty()) db.ruleDao().insertRules(data.rules)
-                recordBackupCompleted()
-                onComplete(true, "Restored ${data.transactions.size} transactions, ${data.accounts.size} accounts, and ${data.rules.size} rules.")
+                withContext(Dispatchers.IO) {
+                    val db = ExpenseTrackerDatabase.getDatabase(getApplication(), profile.id)
+                    val txns = db.transactionDao().getAllTransactionsSnapshot()
+                    val accs = db.accountDao().getAllAccountsSnapshot()
+                    val text = when (kind) {
+                        ExportKind.CSV -> ExportEngine.generateCsv(txns, accs)
+                        ExportKind.JSON -> ExportEngine.generateJsonBackup(profile.name, txns, accs, db.ruleDao().getAllRulesSnapshot())
+                    }
+                    val out = getApplication<Application>().contentResolver.openOutputStream(uri, "wt")
+                        ?: throw IOException("Could not open the destination file")
+                    out.bufferedWriter(Charsets.UTF_8).use { it.write(text) }
+                }
+                recordBackupCompleted(profile.id)
+                onComplete(true, if (kind == ExportKind.JSON) "Backup saved" else "CSV exported")
             } catch (e: Exception) {
-                onComplete(false, e.message ?: "Failed to parse backup JSON")
+                onComplete(false, "Export failed: ${e.message ?: "could not write the file"}")
             }
+        }
+    }
+
+    fun restoreFromUri(uri: Uri, onComplete: (Boolean, String) -> Unit) {
+        val profile = activeProfile.value ?: run {
+            onComplete(false, "No active profile selected")
+            return
+        }
+        viewModelScope.launch {
+            val result = try {
+                val data = withContext(Dispatchers.IO) {
+                    val json = getApplication<Application>().contentResolver.openInputStream(uri)
+                        ?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
+                        ?: throw IOException("Could not open the selected file")
+                    val parsed = ExportEngine.parseJsonBackup(json)
+                    val db = ExpenseTrackerDatabase.getDatabase(getApplication(), profile.id)
+                    db.withTransaction {
+                        if (parsed.transactions.isNotEmpty()) db.transactionDao().insertTransactions(parsed.transactions)
+                        if (parsed.accounts.isNotEmpty()) db.accountDao().insertAccounts(parsed.accounts)
+                        if (parsed.rules.isNotEmpty()) db.ruleDao().insertRules(parsed.rules)
+                    }
+                    parsed
+                }
+                true to "Restored ${data.transactions.size} transactions, ${data.accounts.size} accounts, and ${data.rules.size} rules."
+            } catch (e: BackupFormatException) {
+                false to (e.message ?: "Invalid backup file")
+            } catch (e: Exception) {
+                false to "Restore failed: ${e.message ?: "unreadable backup file"}"
+            }
+            onComplete(result.first, result.second)
         }
     }
 }

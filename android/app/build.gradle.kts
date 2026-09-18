@@ -13,8 +13,8 @@ android {
         applicationId = "com.wnoicew.expensetracker"
         minSdk = 26
         targetSdk = 35
-        versionCode = 13
-        versionName = "1.4.0"
+        versionCode = 15
+        versionName = "1.4.2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -75,10 +75,10 @@ android {
                         val versionedApk = File(apksFolder, "ExpenseTracker-v${vName}.apk")
                         apkFile.copyTo(versionedApk, overwrite = true)
 
-                        // 3. Keep only the last 10 versions for emergency fallback
+                        // 3. Keep only the last 5 versions for emergency fallback
                         val versionRegex = Regex("""ExpenseTracker-v(\d+)\.(\d+)\.(\d+)\.apk""")
                         val archivedApks = apksFolder.listFiles { f -> f.isFile && versionRegex.matches(f.name) }
-                        if (archivedApks != null && archivedApks.size > 10) {
+                        if (archivedApks != null && archivedApks.size > 5) {
                             archivedApks.sortedWith(Comparator { a, b ->
                                 val mA = versionRegex.matchEntire(a.name)
                                 val mB = versionRegex.matchEntire(b.name)
@@ -93,7 +93,7 @@ android {
                                 } else {
                                     a.name.compareTo(b.name)
                                 }
-                            }).take(archivedApks.size - 10).forEach { oldApk ->
+                            }).take(archivedApks.size - 5).forEach { oldApk ->
                                 if (oldApk.delete()) {
                                     println("  [APKs Folder] Pruned old fallback version: ${oldApk.name}")
                                 } else {
@@ -116,6 +116,10 @@ android {
             finalizedBy(copyTask)
         }
     }
+}
+
+ksp {
+    arg("room.schemaLocation", "$projectDir/schemas")
 }
 
 dependencies {

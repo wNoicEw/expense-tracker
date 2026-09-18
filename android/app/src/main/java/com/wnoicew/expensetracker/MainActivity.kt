@@ -22,6 +22,8 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.listSaver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -37,6 +39,7 @@ import com.wnoicew.expensetracker.ui.screens.*
 import com.wnoicew.expensetracker.ui.theme.MoneyTrackerTheme
 import com.wnoicew.expensetracker.ui.theme.PrimaryBlue
 import com.wnoicew.expensetracker.ui.theme.WarningAmber
+import com.wnoicew.expensetracker.ui.theme.WarningAmberFill
 import com.wnoicew.expensetracker.ui.theme.IncomeGreen
 import com.wnoicew.expensetracker.ui.theme.ExpenseRose
 
@@ -84,11 +87,16 @@ class MainActivity : ComponentActivity() {
 fun MainAppRoot(viewModel: MainViewModel) {
     val activeProfile by viewModel.activeProfile
     val isDarkMode by viewModel.isDarkMode
-    var selectedTab by remember { mutableStateOf(BottomTab.DASHBOARD) }
-    val tabBackStack = remember { mutableStateListOf(BottomTab.DASHBOARD) }
-    var activeSubScreen by remember { mutableStateOf(SubScreen.NONE) }
-    var showProfileManagerSheet by remember { mutableStateOf(false) }
-    var showAddTxnSheet by remember { mutableStateOf(false) }
+    var selectedTab by rememberSaveable { mutableStateOf(BottomTab.DASHBOARD) }
+    val tabBackStack = rememberSaveable(
+        saver = listSaver(
+            save = { stack -> stack.map { it.name } },
+            restore = { names -> names.map { BottomTab.valueOf(it) }.toMutableStateList() }
+        )
+    ) { mutableStateListOf(BottomTab.DASHBOARD) }
+    var activeSubScreen by rememberSaveable { mutableStateOf(SubScreen.NONE) }
+    var showProfileManagerSheet by rememberSaveable { mutableStateOf(false) }
+    var showAddTxnSheet by rememberSaveable { mutableStateOf(false) }
 
     fun navigateToTab(tab: BottomTab) {
         activeSubScreen = SubScreen.NONE
@@ -156,11 +164,11 @@ fun MainAppRoot(viewModel: MainViewModel) {
                                     BadgedBox(
                                         badge = {
                                             if (tab == BottomTab.REVIEW && needsReviewCount > 0) {
-                                                Badge(containerColor = WarningAmber) {
-                                                    Text(needsReviewCount.toString(), color = Color.Black, fontWeight = FontWeight.Bold)
+                                                Badge(containerColor = WarningAmberFill, contentColor = Color.Black) {
+                                                    Text(needsReviewCount.toString(), fontWeight = FontWeight.Bold)
                                                 }
                                             } else if (tab == BottomTab.MORE && duplicatePairs.isNotEmpty()) {
-                                                Badge(containerColor = PrimaryBlue) {
+                                                Badge(containerColor = PrimaryBlue, contentColor = Color.White) {
                                                     Text(duplicatePairs.size.toString())
                                                 }
                                             }
@@ -168,7 +176,11 @@ fun MainAppRoot(viewModel: MainViewModel) {
                                     ) {
                                         Icon(
                                             imageVector = if (selected) tab.selectedIcon else tab.unselectedIcon,
-                                            contentDescription = tab.title
+                                            contentDescription = when {
+                                                tab == BottomTab.REVIEW && needsReviewCount > 0 -> "${tab.title}, $needsReviewCount pending"
+                                                tab == BottomTab.MORE && duplicatePairs.isNotEmpty() -> "${tab.title}, ${duplicatePairs.size} duplicates to resolve"
+                                                else -> tab.title
+                                            }
                                         )
                                     }
                                 },
@@ -231,8 +243,7 @@ fun MainAppRoot(viewModel: MainViewModel) {
                                 onNavigateToAccounts = { activeSubScreen = SubScreen.ACCOUNTS },
                                 onNavigateToReview = { navigateToTab(BottomTab.REVIEW) },
                                 onNavigateToUpload = { navigateToTab(BottomTab.UPLOAD) },
-                                onOpenAddTransaction = { showAddTxnSheet = true },
-                                onNavigateToReports = { activeSubScreen = SubScreen.REPORTS }
+                                onOpenAddTransaction = { showAddTxnSheet = true }
                             )
                             BottomTab.TRANSACTIONS -> TransactionsScreen(
                                 viewModel = viewModel

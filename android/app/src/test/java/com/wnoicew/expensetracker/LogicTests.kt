@@ -2,14 +2,23 @@ package com.wnoicew.expensetracker
 
 import com.wnoicew.expensetracker.data.PRESET_GRADIENTS
 import com.wnoicew.expensetracker.data.UserProfile
+import com.wnoicew.expensetracker.data.engine.BackupFormatException
+import com.wnoicew.expensetracker.data.engine.BackupReminderPolicy
 import com.wnoicew.expensetracker.data.engine.CategorizerEngine
 import com.wnoicew.expensetracker.data.engine.DuplicateDetectorEngine
 import com.wnoicew.expensetracker.data.engine.ExportEngine
 import com.wnoicew.expensetracker.data.engine.StatementParserEngine
 import com.wnoicew.expensetracker.data.model.*
+import com.wnoicew.expensetracker.ui.KpiMath
+import com.wnoicew.expensetracker.ui.KpiRange
+import com.wnoicew.expensetracker.ui.components.CalendarAggregator
 import org.junit.Assert.*
 import org.junit.Test
 import java.text.SimpleDateFormat
+import java.time.LocalDate
+import java.time.LocalDateTime
+import java.time.ZoneId
+import java.util.Calendar
 import java.util.Locale
 import java.util.UUID
 
@@ -301,6 +310,63 @@ class LogicTests {
         assertEquals("HDFC Bank", restored.accounts[0].name)
     }
 
+    @Test
+    fun testCsvEscapesQuotesNeutralisesFormulasAndSkipsMerged() {
+        val txns = listOf(
+            TransactionEntity(id = "a", description = "=HYPERLINK(\"http://x\")", amount = 10.0, category = "+cmd", note = "say \"hi\"", sourceFile = "@src"),
+            TransactionEntity(id = "b", description = "Merged dup", amount = 5.0, duplicateStatus = "merged"),
+            TransactionEntity(id = "c", description = "Big", amount = 12500000.0, accountName = "-Acct")
+        )
+        val csv = ExportEngine.generateCsv(txns, emptyList())
+        val rows = csv.trim().lines()
+
+        assertEquals(3, rows.size)
+        assertFalse(csv.contains("Merged dup"))
+        assertTrue(rows[1].contains("\"'=HYPERLINK(\"\"http://x\"\")\""))
+        assertTrue(rows[1].contains("\"'+cmd\""))
+        assertTrue(rows[1].contains("\"say \"\"hi\"\"\""))
+        assertTrue(rows[1].contains("\"'@src\""))
+        assertTrue(rows[2].contains(",12500000,") || rows[2].contains(",12500000.0,"))
+        assertTrue(rows[2].contains("\"'-Acct\""))
+        assertFalse(rows[2].contains("E7"))
+    }
+
+    @Test
+    fun testJsonBackupRoundTripsDuplicateFields() {
+        val txns = listOf(
+            TransactionEntity(
+                id = "t1", description = "Swiggy", amount = 320.0,
+                duplicateWithId = "t2", duplicateStatus = "pending_review",
+                duplicateConfidence = 95, duplicateReason = "Same day and amount"
+            ),
+            TransactionEntity(id = "t3", description = "No dup", amount = 1.0)
+        )
+        val restored = ExportEngine.parseJsonBackup(ExportEngine.generateJsonBackup("P", txns, emptyList(), emptyList()))
+
+        assertEquals("t2", restored.transactions[0].duplicateWithId)
+        assertEquals(95, restored.transactions[0].duplicateConfidence)
+        assertEquals("Same day and amount", restored.transactions[0].duplicateReason)
+        assertEquals("pending_review", restored.transactions[0].duplicateStatus)
+        assertNull(restored.transactions[1].duplicateWithId)
+    }
+
+    @Test
+    fun testRestoreRejectsNewerOrUnrecognisedBackupVersion() {
+        val ok = """{"version":"${ExportEngine.BACKUP_VERSION}","transactions":[]}"""
+        assertEquals(0, ExportEngine.parseJsonBackup(ok).transactions.size)
+        assertEquals(0, ExportEngine.parseJsonBackup("""{"version":"1.1.0","transactions":[]}""").transactions.size)
+        assertEquals(0, ExportEngine.parseJsonBackup("""{"transactions":[]}""").transactions.size)
+        assertEquals(0, ExportEngine.parseJsonBackup("""{"version":"1.2.9","transactions":[]}""").transactions.size)
+
+        val newerMinor = assertThrows(BackupFormatException::class.java) {
+            ExportEngine.parseJsonBackup("""{"version":"1.3.0","transactions":[]}""")
+        }
+        assertTrue(newerMinor.message!!.contains("newer"))
+        assertThrows(BackupFormatException::class.java) { ExportEngine.parseJsonBackup("""{"version":"2.0.0"}""") }
+        assertThrows(BackupFormatException::class.java) { ExportEngine.parseJsonBackup("""{"version":"banana"}""") }
+        assertThrows(BackupFormatException::class.java) { ExportEngine.parseJsonBackup("not json") }
+    }
+
     // ==========================================
     // 6. AUTO-DETECTION OF CARDS & ACCOUNTS TESTS
     // ==========================================
@@ -474,111 +540,457 @@ class LogicTests {
     }
 
     // ==========================================
-    // 11. CALENDAR MONTH-VIEW & DAY-LEDGER AGGREGATION TESTS
+    // 11. CALENDAR AGGREGATION (production CalendarAggregator)
     // ==========================================
 
-    @Test
-    fun testCalendarMonthTransactionAggregation() {
-        val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.ENGLISH)
-        val day1 = sdf.parse("2026-09-15")!!.time
-        val day2 = sdf.parse("2026-09-18")!!.time
+    private val utc = ZoneId.of("UTC")
 
+    private fun epoch(y: Int, m: Int, d: Int, h: Int = 12, min: Int = 0): Long =
+        LocalDateTime.of(y, m, d, h, min).atZone(utc).toInstant().toEpochMilli()
+
+    private fun txn(
+        date: Long,
+        amount: Double,
+        type: TransactionType,
+        status: String = "none",
+        id: String = UUID.randomUUID().toString()
+    ) = TransactionEntity(id = id, date = date, description = "t", amount = amount, type = type, duplicateStatus = status)
+
+    @Test
+    fun testCalendarAggregateExcludesMergedAndTransfersFromTotals() {
         val txns = listOf(
-            TransactionEntity(
-                id = "t1",
-                date = day1,
-                description = "Salary Credit",
-                amount = 50000.0,
-                type = TransactionType.INCOME,
-                category = "Salary & Professional"
-            ),
-            TransactionEntity(
-                id = "t2",
-                date = day1,
-                description = "Grocery Store",
-                amount = 2500.0,
-                type = TransactionType.EXPENSE,
-                category = "Groceries & Mart"
-            ),
-            TransactionEntity(
-                id = "t3",
-                date = day2,
-                description = "Dining Out",
-                amount = 1200.0,
-                type = TransactionType.EXPENSE,
-                category = "Food & Dining"
-            ),
-            TransactionEntity(
-                id = "t4",
-                date = day2,
-                description = "Duplicate Record",
-                amount = 1200.0,
-                type = TransactionType.EXPENSE,
-                category = "Food & Dining",
-                duplicateStatus = "merged" // Must be excluded!
-            )
+            txn(epoch(2026, 9, 15), 50000.0, TransactionType.INCOME),
+            txn(epoch(2026, 9, 15), 2500.0, TransactionType.EXPENSE),
+            txn(epoch(2026, 9, 18), 1200.0, TransactionType.EXPENSE),
+            txn(epoch(2026, 9, 18), 1200.0, TransactionType.EXPENSE, status = "merged"),
+            txn(epoch(2026, 9, 18), 9000.0, TransactionType.TRANSFER),
+            txn(epoch(2026, 8, 31), 777.0, TransactionType.EXPENSE)
         )
 
-        val monthPrefix = "2026-09"
-        val activeTxns = txns.filter { it.duplicateStatus != "merged" }
-        var monthInflow = 0.0
-        var monthOutflow = 0.0
-        val byDate = mutableMapOf<String, MutableList<TransactionEntity>>()
+        val agg = CalendarAggregator.aggregate(txns, 2026, 9, utc)
 
-        activeTxns.forEach { t ->
-            val dStr = sdf.format(java.util.Date(t.date))
-            if (dStr.startsWith(monthPrefix)) {
-                byDate.getOrPut(dStr) { mutableListOf() }.add(t)
-                if (t.type == TransactionType.INCOME) monthInflow += t.amount
-                else if (t.type == TransactionType.EXPENSE) monthOutflow += t.amount
-            }
-        }
+        assertEquals(50000.0, agg.inflow, 0.001)
+        assertEquals(3700.0, agg.outflow, 0.001)
+        assertEquals(46300.0, agg.net, 0.001)
+        assertEquals(setOf(15, 18), agg.days.keys)
+        assertEquals(2, agg.days[15]!!.count)
+        val day18 = agg.days[18]!!
+        assertEquals(2, day18.count)
+        assertEquals(1200.0, day18.expense, 0.001)
+        assertEquals(0.0, day18.income, 0.001)
+    }
 
-        assertEquals(50000.0, monthInflow, 0.001)
-        assertEquals(3700.0, monthOutflow, 0.001)
-        assertEquals(46300.0, monthInflow - monthOutflow, 0.001)
-        assertEquals(2, byDate.size)
-        assertEquals(2, byDate["2026-09-15"]?.size)
-        assertEquals(1, byDate["2026-09-18"]?.size)
+    @Test
+    fun testCalendarAggregateLeapDayAndMonthBoundaries() {
+        val txns = listOf(
+            txn(epoch(2024, 2, 29, 23, 59), 10.0, TransactionType.EXPENSE),
+            txn(epoch(2024, 3, 1, 0, 0), 20.0, TransactionType.EXPENSE),
+            txn(epoch(2024, 1, 31, 23, 59), 30.0, TransactionType.EXPENSE)
+        )
+
+        val feb = CalendarAggregator.aggregate(txns, 2024, 2, utc)
+        assertEquals(setOf(29), feb.days.keys)
+        assertEquals(10.0, feb.outflow, 0.001)
+        assertEquals(LocalDate.of(2024, 2, 29), feb.days[29]!!.date)
+
+        val nonLeapFeb = CalendarAggregator.aggregate(txns, 2023, 2, utc)
+        assertTrue(nonLeapFeb.days.isEmpty())
+    }
+
+    @Test
+    fun testCalendarAggregateDecemberToJanuaryRollover() {
+        val txns = listOf(
+            txn(epoch(2025, 12, 31, 23, 30), 100.0, TransactionType.EXPENSE),
+            txn(epoch(2026, 1, 1, 0, 30), 200.0, TransactionType.INCOME)
+        )
+
+        val dec = CalendarAggregator.aggregate(txns, 2025, 12, utc)
+        val jan = CalendarAggregator.aggregate(txns, 2026, 1, utc)
+
+        assertEquals(100.0, dec.outflow, 0.001)
+        assertEquals(0.0, dec.inflow, 0.001)
+        assertEquals(setOf(31), dec.days.keys)
+        assertEquals(200.0, jan.inflow, 0.001)
+        assertEquals(setOf(1), jan.days.keys)
+    }
+
+    @Test
+    fun testCalendarAggregateUsesLocalZoneForDayBucket() {
+        val lateUtc = epoch(2026, 9, 18, 20, 0)
+        val txns = listOf(txn(lateUtc, 5.0, TransactionType.EXPENSE))
+
+        val ist = ZoneId.of("Asia/Kolkata")
+        assertEquals(setOf(18), CalendarAggregator.aggregate(txns, 2026, 9, utc).days.keys)
+        assertEquals(setOf(19), CalendarAggregator.aggregate(txns, 2026, 9, ist).days.keys)
+    }
+
+    @Test
+    fun testCalendarSelectionClampsIntoNewMonth() {
+        assertEquals(LocalDate.of(2024, 2, 29), CalendarAggregator.clampToMonth(LocalDate.of(2026, 1, 31), 2024, 2))
+        assertEquals(LocalDate.of(2026, 2, 28), CalendarAggregator.clampToMonth(LocalDate.of(2026, 1, 31), 2026, 2))
+        assertEquals(LocalDate.of(2026, 1, 15), CalendarAggregator.clampToMonth(LocalDate.of(2025, 12, 15), 2026, 1))
+        assertEquals(LocalDate.of(2026, 5, 1), CalendarAggregator.clampToMonth(null, 2026, 5))
+    }
+
+    @Test
+    fun testCalendarAddForDateKeepsCurrentTimeOfDay() {
+        val now = epoch(2026, 9, 18, 14, 35)
+        val millis = CalendarAggregator.dateWithCurrentTime(LocalDate.of(2026, 9, 3), now, utc)
+        assertEquals(epoch(2026, 9, 3, 14, 35), millis)
+    }
+
+    @Test
+    fun testCalendarLeadingBlankCellsAreSundayFirst() {
+        assertEquals(2, CalendarAggregator.leadingBlankCells(2026, 9)) // Tuesday
+        assertEquals(0, CalendarAggregator.leadingBlankCells(2026, 2)) // Sunday
+        assertEquals(5, CalendarAggregator.leadingBlankCells(2025, 8)) // Friday
+    }
+
+    @Test
+    fun testCalendarCompactAmountAndDayDescription() {
+        assertEquals("500", CalendarAggregator.compactAmount(500.0))
+        assertEquals("1.2k", CalendarAggregator.compactAmount(1234.0))
+        assertEquals("2k", CalendarAggregator.compactAmount(2000.0))
+        assertEquals("1.5L", CalendarAggregator.compactAmount(150000.0))
+        assertEquals("1.2Cr", CalendarAggregator.compactAmount(12000000.0))
+
+        val txns = listOf(
+            txn(epoch(2026, 9, 18), 100.0, TransactionType.EXPENSE),
+            txn(epoch(2026, 9, 18), 300.0, TransactionType.EXPENSE),
+            txn(epoch(2026, 9, 18), 500.0, TransactionType.INCOME)
+        )
+        val summary = CalendarAggregator.aggregate(txns, 2026, 9, utc).days[18]
+        assertEquals(
+            "18 September, 2 expenses, 1 income, selected",
+            CalendarAggregator.describeDay(LocalDate.of(2026, 9, 18), summary, isToday = false, isSelected = true, locale = Locale.ENGLISH)
+        )
+        assertEquals(
+            "3 September, today, no transactions",
+            CalendarAggregator.describeDay(LocalDate.of(2026, 9, 3), null, isToday = true, isSelected = false, locale = Locale.ENGLISH)
+        )
     }
 
     // ==========================================
-    // 12. BACKUP REMINDER LOGIC TESTS
+    // 12. BACKUP REMINDER POLICY (production BackupReminderPolicy)
     // ==========================================
 
     @Test
-    fun testBackupReminderThresholds() {
+    fun testBackupReminderPolicyThresholds() {
         val now = 1758200000000L
-        val thirtyDaysMs = 30L * 24 * 60 * 60 * 1000L
-        val sevenDaysMs = 7L * 24 * 60 * 60 * 1000L
+        val day = 24L * 60 * 60 * 1000L
+        val oldBackup = now - 31 * day
 
-        fun shouldShow(txnCount: Int, lastBackupAt: Long, dismissedUntil: Long, currentTime: Long): Boolean {
-            if (txnCount == 0) return false
-            if (currentTime < dismissedUntil) return false
-            return (currentTime - lastBackupAt) > thirtyDaysMs
+        assertFalse(BackupReminderPolicy.shouldShow(0, 0L, 0L, now))
+        assertTrue(BackupReminderPolicy.shouldShow(5, 0L, 0L, now))
+        assertFalse(BackupReminderPolicy.shouldShow(5, now - 5 * day, 0L, now))
+        assertTrue(BackupReminderPolicy.shouldShow(5, oldBackup, 0L, now))
+        assertFalse(BackupReminderPolicy.shouldShow(5, oldBackup, now + BackupReminderPolicy.SNOOZE_MS, now))
+        assertTrue(BackupReminderPolicy.shouldShow(5, oldBackup, now + BackupReminderPolicy.SNOOZE_MS, now + 8 * day))
+        assertFalse(BackupReminderPolicy.shouldShow(5, now - 30 * day, 0L, now))
+    }
+
+    // ==========================================
+    // 13. STATEMENT DATE PARSING
+    // ==========================================
+
+    private val parseNow = epoch(2026, 9, 18)
+
+    private fun ymd(millis: Long?): Triple<Int, Int, Int>? {
+        if (millis == null) return null
+        val c = Calendar.getInstance().apply { timeInMillis = millis }
+        return Triple(c.get(Calendar.YEAR), c.get(Calendar.MONTH) + 1, c.get(Calendar.DAY_OF_MONTH))
+    }
+
+    @Test
+    fun testParseDateRealStatementFormats() {
+        assertEquals(Triple(2025, 1, 5), ymd(StatementParserEngine.parseDate("05-01-2025", parseNow)))
+        assertEquals(Triple(2025, 1, 5), ymd(StatementParserEngine.parseDate("05/01/25", parseNow)))
+        assertEquals(Triple(2025, 1, 5), ymd(StatementParserEngine.parseDate("05/01/2025", parseNow)))
+        assertEquals(Triple(2024, 1, 15), ymd(StatementParserEngine.parseDate("15 Jan 2024", parseNow)))
+        assertEquals(Triple(2024, 1, 15), ymd(StatementParserEngine.parseDate("15 January 2024", parseNow)))
+        assertEquals(Triple(2024, 1, 15), ymd(StatementParserEngine.parseDate("2024-01-15", parseNow)))
+        assertEquals(Triple(2024, 1, 15), ymd(StatementParserEngine.parseDate("2024-01-15 10:30:00", parseNow)))
+        assertEquals(Triple(2024, 1, 15), ymd(StatementParserEngine.parseDate("Jan 15, 2024", parseNow)))
+        assertEquals(Triple(2024, 1, 15), ymd(StatementParserEngine.parseDate("15-Jan-2024", parseNow)))
+    }
+
+    @Test
+    fun testParseDateMonthFirstOnlyWhenDayFirstIsImpossible() {
+        // 15 can't be a month, so 01/15/2025 is unambiguously US order
+        assertEquals(Triple(2025, 1, 15), ymd(StatementParserEngine.parseDate("01/15/2025", parseNow)))
+        assertEquals(Triple(2025, 1, 15), ymd(StatementParserEngine.parseDate("01-15-2025", parseNow)))
+        assertEquals(Triple(2025, 3, 25), ymd(StatementParserEngine.parseDate("03/25/25", parseNow)))
+        // ambiguous stays day-first (Indian convention): 5 June, never 6 May
+        assertEquals(Triple(2025, 6, 5), ymd(StatementParserEngine.parseDate("05/06/2025", parseNow)))
+        // impossible either way stays unreadable (flagged), never guessed
+        assertNull(StatementParserEngine.parseDate("13/13/2025", parseNow))
+        assertNull(StatementParserEngine.parseDate("02/30/2025", parseNow))
+    }
+
+    @Test
+    fun testAccountDetectionSbiBankStatementIsBankAccountKeyedByAccountNumber() {
+        // pdf text lists header labels first, values after: CIF number precedes the account number
+        val text = "STATEMENT OF ACCOUNT State Bank of India CIF Number : Account Number : Account Status : " +
+            "12345678901 98765432105 OPEN INR 05/04/2025 DEP TFR UPI/CR/1/x/paytm/gpay 06/04/2025 WDL TFR UPI/DR/2/y"
+        val meta = StatementParserEngine.extractAccountMetadata(text, "statement.pdf")
+        assertEquals("Bank Account", meta.type)
+        assertEquals("2105", meta.lastFour)
+    }
+
+    @Test
+    fun testAccountDetectionNaviIsWalletNotSbi() {
+        val meta = StatementParserEngine.extractAccountMetadata(
+            "Transaction statement from 20 May 2026 Paid via Navi UPI State Bank of India - 2105", "Navi_Statement.pdf"
+        )
+        assertEquals("Navi UPI", meta.bankName)
+        assertEquals("Digital Wallet", meta.type)
+        assertEquals("Navi UPI Wallet", meta.name)
+    }
+
+    @Test
+    fun testParseDateRejectsInvalidAndOutOfRange() {
+        assertNull(StatementParserEngine.parseDate("31/02/2024", parseNow))
+        assertNull(StatementParserEngine.parseDate("32/01/2024", parseNow))
+        assertNull(StatementParserEngine.parseDate("", parseNow))
+        assertNull(StatementParserEngine.parseDate("not a date", parseNow))
+        assertNull(StatementParserEngine.parseDate("01/01/1980", parseNow))
+        assertNull(StatementParserEngine.parseDate("01/01/2099", parseNow))
+        assertNull(StatementParserEngine.parseDate("15/01/2024 garbage", parseNow))
+    }
+
+    @Test
+    fun testCsvRowWithUnreadableDateIsFlaggedNotSilentlyDatedToday() {
+        val lines = listOf(
+            "Date,Description,Amount,Type",
+            "31/02/2024,Zomato Food Order,650.00,Debit",
+            "2024-01-15,Zomato Food Order,100.00,Debit"
+        )
+        val result = StatementParserEngine.parseCsvLines(lines, "bad_dates.csv")
+
+        assertEquals(2, result.transactions.size)
+        val bad = result.transactions[0]
+        assertTrue(bad.needsReview)
+        assertEquals("low", bad.confidence)
+        assertTrue(bad.note.contains("31/02/2024"))
+        val good = result.transactions[1]
+        assertEquals(Triple(2024, 1, 15), ymd(good.date))
+        assertTrue(good.note.isEmpty())
+    }
+
+    // ==========================================
+    // 14. KPI WINDOWS (production KpiMath)
+    // ==========================================
+
+    @Test
+    fun testKpiWindowUsesLocalCalendarDays() {
+        val today = LocalDate.of(2026, 9, 18)
+        val txns = listOf(
+            txn(epoch(2026, 8, 20, 0, 0), 100.0, TransactionType.EXPENSE), // first day of the 30D window
+            txn(epoch(2026, 8, 19, 23, 59), 999.0, TransactionType.EXPENSE), // just outside
+            txn(epoch(2026, 9, 18, 9, 0), 5000.0, TransactionType.INCOME),
+            txn(epoch(2026, 9, 10, 9, 0), 50.0, TransactionType.EXPENSE, status = "merged"),
+            txn(epoch(2026, 9, 10, 9, 0), 70.0, TransactionType.TRANSFER)
+        )
+
+        val t30 = KpiMath.totals(txns, KpiRange.D30, today, utc)
+        assertEquals(5000.0, t30.inflow, 0.001)
+        assertEquals(100.0, t30.outflow, 0.001)
+        assertEquals(98.0, t30.savingsRatePercent, 0.001)
+
+        val t7 = KpiMath.totals(txns, KpiRange.D7, today, utc)
+        assertEquals(0.0, t7.outflow, 0.001)
+
+        val all = KpiMath.totals(txns, KpiRange.ALL, today, utc)
+        assertEquals(1099.0, all.outflow, 0.001)
+    }
+
+    @Test
+    fun testKpiWindowMovesAtMidnight() {
+        val txns = listOf(txn(epoch(2026, 8, 20, 6, 0), 100.0, TransactionType.EXPENSE))
+        assertEquals(100.0, KpiMath.totals(txns, KpiRange.D30, LocalDate.of(2026, 9, 18), utc).outflow, 0.001)
+        assertEquals(0.0, KpiMath.totals(txns, KpiRange.D30, LocalDate.of(2026, 9, 19), utc).outflow, 0.001)
+    }
+
+    // ==========================================
+    // PER-ROW ACCOUNTS (UPI histories mixing bank, RuPay card and wallet rows)
+    // ==========================================
+
+    @Test
+    fun testNaviRowAccountRupayCardInEveryGlueOrder() {
+        val txnLine = "12:56 PM UPI txn ID: 100000000002"
+        // account column split: bank part glued to the payee, card part on the txn-ID line, on its own line, or glued to the payee too
+        val variants = listOf(
+            "SOME SHOP HDFC Bank RuPay" to listOf("$txnLine Credit Card - XX99", "Note: Paid via Navi UPI"),
+            "SOME SHOP HDFC Bank RuPay" to listOf(txnLine, "Credit Card - XX99", "Note: Paid via Navi UPI"),
+            "SOME SHOP HDFC Bank RuPay Credit Card - XX99" to listOf(txnLine)
+        )
+        for ((payee, follow) in variants) {
+            val r = StatementParserEngine.splitNaviAccount(payee, follow)
+            assertEquals("SOME SHOP", r.payee)
+            assertEquals("Credit Card", r.account?.type)
+            assertTrue(r.account?.isRuPay == true)
+            assertEquals("HDFC Bank", r.account?.bankName)
         }
+    }
 
-        // 1. No transactions -> never show
-        assertFalse(shouldShow(0, 0L, 0L, now))
+    @Test
+    fun testNaviRowAccountBankKeyedByLast4AndSbiNormalised() {
+        val txnLine = "1:05 PM UPI txn ID: 100000000001"
+        val sameLine = StatementParserEngine.splitNaviAccount("A FRIEND State Bank of India", listOf("$txnLine - 1234"))
+        val ownLine = StatementParserEngine.splitNaviAccount("A FRIEND State Bank of India", listOf(txnLine, "- 1234", "Note: x"))
+        val bankOnFollowUp = StatementParserEngine.splitNaviAccount("A FRIEND", listOf("State Bank of India - 1234"))
+        for (r in listOf(sameLine, ownLine, bankOnFollowUp)) {
+            assertEquals("A FRIEND", r.payee)
+            assertEquals("Bank Account", r.account?.type)
+            assertEquals("1234", r.account?.lastFour)
+            assertEquals("State Bank of India (SBI)", r.account?.bankName)
+            assertFalse(r.account?.isRuPay == true)
+        }
+    }
 
-        // 2. Transactions exist, never backed up -> show
-        assertTrue(shouldShow(5, 0L, 0L, now))
+    @Test
+    fun testNaviRowAccountMissingOrUntrustedTextNeverBreaksTheRow() {
+        val none = StatementParserEngine.splitNaviAccount("SOME SHOP", listOf("12:56 PM UPI txn ID: 100000000004"))
+        assertEquals("SOME SHOP", none.payee)
+        assertNull(none.account)
+        // a trailing "... Bank" with no "- 1234" beside it may be part of the payee's own name
+        val plain = StatementParserEngine.splitNaviAccount("SOME SHOP Sunrise Bank", listOf("12:56 PM UPI txn ID: 100000000004"))
+        assertEquals("SOME SHOP Sunrise Bank", plain.payee)
+        assertNull(plain.account)
+        // bank column present but the last4 fragment lost: payee is cleaned, no account guessed
+        val noLast4 = StatementParserEngine.splitNaviAccount("A FRIEND State Bank of India", listOf("12:56 PM UPI txn ID: 100000000004"))
+        assertEquals("A FRIEND", noLast4.payee)
+        assertNull(noLast4.account)
+    }
 
-        // 3. Backed up recently (5 days ago) -> don't show
-        val recentBackup = now - (5L * 24 * 60 * 60 * 1000L)
-        assertFalse(shouldShow(5, recentBackup, 0L, now))
+    @Test
+    fun testNaviBillPaymentOfCardIsBankRowTransferAndNeverACardAccount() {
+        val lines = listOf(
+            "Date Transaction details Account Amount",
+            "12 May 2026 Paid to SOME SHOP HDFC Bank RuPay 75",
+            "12:56 PM UPI txn ID: 100000000002 Credit Card - XX99",
+            "Note: Paid via Navi UPI",
+            "13 May 2026 Paid to A FRIEND State Bank of India 120",
+            "1:05 PM UPI txn ID: 100000000001",
+            "- 1234",
+            "Note: Paid via Navi UPI",
+            "14 May 2026 Bill payment of HDFC Credit Card State Bank of India 9,999",
+            "9:00 AM UPI txn ID: 100000000003 - 1234",
+            "Note: UPI",
+            "15 May 2026 Paid to SOME SHOP 30",
+            "3:00 PM UPI txn ID: 100000000004"
+        )
+        val res = StatementParserEngine.parseNaviPdf(lines, "navi.pdf", "", "", emptyList())
+        assertEquals(4, res.transactions.size)
+        assertEquals(4, res.rowAccounts.size)
 
-        // 4. Backed up 31 days ago -> show
-        val oldBackup = now - (31L * 24 * 60 * 60 * 1000L)
-        assertTrue(shouldShow(5, oldBackup, 0L, now))
+        val card = res.transactions[0]
+        assertTrue(res.rowAccounts[0]?.isRuPay == true)
+        assertEquals("Paid to SOME SHOP — Paid via Navi UPI", card.rawNarration)
+        assertEquals("UPI (RuPay Credit Card)", card.paymentMode)
+        assertEquals("100000000002", card.referenceNo)
 
-        // 5. Backed up 31 days ago but dismissed for 7 days (snoozed) -> don't show
-        val dismissedUntil = now + sevenDaysMs
-        assertFalse(shouldShow(5, oldBackup, dismissedUntil, now))
+        assertEquals("1234", res.rowAccounts[1]?.lastFour)
+        assertEquals("Paid to A FRIEND — Paid via Navi UPI", res.transactions[1].rawNarration)
 
-        // 6. Snooze period expired (8 days later) -> show again
-        val later = now + (8L * 24 * 60 * 60 * 1000L)
-        assertTrue(shouldShow(5, oldBackup, dismissedUntil, later))
+        val bill = res.transactions[2]
+        assertEquals(TransactionType.TRANSFER, bill.type)
+        assertEquals(9999.0, bill.amount, 0.001)
+        assertEquals("Bill payment of HDFC Credit Card — UPI", bill.rawNarration)
+        assertEquals("Bank Account", res.rowAccounts[2]?.type)
+        assertEquals("1234", res.rowAccounts[2]?.lastFour)
+        assertEquals("UPI", bill.paymentMode)
+
+        assertNull(res.rowAccounts[3]) // falls back to the file-level Navi wallet
+    }
+
+    @Test
+    fun testRowAccountForPrefersHintAndNeverInventsCardForBillPayments() {
+        fun t(narr: String, type: TransactionType = TransactionType.EXPENSE) =
+            TransactionEntity(description = "t", amount = 1.0, type = type, rawNarration = narr)
+        val bank = StatementParserEngine.accountHintFromInstrument("State Bank of India - 1234")
+        assertEquals(bank, StatementParserEngine.rowAccountFor(t("Paid to SOME SHOP — Paid via Navi UPI"), bank))
+        // no hint: the old narration detection still finds a RuPay card
+        assertTrue(StatementParserEngine.rowAccountFor(t("Paid to SOME SHOP HDFC Bank RuPay Credit Card - XX99"), null)?.isRuPay == true)
+        // a payment OF a card, even one that mentions UPI, is not a purchase made with one
+        assertNull(StatementParserEngine.rowAccountFor(t("Bill payment of HDFC Credit Card — UPI"), null))
+        assertNull(StatementParserEngine.rowAccountFor(t("Paid to SOME SHOP via UPI credit card", TransactionType.TRANSFER), null))
+        assertNull(StatementParserEngine.rowAccountFor(t("Paid to SOME SHOP"), null))
+    }
+
+    @Test
+    fun testAccountHintFromInstrumentShapes() {
+        val masked = StatementParserEngine.accountHintFromInstrument("Paid by XXXXXXXX3863")!!
+        assertEquals("Bank Account", masked.type)
+        assertEquals("3863", masked.lastFour)
+        assertEquals("Bank Account (•••• 3863)", masked.name)
+
+        val hdfc = StatementParserEngine.accountHintFromInstrument("Paid by HDFC Bank 4321")!!
+        assertEquals("HDFC Bank", hdfc.bankName)
+        assertEquals("4321", hdfc.lastFour)
+        assertEquals("HDFC Bank Account (•••• 4321)", hdfc.name)
+        assertEquals("4321", StatementParserEngine.accountHintFromInstrument("Paid by Axis Bank A/c XX4321")?.lastFour)
+
+        val card = StatementParserEngine.accountHintFromInstrument("Paid by HDFC Bank Credit Card XX4321")!!
+        assertEquals("Credit Card", card.type)
+        assertEquals("4321", card.lastFour)
+
+        // free text that is not an instrument yields nothing rather than a guess
+        assertNull(StatementParserEngine.accountHintFromInstrument("Paid by SOME SHOP 1234"))
+        assertNull(StatementParserEngine.accountHintFromInstrument(""))
+        assertEquals("1234", StatementParserEngine.bankAccountInText("Paid to SOME SHOP State Bank Of India - 1234")?.lastFour)
+        assertNull(StatementParserEngine.bankAccountInText("Paid to SOME SHOP"))
+    }
+
+    @Test
+    fun testPhonePeRowsCarryPaidByAccountAndWholeRupeeAmounts() {
+        val lines = listOf(
+            "Date Transaction Details Type Amount",
+            "Apr 02, 2025 Paid to SOME SHOP DEBIT ₹185",
+            "06:57 PM Transaction ID T2504021234567890123456",
+            "UTR No: 100000000001",
+            "Paid by XXXXXXXX3863",
+            "Apr 03, 2025 Received from A FRIEND CREDIT ₹1,500",
+            "08:00 AM Transaction ID T2504031234567890123456",
+            "Apr 04, 2025 Paid to SOME SHOP DEBIT ₹50"
+        )
+        val res = StatementParserEngine.parsePhonePePdf(lines, "phonepe.pdf", "", "", emptyList())
+        assertEquals(listOf(185.0, 1500.0, 50.0), res.transactions.map { it.amount })
+        assertEquals(TransactionType.INCOME, res.transactions[1].type)
+        assertEquals("100000000001", res.transactions[0].referenceNo)
+        assertEquals("Paid to SOME SHOP", res.transactions[0].rawNarration)
+        assertEquals("3863", res.rowAccounts[0]?.lastFour)
+        assertNull(res.rowAccounts[1])
+        assertNull(res.rowAccounts[2])
+    }
+
+    @Test
+    fun testGooglePayRowsWithSplitDatesAndPaidByBank() {
+        val lines = listOf(
+            "Transaction statement",
+            "01 Jan, 2025 Paid to SOME SHOP ₹1,234",
+            "10:30 AM UPI Transaction ID: 100000000001",
+            "Paid by State Bank of India 1234",
+            "03 Jan,",
+            "2025 Received from A FRIEND ₹500",
+            "UPI Transaction ID: 100000000002",
+            "Paid by XXXXXXXX3863",
+            "05 Jan, 2025",
+            "Paid to SOME SHOP",
+            "UPI Transaction ID: 100000000003",
+            "₹99.50"
+        )
+        val res = StatementParserEngine.parseGooglePayLines(lines, "gpay.pdf")
+        assertEquals(3, res.transactions.size)
+        assertEquals(listOf(1234.0, 500.0, 99.5), res.transactions.map { it.amount })
+        assertEquals(TransactionType.INCOME, res.transactions[1].type)
+        assertEquals("100000000001", res.transactions[0].referenceNo)
+        assertTrue(res.transactions.all { it.note.isEmpty() }) // year on its own line still dated the row
+        assertEquals("1234", res.rowAccounts[0]?.lastFour)
+        assertEquals("State Bank of India (SBI)", res.rowAccounts[0]?.bankName)
+        assertEquals("3863", res.rowAccounts[1]?.lastFour)
+        assertNull(res.rowAccounts[2])
+        assertEquals(500.0, res.totalInflow, 0.001)
+        assertEquals(1333.5, res.totalOutflow, 0.001)
     }
 }
-

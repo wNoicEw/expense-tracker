@@ -71,7 +71,7 @@ object CategorizerEngine {
                 "water board", "mahanagar gas", "igl", "adani gas", "airtel", "jio", "vodafone",
                 "vi prepaid", "vi postpaid", "act fibernet", "hathway", "tata play", "tatasky",
                 "dth", "electricity", "broadband", "cylinder", "indane", "hp gas", "bharat gas",
-                "bbps", "billpay", "utility"
+                "bbps", "billpay", "utility", "tuition", "school fee", "college fee", "exam fee", "challan"
             )
         ),
         // Subscriptions & OTT

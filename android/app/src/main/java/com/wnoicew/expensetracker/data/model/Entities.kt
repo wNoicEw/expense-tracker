@@ -98,7 +98,10 @@ data class StatementParseResult(
     val transactions: List<TransactionEntity>,
     val totalInflow: Double,
     val totalOutflow: Double,
-    val accountMetadata: AccountMetadata? = null
+    val accountMetadata: AccountMetadata? = null,
+    // Parallel to transactions when the statement names the paying account per row (Navi, PhonePe, Google Pay, Paytm).
+    // null entries, or an empty list, mean "use the file-level account". In-memory only: nothing here is persisted.
+    val rowAccounts: List<AccountMetadata?> = emptyList()
 )
 
 data class AccountWithMetrics(

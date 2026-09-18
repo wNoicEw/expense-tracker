@@ -10,6 +10,7 @@ import com.wnoicew.expensetracker.data.model.TransactionType
 import java.io.BufferedReader
 import java.io.InputStream
 import java.io.InputStreamReader
+import java.text.ParsePosition
 import java.text.SimpleDateFormat
 import java.util.*
 import kotlin.math.abs
@@ -25,20 +26,33 @@ class StatementParsingException(
 
 object StatementParserEngine {
 
+    // Two-digit-year patterns precede four-digit ones and every parse must consume the whole string;
+    // otherwise "05/01/25" would be read as year 0025 by the yyyy pattern.
     private val supportedDateFormats = listOf(
-        "yyyy-MM-dd",
-        "dd/MM/yyyy",
-        "dd-MM-yyyy",
-        "dd/MM/yy",
-        "dd-MM-yy",
-        "dd-MMM-yyyy",
-        "dd MMM yyyy",
-        "MMM dd, yyyy",
-        "dd MMM, yyyy",
         "yyyy-MM-dd HH:mm:ss",
         "dd/MM/yyyy HH:mm:ss",
-        "yyyy/MM/dd"
+        "yyyy-MM-dd",
+        "yyyy/MM/dd",
+        "dd/MM/yy",
+        "dd-MM-yy",
+        "dd.MM.yy",
+        "dd/MM/yyyy",
+        "dd-MM-yyyy",
+        "dd.MM.yyyy",
+        "dd-MMM-yy",
+        "dd-MMM-yyyy",
+        "dd MMM yy",
+        "dd MMM yyyy",
+        "MMM dd, yyyy",
+        "dd MMM, yyyy"
     )
+
+    private const val MIN_VALID_YEAR = 1990
+
+    // Month-first fallbacks, tried only when the day-first parse failed AND the first number can't be a day
+    // ("01/15/2025"). "05/06/2025" stays day-first: that is the Indian convention and guessing would misdate it.
+    private val monthFirstFormats = listOf("MM/dd/yyyy", "MM-dd-yyyy", "MM/dd/yy", "MM-dd-yy")
+    private val monthFirstShape = Regex("""^(\d{1,2})[/\-](\d{1,2})[/\-](\d{2}|\d{4})$""")
 
     // Regex patterns for date, amount, type
     private val dateRegex = Regex("""(\d{1,2}[/\-.]\d{1,2}[/\-.]\d{2,4})|(\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*,?\s+\d{2,4})|((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2},?\s+\d{4})""", RegexOption.IGNORE_CASE)
@@ -149,6 +163,13 @@ object StatementParserEngine {
                     }
                 }
             }
+            // Header-based (extractAccountMetadata looks at the top of the file) so a payee named "Paytm" in a Google Pay file does not misroute it
+            detectedBank == "Google Pay" -> {
+                val gpay = parseGooglePayLines(lines, fileName, accountId, effectiveAccountName, customRules)
+                if (gpay.transactions.isNotEmpty()) gpay else {
+                    parseFallbackLines(lines, fileName, detectedBank, accountId, effectiveAccountName, customRules)
+                }
+            }
             ft.contains("phonepe") || fname.contains("phonepe") -> {
                 parsePhonePePdf(lines, fileName, accountId, effectiveAccountName, customRules)
             }
@@ -181,16 +202,109 @@ object StatementParserEngine {
         )
     }
 
+    // --- PER-ROW ACCOUNT HINTS (UPI histories that mix several paying accounts) ---
+    // Bank names as printed by UPI apps: "State Bank of India", "HDFC Bank", "Union Bank of India". "Bank" stays
+    // case-sensitive so an all-caps payee such as "SOME BANK" is never mistaken for the account column.
+    private const val BANK_NAME = """State\s+Bank\s+[Oo]f\s+India|[A-Za-z&.]+\s+Bank(?:\s+[Oo]f\s+[A-Za-z]+)?"""
+    private val sbiNameRe = Regex("""state\s*bank|\bsbi\b""", RegexOption.IGNORE_CASE)
+    private val knownBankRe = Regex("""\bbank\b|^(?:sbi|hdfc|icici|axis|kotak|pnb|idfc|bob|rbl|yes)\b""", RegexOption.IGNORE_CASE)
+    private val cardWordRe = Regex("""rupay|credit\s*card""", RegexOption.IGNORE_CASE)
+    private val instrumentMaskedRe = Regex("""^(?:paid\s+by\s+)?[xX*•]{2,}\s*(\d{4})$""", RegexOption.IGNORE_CASE)
+    private val instrumentBankRe = Regex("""^(?:paid\s+by\s+)?([A-Za-z][A-Za-z&.\s]*?)\s*(?:-|a/c|acct?\.?|account|ending(?:\s+in)?|no\.?)?\s*[xX*•]*\s*(\d{4})$""", RegexOption.IGNORE_CASE)
+    private val bankBeforeSuffixRe = Regex("""($BANK_NAME)\s*-\s*[xX*]*(\d{4})\b""")
+    private val naviCardFragRe = Regex("""credit\s*card\s*-?\s*[xX*]*\d{2,4}""", RegexOption.IGNORE_CASE)
+    private val naviRupayTailRe = Regex("""^(.*?)\s+($BANK_NAME|[A-Za-z&.]+)\s+(?i:rupay)$""")
+    private val naviBankTailRe = Regex("""^(.*?)\s+($BANK_NAME)$""")
+    private val naviBankSuffixRe = Regex("""(?:^|\s)-\s*(\d{4})\s*$""")
+    private val cardBillRe = Regex("""bill\s*payment\s*of\s+.*credit\s*card|credit\s*card\s*(?:bill\s*)?payment|\bcc\s*(?:bill|payment)\b""", RegexOption.IGNORE_CASE)
+    private val timeOnlyRe = Regex("""^\d{1,2}:\d{2}\s*[AP]M$""", RegexOption.IGNORE_CASE)
+    // Currency-prefixed so whole-rupee amounts ("₹185") match; amountRegex insists on decimals
+    private val upiAmountRe = Regex("""(?:₹|Rs\.?|INR)\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)""", RegexOption.IGNORE_CASE)
+
+    // "State Bank of India - 1234" / "HDFC Bank 4321" / "Paid by XXXXXXXX3863" / "HDFC Bank RuPay Credit Card - XX99"
+    // -> the account that paid. Cards become RuPay credit-card accounts, bank rows a bank account keyed by type + last4
+    // (the same key an imported bank statement uses, so both files land on one account). Unrecognised text -> null,
+    // and the caller falls back to the file-level account.
+    fun accountHintFromInstrument(text: String): AccountMetadata? {
+        val t = text.trim()
+        if (t.isBlank()) return null
+        if (cardWordRe.containsMatchIn(t)) return detectRuPayCC("UPI $t")
+        instrumentMaskedRe.find(t)?.let { m ->
+            val last4 = m.groupValues[1]
+            return AccountMetadata(bankName = "", type = "Bank Account", lastFour = last4, name = "Bank Account (•••• $last4)")
+        }
+        val m = instrumentBankRe.find(t) ?: return null
+        val bank = m.groupValues[1].trim()
+        if (!knownBankRe.containsMatchIn(bank)) return null
+        val last4 = m.groupValues[2]
+        val isSbi = sbiNameRe.containsMatchIn(bank)
+        val bankName = if (isSbi) "State Bank of India (SBI)" else bank
+        return AccountMetadata(
+            bankName = bankName,
+            type = "Bank Account",
+            lastFour = last4,
+            name = "$bankName Account (•••• $last4)",
+            gradientIndex = if (isSbi) 1 else 0
+        )
+    }
+
+    // First "<Bank> - 1234" found in free text (Paytm narrations that carry the account column)
+    fun bankAccountInText(text: String): AccountMetadata? {
+        val m = bankBeforeSuffixRe.find(text) ?: return null
+        return accountHintFromInstrument("${m.groupValues[1]} - ${m.groupValues[2]}")
+    }
+
+    // Which account a row lands on: its own hint first; otherwise the RuPay-on-UPI narration detection, except for
+    // credit-card bill payments (a payment OF a card is not spending WITH one, so no phantom card account).
+    fun rowAccountFor(txn: TransactionEntity, hint: AccountMetadata?): AccountMetadata? {
+        if (hint != null) return hint
+        if (txn.type == TransactionType.TRANSFER || cardBillRe.containsMatchIn(txn.rawNarration)) return null
+        return detectRuPayCC(txn.rawNarration)
+    }
+
+    class NaviRowAccount(val payee: String, val account: AccountMetadata?)
+
+    // Navi's Account column reads "State Bank of India" + "- 1234", or "HDFC Bank RuPay" + "Credit Card - XX99". In flattened
+    // text the first part is glued to the end of the payee and the rest sits on the time / txn-ID line or the one after,
+    // so the fragments are searched across every follow-up line rather than in a fixed position.
+    fun splitNaviAccount(payeeRaw: String, followLines: List<String>): NaviRowAccount {
+        var payee = payeeRaw.trim()
+        val frags = followLines.filterNot { it.startsWith("Note:", ignoreCase = true) }
+
+        val cardInPayee = naviCardFragRe.find(payee)
+        if (cardInPayee != null) payee = payee.replace(cardInPayee.value, "").trim()
+        val card = cardInPayee?.value ?: frags.firstNotNullOfOrNull { naviCardFragRe.find(it)?.value }
+        val rupay = naviRupayTailRe.find(payee)
+        if (card != null || rupay != null) {
+            if (rupay != null) payee = rupay.groupValues[1]
+            val account = detectRuPayCC("${rupay?.groupValues?.get(2).orEmpty()} RuPay ${card ?: "Credit Card"}")
+            return NaviRowAccount(payee.ifBlank { payeeRaw.trim() }, account)
+        }
+
+        val suffix = frags.firstNotNullOfOrNull { naviBankSuffixRe.find(it)?.groupValues?.get(1) }
+        val tail = naviBankTailRe.find(payee)
+        val bank = tail?.groupValues?.get(2)
+            ?: suffix?.let { frags.firstNotNullOfOrNull { f -> bankBeforeSuffixRe.find(f)?.groupValues?.get(1) } }
+        // "State Bank of India" is Navi's own column text; any other trailing "... Bank" is only trusted with a "- 1234" beside it
+        if (tail != null && (suffix != null || sbiNameRe.containsMatchIn(tail.groupValues[2]))) payee = tail.groupValues[1]
+        val account = if (bank != null && suffix != null) accountHintFromInstrument("$bank - $suffix") else null
+        return NaviRowAccount(payee.ifBlank { payeeRaw.trim() }, account)
+    }
+
     // --- NAVI UPI PDF PARSER ---
-    private fun parseNaviPdf(
+    internal fun parseNaviPdf(
         lines: List<String>,
         fileName: String,
         accountId: String,
         accountName: String,
         customRules: List<RuleEntity>
     ): StatementParseResult {
-        val anchorRe = Regex("""^(\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\w*\s+\d{4})\s+(Paid\s+to|Paid\s+for|Received\s+from|Refund\s+from)\s+(.+?)\s+[₹Rs.]*\s*([\d,]+(?:\.\d{1,2})?)$""", RegexOption.IGNORE_CASE)
+        // Direction word is part of the row text; "Bill payment of …" / "Recharge of …" rows have no Paid-to prefix
+        val anchorRe = Regex("""^(\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\w*\s+\d{4})\s+(Paid\s+to|Paid\s+for|Received\s+from|Refund\s+from|Bill\s+payment\s+of|Recharge\s+of|Payment\s+(?:of|to))\s+(.+?)\s+[₹Rs.]*\s*([\d,]+(?:\.\d{1,2})?)$""", RegexOption.IGNORE_CASE)
+        val ccBillRe = Regex("""^bill\s+payment\s+of\s+.*credit\s*card""", RegexOption.IGNORE_CASE)
+        val rowStartRe = Regex("""^\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)""", RegexOption.IGNORE_CASE)
         val list = mutableListOf<TransactionEntity>()
+        val rowAccounts = mutableListOf<AccountMetadata?>()
         var inflow = 0.0
         var outflow = 0.0
 
@@ -198,60 +312,78 @@ object StatementParserEngine {
             val m = anchorRe.find(lines[i]) ?: continue
             val rawDate = m.groupValues[1]
             val direction = m.groupValues[2].lowercase()
-            val payee = m.groupValues[3].trim()
             val amt = cleanAmount(m.groupValues[4])
             if (amt <= 0) continue
 
             val isIncome = direction.contains("received") || direction.contains("refund")
             val explicitType = if (isIncome) TransactionType.INCOME else TransactionType.EXPENSE
 
+            // Everything up to the next dated row belongs to this one
+            val follow = mutableListOf<String>()
+            for (j in (i + 1)..minOf(i + 5, lines.lastIndex)) {
+                if (rowStartRe.containsMatchIn(lines[j])) break
+                follow.add(lines[j])
+            }
+
             var bankInstrument = ""
             var txnId = ""
             var note = ""
-
-            for (j in (i + 1)..minOf(i + 4, lines.lastIndex)) {
-                val next = lines[j]
-                if (Regex("""^\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)""", RegexOption.IGNORE_CASE).containsMatchIn(next)) break
+            for (next in follow) {
                 if (next.contains("UPI txn ID", ignoreCase = true)) {
                     val tid = Regex("""UPI\s+txn\s+ID[:\s]*(\d+)""", RegexOption.IGNORE_CASE).find(next)?.groupValues?.getOrNull(1)
                     if (tid != null) txnId = tid
                 } else if (next.startsWith("Note:", ignoreCase = true)) {
                     note = next.replace(Regex("""^Note:\s*""", RegexOption.IGNORE_CASE), "").trim()
-                } else if (bankInstrument.isBlank() && next.length in 3..50) {
+                } else if (bankInstrument.isBlank() && next.length in 3..50 && !timeOnlyRe.matches(next)) {
                     bankInstrument = next
                 }
             }
 
-            val narration = (if (isIncome) "Received from " else "Paid to ") + payee + (if (note.isNotBlank()) " — $note" else "") + (if (bankInstrument.isNotBlank()) " [$bankInstrument]" else "")
+            val split = splitNaviAccount(m.groupValues[3], follow)
+            val payee = split.payee
+            val isCard = split.account?.isRuPay == true
+
+            val prefix = when {
+                isIncome -> "Received from "
+                direction.startsWith("paid") -> "Paid to "
+                else -> m.groupValues[2].trim().replaceFirstChar { it.uppercase() } + " " // "Bill payment of "
+            }
+            // A parsed account is carried on the row; the raw column text is only kept in the narration when nothing was understood
+            val instrumentTag = if (split.account == null && bankInstrument.isNotBlank()) " [$bankInstrument]" else ""
+            val narration = prefix + payee + (if (note.isNotBlank()) " — $note" else "") + instrumentTag
+            // Paying a credit-card bill is not spending: the purchases are already on the card itself
+            val isCcBillPayment = ccBillRe.containsMatchIn(prefix + payee) && !isCard && !bankInstrument.contains("Credit Card", ignoreCase = true)
             val cat = CategorizerEngine.categorize(narration, amt, customRules)
-            val date = parseDate(rawDate) ?: System.currentTimeMillis()
+            val parsedDate = parseDate(rawDate)
 
             list.add(
                 TransactionEntity(
-                    date = date,
+                    date = parsedDate ?: System.currentTimeMillis(),
                     description = cat.cleanTitle,
                     amount = amt,
-                    type = explicitType,
-                    category = cat.category,
+                    type = if (isCcBillPayment) TransactionType.TRANSFER else explicitType,
+                    category = if (isCcBillPayment) "Transfers & CC Bill" else cat.category,
                     accountId = accountId,
                     accountName = accountName.ifBlank { "Navi UPI" },
+                    note = if (parsedDate == null) undatedNote(rawDate) else "",
                     referenceNo = txnId,
-                    paymentMode = if (bankInstrument.contains("Credit Card", ignoreCase = true)) "UPI (RuPay Credit Card)" else "UPI",
+                    paymentMode = if (isCard || bankInstrument.contains("Credit Card", ignoreCase = true)) "UPI (RuPay Credit Card)" else "UPI",
                     sourceFile = fileName,
                     rawNarration = narration,
-                    needsReview = cat.needsReview,
-                    confidence = cat.confidence
+                    needsReview = cat.needsReview || parsedDate == null,
+                    confidence = if (parsedDate == null) "low" else cat.confidence
                 )
             )
+            rowAccounts.add(split.account)
 
             if (explicitType == TransactionType.INCOME) inflow += amt else outflow += amt
         }
 
-        return StatementParseResult("Navi UPI Statement", list, inflow, outflow)
+        return StatementParseResult("Navi UPI Statement", list, inflow, outflow, rowAccounts = rowAccounts)
     }
 
     // --- PHONEPE STATEMENT PDF PARSER ---
-    private fun parsePhonePePdf(
+    internal fun parsePhonePePdf(
         lines: List<String>,
         fileName: String,
         accountId: String,
@@ -259,17 +391,19 @@ object StatementParserEngine {
         customRules: List<RuleEntity>
     ): StatementParseResult {
         val list = mutableListOf<TransactionEntity>()
+        val rowAccounts = mutableListOf<AccountMetadata?>()
         var inflow = 0.0
         var outflow = 0.0
 
         val typeRe = Regex("""\b(DEBIT|CREDIT|DR|CR)\b""", RegexOption.IGNORE_CASE)
         val txnIdRe = Regex("""(?:Transaction\s*ID|Txn\s*ID|T\d{20,})[:\s]*([T\w]{10,30})""", RegexOption.IGNORE_CASE)
         val utrRe = Regex("""UTR\s*No\.?\s*[:\s]*(\d{10,15})""", RegexOption.IGNORE_CASE)
+        val paidByRe = Regex("""^Paid\s+by\b""", RegexOption.IGNORE_CASE)
 
         for (i in lines.indices) {
             val line = lines[i]
             val dateM = dateRegex.find(line)
-            val amtM = amountRegex.find(line)
+            val amtM = upiAmountRe.find(line) ?: amountRegex.find(line)
             val typeM = typeRe.find(line)
 
             if (dateM == null || amtM == null) continue
@@ -281,10 +415,16 @@ object StatementParserEngine {
 
             var narration = line.replace(dateM.value, "").replace(amtM.value, "").replace(typeRe, "").trim()
             var refNo = ""
+            var hint: AccountMetadata? = null
 
             for (j in (i + 1)..minOf(i + 3, lines.lastIndex)) {
                 val next = lines[j]
-                if (dateRegex.containsMatchIn(next) && amountRegex.containsMatchIn(next)) break
+                if (dateRegex.containsMatchIn(next) && (upiAmountRe.containsMatchIn(next) || amountRegex.containsMatchIn(next))) break
+                // "Paid by XXXXXXXX3863" names the paying account; a missing or unreadable line just leaves the file-level account
+                if (hint == null && paidByRe.containsMatchIn(next)) {
+                    hint = accountHintFromInstrument(next)
+                    if (hint != null) continue
+                }
                 val tid = txnIdRe.find(next)?.groupValues?.getOrNull(1)
                 val utr = utrRe.find(next)?.groupValues?.getOrNull(1)
                 if (utr != null) refNo = utr else if (tid != null && refNo.isBlank()) refNo = tid
@@ -294,7 +434,7 @@ object StatementParserEngine {
             }
 
             val cat = CategorizerEngine.categorize(narration, amt, customRules)
-            val date = parseDate(dateM.value) ?: System.currentTimeMillis()
+            val date = parseDate(dateM.value) ?: continue
 
             list.add(
                 TransactionEntity(
@@ -306,18 +446,88 @@ object StatementParserEngine {
                     accountId = accountId,
                     accountName = accountName.ifBlank { "PhonePe Statement" },
                     referenceNo = refNo,
-                    paymentMode = "UPI",
+                    paymentMode = if (hint?.isRuPay == true) "UPI (RuPay Credit Card)" else "UPI",
                     sourceFile = fileName,
                     rawNarration = narration,
                     needsReview = cat.needsReview,
                     confidence = cat.confidence
                 )
             )
+            rowAccounts.add(hint)
 
             if (explicitType == TransactionType.INCOME) inflow += amt else outflow += amt
         }
 
-        return StatementParseResult("PhonePe UPI Statement", list, inflow, outflow)
+        return StatementParseResult("PhonePe UPI Statement", list, inflow, outflow, rowAccounts = rowAccounts)
+    }
+
+    // --- GOOGLE PAY (INDIA) TRANSACTION STATEMENT PDF PARSER ---
+    // Rows are 3-line groups: "01 Jan," / "2025" date cell (year may wrap), "Paid to X" / "UPI Transaction ID: n" / "Paid by <Bank> 1234"
+    // details cell, "₹1,234" amount cell. Grouped by date-start line and read from joined text, so column glue order is irrelevant.
+    fun parseGooglePayLines(
+        lines: List<String>,
+        fileName: String,
+        accountId: String = "",
+        accountName: String = "",
+        customRules: List<RuleEntity> = emptyList()
+    ): StatementParseResult {
+        val startRe = Regex("""^(\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*),?(?:\s+(\d{4}))?(?:\s|$)""", RegexOption.IGNORE_CASE)
+        val detailsRe = Regex("""(Paid\s+to|Received\s+from)\s+(.+?)(?=\s+(?:UPI\s+Transaction\s+ID|Paid\s+by|₹|Rs\.?|INR|\d{1,2}:\d{2}\s*[AP]M)|$)""", RegexOption.IGNORE_CASE)
+        val idRe = Regex("""UPI\s+Transaction\s+ID[:\s]*(\d+)""", RegexOption.IGNORE_CASE)
+        val paidByRe = Regex("""Paid\s+by\s+(.+?)(?:\s+(?:₹|Rs\.?|INR)\s*[\d,.]+|\s+\d{1,2}:\d{2}\s*[AP]M)?$""", RegexOption.IGNORE_CASE)
+        val yearOnlyRe = Regex("""^(20\d{2})\b""")
+
+        val starts = lines.indices.filter { startRe.containsMatchIn(lines[it]) }
+        val list = mutableListOf<TransactionEntity>()
+        val rowAccounts = mutableListOf<AccountMetadata?>()
+        var inflow = 0.0
+        var outflow = 0.0
+
+        for ((n, s) in starts.withIndex()) {
+            val block = lines.subList(s, minOf(starts.getOrElse(n + 1) { lines.size }, s + 8))
+            val text = block.joinToString(" ")
+            val details = detailsRe.find(text) ?: continue
+            val amt = upiAmountRe.find(text)?.let { cleanAmount(it.groupValues[1]) } ?: continue
+            if (amt <= 0) continue
+
+            val startM = startRe.find(block[0])!!
+            val year = startM.groupValues[2].ifBlank { block.drop(1).firstNotNullOfOrNull { yearOnlyRe.find(it)?.groupValues?.get(1) }.orEmpty() }
+            val rawDate = (startM.groupValues[1] + " " + year).trim()
+            val parsedDate = parseDate(rawDate)
+
+            val isIncome = details.groupValues[1].startsWith("received", ignoreCase = true)
+            val payee = details.groupValues[2].trim()
+            val txnId = block.firstNotNullOfOrNull { idRe.find(it)?.groupValues?.get(1) }.orEmpty()
+            val hint = block.firstNotNullOfOrNull { paidByRe.find(it)?.groupValues?.get(1) }?.let { accountHintFromInstrument(it) }
+
+            val narration = (if (isIncome) "Received from " else "Paid to ") + payee
+            val cat = CategorizerEngine.categorize(narration, amt, customRules)
+            val explicitType = if (isIncome) TransactionType.INCOME else TransactionType.EXPENSE
+
+            list.add(
+                TransactionEntity(
+                    date = parsedDate ?: System.currentTimeMillis(),
+                    description = cat.cleanTitle,
+                    amount = amt,
+                    type = explicitType,
+                    category = cat.category,
+                    accountId = accountId,
+                    accountName = accountName.ifBlank { "Google Pay" },
+                    note = if (parsedDate == null) undatedNote(rawDate) else "",
+                    referenceNo = txnId,
+                    paymentMode = if (hint?.isRuPay == true) "UPI (RuPay Credit Card)" else "UPI",
+                    sourceFile = fileName,
+                    rawNarration = narration,
+                    needsReview = cat.needsReview || parsedDate == null,
+                    confidence = if (parsedDate == null) "low" else cat.confidence
+                )
+            )
+            rowAccounts.add(hint)
+
+            if (isIncome) inflow += amt else outflow += amt
+        }
+
+        return StatementParseResult("Google Pay UPI Statement", list, inflow, outflow, rowAccounts = rowAccounts)
     }
 
     // --- PAYTM PDF PARSER ---
@@ -328,9 +538,13 @@ object StatementParserEngine {
         accountName: String,
         customRules: List<RuleEntity>
     ): StatementParseResult {
-        val generic = parseGenericTablePdf(lines, fileName, "Paytm Statement", accountId, accountName, customRules)
-        if (generic.transactions.isNotEmpty()) return generic
-        return parseFallbackLines(lines, fileName, "Paytm Statement", accountId, accountName, customRules)
+        var result = parseGenericTablePdf(lines, fileName, "Paytm Statement", accountId, accountName, customRules)
+        if (result.transactions.isEmpty()) {
+            result = parseFallbackLines(lines, fileName, "Paytm Statement", accountId, accountName, customRules)
+        }
+        // The "Your Account" column ("State Bank Of India - 1234") ends up in the row text when it shares the line; layout unverified, so best effort
+        val hints = result.transactions.map { bankAccountInText(it.rawNarration) }
+        return if (hints.any { it != null }) result.copy(rowAccounts = hints) else result
     }
 
     // --- SBI STATEMENT PDF PARSER ---
@@ -433,23 +647,24 @@ object StatementParserEngine {
                     val cleanNarration = rawNarration.replace(Regex("""AT\s+\d+.*""", RegexOption.IGNORE_CASE), "").replace(Regex("""\s+"""), " ").trim()
                     val ref = Regex("""(?:UPI|UTR|IMPS|NEFT|REF)[/\s:-]*([0-9A-Za-z]{8,18})""", RegexOption.IGNORE_CASE).find(rawNarration)?.groupValues?.getOrNull(1) ?: ""
                     val cat = CategorizerEngine.categorize(cleanNarration.ifBlank { "SBI Transaction" }, txnAmount, customRules)
-                    val timestamp = parseDate(rawDate) ?: System.currentTimeMillis()
+                    val parsedDate = parseDate(rawDate)
 
                     list.add(
                         TransactionEntity(
-                            date = timestamp,
+                            date = parsedDate ?: System.currentTimeMillis(),
                             description = cat.cleanTitle,
                             amount = txnAmount,
                             type = finalType,
                             category = cat.category,
                             accountId = accountId,
                             accountName = accountName.ifBlank { "State Bank of India" },
+                            note = if (parsedDate == null) undatedNote(rawDate) else "",
                             referenceNo = ref,
                             paymentMode = if (cleanNarration.contains("upi", ignoreCase = true)) "UPI" else "Online / Bank Transfer",
                             sourceFile = fileName,
                             rawNarration = cleanNarration,
-                            needsReview = cat.needsReview,
-                            confidence = cat.confidence
+                            needsReview = cat.needsReview || parsedDate == null,
+                            confidence = if (parsedDate == null) "low" else cat.confidence
                         )
                     )
 
@@ -495,7 +710,7 @@ object StatementParserEngine {
 
                 val narration = line.replace(dateM.value, "").replace(amtM.value, "").replace(" CR", "", ignoreCase = true).trim()
                 val cat = CategorizerEngine.categorize(narration, amt, customRules)
-                val date = parseDate(dateM.value) ?: System.currentTimeMillis()
+                val date = parseDate(dateM.value) ?: continue
 
                 list.add(
                     TransactionEntity(
@@ -568,7 +783,7 @@ object StatementParserEngine {
                 }
 
                 val cat = CategorizerEngine.categorize(narration, amt, customRules)
-                val date = parseDate(dateM.value) ?: System.currentTimeMillis()
+                val date = parseDate(dateM.value) ?: continue
 
                 list.add(
                     TransactionEntity(
@@ -671,7 +886,7 @@ object StatementParserEngine {
             val rawDesc = if (descIdx >= 0 && descIdx < cols.size) cols[descIdx] else "Transaction"
             val rawRef = if (refIdx >= 0 && refIdx < cols.size) cols[refIdx] else ""
 
-            val timestamp = parseDate(rawDate) ?: System.currentTimeMillis()
+            val parsedDate = parseDate(rawDate)
 
             var amount = 0.0
             var explicitType: TransactionType? = null
@@ -711,19 +926,20 @@ object StatementParserEngine {
             val paymentMode = if (ruPayMeta != null) "UPI (RuPay Credit Card)" else if (rawDesc.contains("upi", ignoreCase = true)) "UPI" else if (accountMetadata.type == "Credit Card") "Credit Card" else "Bank Transfer / Online"
 
             val entity = TransactionEntity(
-                date = timestamp,
+                date = parsedDate ?: System.currentTimeMillis(),
                 description = catResult.cleanTitle,
                 amount = amount,
                 type = finalType,
                 category = catResult.category,
                 accountId = accountId,
                 accountName = txnAccountName,
+                note = if (parsedDate == null) undatedNote(rawDate) else "",
                 referenceNo = rawRef.trim(),
                 paymentMode = paymentMode,
                 sourceFile = fileName,
                 rawNarration = rawDesc,
-                needsReview = catResult.needsReview,
-                confidence = catResult.confidence
+                needsReview = catResult.needsReview || parsedDate == null,
+                confidence = if (parsedDate == null) "low" else catResult.confidence
             )
 
             parsedList.add(entity)
@@ -758,12 +974,13 @@ object StatementParserEngine {
         var bankName = "Primary Bank"
         var gradientIndex = 0
 
-        if (fn.contains("sbi") || fn.contains("state bank") || header.contains("state bank of india") || Regex("""\bsbin\b""", RegexOption.IGNORE_CASE).containsMatchIn(header) || header.contains("wdl tfr") || header.contains("dep tfr")) {
-            bankName = "State Bank of India (SBI)"
-            gradientIndex = 1
-        } else if (fn.contains("navi") || header.contains("paid via navi") || header.contains("navi technologies")) {
+        // Navi first: its "Account" column repeats "State Bank of India" in the header, which must not claim the whole file
+        if (fn.contains("navi") || header.contains("paid via navi") || header.contains("navi technologies")) {
             bankName = "Navi UPI"
             gradientIndex = 0
+        } else if (fn.contains("sbi") || fn.contains("state bank") || header.contains("state bank of india") || Regex("""\bsbin\b""", RegexOption.IGNORE_CASE).containsMatchIn(header) || header.contains("wdl tfr") || header.contains("dep tfr")) {
+            bankName = "State Bank of India (SBI)"
+            gradientIndex = 1
         } else if (fn.contains("phonepe") || header.contains("phonepe")) {
             bankName = "PhonePe"
             gradientIndex = 2
@@ -819,7 +1036,8 @@ object StatementParserEngine {
         val isBankStatement = text.contains("wdl tfr") || text.contains("dep tfr") || text.contains("savings account") || text.contains("current account") || text.contains("clear balance")
         val type = when {
             !isBankStatement && (text.contains("credit card statement") || text.contains("minimum amount due") || text.contains("total amount due") || text.contains("card statement") || text.contains("card ending in")) -> "Credit Card"
-            text.contains("google pay") || text.contains("gpay") || text.contains("phonepe") || text.contains("paytm wallet") || text.contains("amazon pay wallet") || text.contains("upi history") || text.contains("upi statement") || text.contains("navi upi") -> "Digital Wallet"
+            // a bank statement's narrations often mention gpay/phonepe/paytm; that never makes the account a wallet
+            !isBankStatement && (bankName == "Navi UPI" || text.contains("google pay") || text.contains("gpay") || text.contains("phonepe") || text.contains("paytm wallet") || text.contains("amazon pay wallet") || text.contains("upi history") || text.contains("upi statement") || text.contains("navi upi")) -> "Digital Wallet"
             text.contains("cash in hand") || text.contains("cash statement") -> "Cash"
             else -> "Bank Account"
         }
@@ -835,8 +1053,12 @@ object StatementParserEngine {
         }
 
         if (last4.isEmpty() && (bankName.contains("SBI", ignoreCase = true) || bankName.contains("State Bank", ignoreCase = true))) {
-            val sbiAccMatch = Regex("""\b([0-9]{11})\b""").find(fullText)
-            if (sbiAccMatch != null) last4 = sbiAccMatch.groupValues[1].takeLast(4)
+            // pdf text lists the header labels first and the values after, in the same order: CIF, then Account Number
+            val nums = Regex("""\b(\d{11})\b""").findAll(fullText).map { it.groupValues[1] }.toList()
+            val cifAt = Regex("""cif\s*(?:number|no)""", RegexOption.IGNORE_CASE).find(fullText)?.range?.first ?: -1
+            val accAt = Regex("""account\s*(?:number|no)""", RegexOption.IGNORE_CASE).find(fullText)?.range?.first ?: -1
+            val pick = if (cifAt >= 0 && accAt > cifAt && nums.size > 1) nums[1] else nums.firstOrNull()
+            if (pick != null) last4 = pick.takeLast(4)
         }
 
         if (last4.isEmpty()) {
@@ -869,7 +1091,7 @@ object StatementParserEngine {
         // 4. Generate user-friendly Account Name
         val name = when (type) {
             "Credit Card" -> "$bankName Credit Card" + (if (last4.isNotBlank()) " (•••• $last4)" else "")
-            "Digital Wallet" -> "$bankName UPI Wallet"
+            "Digital Wallet" -> if (bankName.contains("UPI", ignoreCase = true)) "$bankName Wallet" else "$bankName UPI Wallet"
             "Cash" -> "Cash in Hand"
             else -> "$bankName Account" + (if (last4.isNotBlank()) " (•••• $last4)" else "")
         }
@@ -955,19 +1177,36 @@ object StatementParserEngine {
         return cleaned.toDoubleOrNull() ?: 0.0
     }
 
-    private fun parseDate(dateStr: String): Long? {
+    fun parseDate(dateStr: String, nowMs: Long = System.currentTimeMillis()): Long? {
         val clean = dateStr.trim().replace(Regex("""\s+"""), " ")
         if (clean.isBlank()) return null
 
+        val maxYear = Calendar.getInstance().apply { timeInMillis = nowMs }.get(Calendar.YEAR) + 1
         for (pattern in supportedDateFormats) {
-            try {
-                val sdf = SimpleDateFormat(pattern, Locale.ENGLISH).apply { isLenient = true }
-                val d = sdf.parse(clean)
-                if (d != null) return d.time
-            } catch (_: Exception) {}
+            val sdf = SimpleDateFormat(pattern, Locale.ENGLISH).apply { isLenient = false }
+            val pos = ParsePosition(0)
+            val d = sdf.parse(clean, pos) ?: continue
+            if (pos.index != clean.length) continue
+            val year = Calendar.getInstance().apply { time = d }.get(Calendar.YEAR)
+            if (year in MIN_VALID_YEAR..maxYear) return d.time
+        }
+
+        val shape = monthFirstShape.find(clean) ?: return null
+        val first = shape.groupValues[1].toInt()
+        val second = shape.groupValues[2].toInt()
+        if (second !in 13..31 || first !in 1..12) return null // ambiguous or not a date: leave it flagged
+        for (pattern in monthFirstFormats) {
+            val sdf = SimpleDateFormat(pattern, Locale.ENGLISH).apply { isLenient = false }
+            val pos = ParsePosition(0)
+            val d = sdf.parse(clean, pos) ?: continue
+            if (pos.index != clean.length) continue
+            val year = Calendar.getInstance().apply { time = d }.get(Calendar.YEAR)
+            if (year in MIN_VALID_YEAR..maxYear) return d.time
         }
         return null
     }
+
+    private fun undatedNote(raw: String) = "Date \"$raw\" not recognised; set to import date, please correct."
 
     private fun splitCsvLine(line: String): List<String> {
         val result = mutableListOf<String>()

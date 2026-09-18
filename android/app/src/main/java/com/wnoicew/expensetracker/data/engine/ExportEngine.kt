@@ -5,11 +5,17 @@ import com.wnoicew.expensetracker.data.model.RuleEntity
 import com.wnoicew.expensetracker.data.model.TransactionEntity
 import com.wnoicew.expensetracker.data.model.TransactionType
 import org.json.JSONArray
+import org.json.JSONException
 import org.json.JSONObject
+import java.math.BigDecimal
 import java.text.SimpleDateFormat
 import java.util.*
 
+class BackupFormatException(message: String) : Exception(message)
+
 object ExportEngine {
+
+    const val BACKUP_VERSION = "1.2.0"
 
     data class BackupData(
         val transactions: List<TransactionEntity>,
@@ -17,23 +23,35 @@ object ExportEngine {
         val rules: List<RuleEntity>
     )
 
+    // Leading = + - @ (and tab/CR) make spreadsheet apps evaluate a cell as a formula.
+    fun csvField(raw: String): String {
+        val safe = if (raw.isNotEmpty() && raw[0] in "=+-@\t\r") "'$raw" else raw
+        return "\"" + safe.replace("\"", "\"\"") + "\""
+    }
+
     fun generateCsv(
         transactions: List<TransactionEntity>,
         accounts: List<AccountEntity>
     ): String {
-        val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+        val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.ENGLISH)
         val sb = StringBuilder()
         sb.append("Date,Type,Category,Description,Amount,Account,PaymentMode,ReferenceNo,SourceFile,Notes\n")
 
         for (t in transactions) {
-            val dateStr = dateFormat.format(Date(t.date))
+            if (t.duplicateStatus == "merged") continue
             val accName = t.accountName.ifBlank {
                 accounts.find { it.id == t.accountId }?.name ?: "Main Account"
             }
-            val escapedDesc = "\"" + t.description.replace("\"", "\"\"") + "\""
-            val escapedNote = "\"" + t.note.replace("\"", "\"\"") + "\""
-
-            sb.append("${dateStr},${t.type.name},${t.category},${escapedDesc},${t.amount},\"${accName}\",${t.paymentMode},\"${t.referenceNo}\",\"${t.sourceFile}\",${escapedNote}\n")
+            sb.append(dateFormat.format(Date(t.date))).append(',')
+                .append(csvField(t.type.name)).append(',')
+                .append(csvField(t.category)).append(',')
+                .append(csvField(t.description)).append(',')
+                .append(BigDecimal.valueOf(t.amount).toPlainString()).append(',')
+                .append(csvField(accName)).append(',')
+                .append(csvField(t.paymentMode)).append(',')
+                .append(csvField(t.referenceNo)).append(',')
+                .append(csvField(t.sourceFile)).append(',')
+                .append(csvField(t.note)).append('\n')
         }
 
         return sb.toString()
@@ -46,7 +64,7 @@ object ExportEngine {
         rules: List<RuleEntity>
     ): String {
         val root = JSONObject()
-        root.put("version", "1.1.0")
+        root.put("version", BACKUP_VERSION)
         root.put("profileName", profileName)
         root.put("exportDate", System.currentTimeMillis())
 
@@ -67,7 +85,10 @@ object ExportEngine {
             obj.put("sourceFile", t.sourceFile)
             obj.put("rawNarration", t.rawNarration)
             obj.put("isDuplicate", t.isDuplicate)
+            obj.put("duplicateWithId", t.duplicateWithId ?: JSONObject.NULL)
             obj.put("duplicateStatus", t.duplicateStatus)
+            obj.put("duplicateConfidence", t.duplicateConfidence)
+            obj.put("duplicateReason", t.duplicateReason)
             obj.put("needsReview", t.needsReview)
             obj.put("confidence", t.confidence)
             txnsArray.put(obj)
@@ -104,8 +125,34 @@ object ExportEngine {
         return root.toString(2)
     }
 
+    private fun versionKey(version: String): Pair<Int, Int>? {
+        val parts = version.trim().split('.')
+        val major = parts.getOrNull(0)?.toIntOrNull() ?: return null
+        val minor = parts.getOrNull(1)?.toIntOrNull() ?: 0
+        return major to minor
+    }
+
+    /** Patch differences never change the schema, so only major.minor is compared. */
+    fun checkBackupVersion(version: String?) {
+        if (version == null) return
+        val found = versionKey(version) ?: throw BackupFormatException("Unrecognised backup version \"$version\".")
+        val supported = versionKey(BACKUP_VERSION)!!
+        val newer = found.first > supported.first || (found.first == supported.first && found.second > supported.second)
+        if (newer) {
+            throw BackupFormatException(
+                "This backup was made by a newer version of Money Tracker (format $version). Update the app to restore it."
+            )
+        }
+    }
+
     fun parseJsonBackup(jsonStr: String): BackupData {
-        val root = JSONObject(jsonStr)
+        val root = try {
+            JSONObject(jsonStr)
+        } catch (e: JSONException) {
+            throw BackupFormatException("This file is not a valid Money Tracker backup.")
+        }
+        checkBackupVersion(if (root.has("version")) root.optString("version") else null)
+
         val txnsList = mutableListOf<TransactionEntity>()
         val accsList = mutableListOf<AccountEntity>()
         val rulesList = mutableListOf<RuleEntity>()
@@ -130,7 +177,10 @@ object ExportEngine {
                         sourceFile = obj.optString("sourceFile", "Backup Restore"),
                         rawNarration = obj.optString("rawNarration", ""),
                         isDuplicate = obj.optBoolean("isDuplicate", false),
+                        duplicateWithId = if (obj.isNull("duplicateWithId")) null else obj.optString("duplicateWithId"),
                         duplicateStatus = obj.optString("duplicateStatus", "none"),
+                        duplicateConfidence = obj.optInt("duplicateConfidence", 0),
+                        duplicateReason = obj.optString("duplicateReason", ""),
                         needsReview = obj.optBoolean("needsReview", false),
                         confidence = obj.optString("confidence", "high")
                     )

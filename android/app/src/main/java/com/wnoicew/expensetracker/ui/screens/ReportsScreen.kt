@@ -1,10 +1,5 @@
 package com.wnoicew.expensetracker.ui.screens
 
-import android.content.Intent
-import android.net.Uri
-import android.widget.Toast
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
@@ -19,16 +14,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.wnoicew.expensetracker.ui.MainViewModel
+import com.wnoicew.expensetracker.ui.rememberExportLaunchers
 import com.wnoicew.expensetracker.ui.components.HigGlassCard
 import com.wnoicew.expensetracker.ui.theme.IncomeGreen
 import com.wnoicew.expensetracker.ui.theme.ExpenseRose
 import com.wnoicew.expensetracker.ui.theme.PrimaryBlue
-import kotlinx.coroutines.launch
 import java.text.NumberFormat
 import java.util.*
 
@@ -36,9 +30,6 @@ import java.util.*
 fun ReportsScreen(
     viewModel: MainViewModel
 ) {
-    val context = LocalContext.current
-    val coroutineScope = rememberCoroutineScope()
-
     val inflow by viewModel.totalInflow30D.collectAsState()
     val outflow by viewModel.totalOutflow30D.collectAsState()
 
@@ -48,24 +39,7 @@ fun ReportsScreen(
         }
     }
 
-    // JSON Restore Launcher
-    val jsonRestoreLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
-    ) { uri: Uri? ->
-        if (uri != null) {
-            try {
-                val inputStream = context.contentResolver.openInputStream(uri)
-                if (inputStream != null) {
-                    val jsonStr = inputStream.bufferedReader().use { it.readText() }
-                    viewModel.restoreJsonBackup(jsonStr) { success, msg ->
-                        Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
-                    }
-                }
-            } catch (e: Exception) {
-                Toast.makeText(context, "Restore failed: ${e.message}", Toast.LENGTH_LONG).show()
-            }
-        }
-    }
+    val launchers = rememberExportLaunchers(viewModel)
 
     LazyColumn(
         modifier = Modifier
@@ -105,15 +79,15 @@ fun ReportsScreen(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("TOTAL INFLOW", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("TOTAL INFLOW", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Text(currencyFormat.format(inflow), fontSize = 15.sp, fontWeight = FontWeight.Bold, color = IncomeGreen)
                     }
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("TOTAL OUTFLOW", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("TOTAL OUTFLOW", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Text(currencyFormat.format(outflow), fontSize = 15.sp, fontWeight = FontWeight.Bold, color = ExpenseRose)
                     }
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("NET SAVINGS", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("NET SAVINGS", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         val retained = (inflow - outflow).coerceAtLeast(0.0)
                         Text(currencyFormat.format(retained), fontSize = 15.sp, fontWeight = FontWeight.Bold, color = PrimaryBlue)
                     }
@@ -137,19 +111,9 @@ fun ReportsScreen(
                 title = "Raw Transactions (CSV)",
                 description = "Export cleaned, deduplicated, RFC4180 standard CSV file for spreadsheets and accounting software.",
                 icon = Icons.Default.Description,
-                buttonText = "Share / Download CSV",
+                buttonText = "Save CSV File",
                 color = PrimaryBlue,
-                onClick = {
-                    coroutineScope.launch {
-                        val csv = viewModel.exportCsvString()
-                        val sendIntent = Intent(Intent.ACTION_SEND).apply {
-                            putExtra(Intent.EXTRA_TEXT, csv)
-                            putExtra(Intent.EXTRA_TITLE, "Money_Tracker_Transactions.csv")
-                            type = "text/csv"
-                        }
-                        context.startActivity(Intent.createChooser(sendIntent, "Share Transactions CSV"))
-                    }
-                }
+                onClick = launchers.exportCsv
             )
         }
 
@@ -159,19 +123,9 @@ fun ReportsScreen(
                 title = "Full Profile Backup (JSON)",
                 description = "Export a complete structured JSON database backup containing all transactions, connected accounts, and learned classification rules.",
                 icon = Icons.Default.Backup,
-                buttonText = "Share Full JSON Backup",
+                buttonText = "Save Full JSON Backup",
                 color = IncomeGreen,
-                onClick = {
-                    coroutineScope.launch {
-                        val json = viewModel.exportJsonBackupString()
-                        val sendIntent = Intent(Intent.ACTION_SEND).apply {
-                            putExtra(Intent.EXTRA_TEXT, json)
-                            putExtra(Intent.EXTRA_TITLE, "MoneyTracker_Profile_Backup.json")
-                            type = "application/json"
-                        }
-                        context.startActivity(Intent.createChooser(sendIntent, "Share JSON Backup"))
-                    }
-                }
+                onClick = launchers.exportBackup
             )
         }
 
@@ -183,9 +137,7 @@ fun ReportsScreen(
                 icon = Icons.Default.Restore,
                 buttonText = "Select JSON Backup File",
                 color = ExpenseRose,
-                onClick = {
-                    jsonRestoreLauncher.launch("application/json")
-                }
+                onClick = launchers.restoreBackup
             )
         }
     }
@@ -243,7 +195,7 @@ private fun ExportOptionCard(
                 onClick = onClick,
                 shape = RoundedCornerShape(10.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = color),
-                modifier = Modifier.fillMaxWidth().height(44.dp)
+                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
             ) {
                 Text(buttonText, fontWeight = FontWeight.Bold, fontSize = 13.sp)
             }

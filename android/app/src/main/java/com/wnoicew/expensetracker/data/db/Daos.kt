@@ -15,12 +15,6 @@ interface TransactionDao {
     @Query("SELECT * FROM transactions ORDER BY date DESC")
     suspend fun getAllTransactionsSnapshot(): List<TransactionEntity>
 
-    @Query("SELECT * FROM transactions WHERE date >= :startDate ORDER BY date DESC")
-    fun getTransactionsSince(startDate: Long): Flow<List<TransactionEntity>>
-
-    @Query("SELECT * FROM transactions WHERE needsReview = 1 OR category = 'Uncategorized' ORDER BY date DESC")
-    fun getNeedsReviewTransactions(): Flow<List<TransactionEntity>>
-
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertTransaction(transaction: TransactionEntity)
 
@@ -35,12 +29,6 @@ interface TransactionDao {
 
     @Delete
     suspend fun deleteTransaction(transaction: TransactionEntity)
-
-    @Query("DELETE FROM transactions WHERE id = :id")
-    suspend fun deleteById(id: String)
-
-    @Query("DELETE FROM transactions")
-    suspend fun clearAll()
 }
 
 @Dao
@@ -57,14 +45,8 @@ interface AccountDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAccounts(accounts: List<AccountEntity>)
 
-    @Update
-    suspend fun updateAccount(account: AccountEntity)
-
     @Delete
     suspend fun deleteAccount(account: AccountEntity)
-
-    @Query("DELETE FROM accounts WHERE id = :id")
-    suspend fun deleteById(id: String)
 }
 
 @Dao
@@ -83,9 +65,6 @@ interface RuleDao {
 
     @Delete
     suspend fun deleteRule(rule: RuleEntity)
-
-    @Query("DELETE FROM rules WHERE id = :id")
-    suspend fun deleteById(id: String)
 }
 
 @Dao
