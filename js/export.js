@@ -55,6 +55,7 @@ class ExportEngine {
   /**
    * Validate and restore a JSON backup, replacing the current profile's data in ONE
    * IndexedDB transaction (all-or-nothing). Throws a user-readable Error on a bad file.
+   * Supports both Web format (app: 'money-tracker' + stores object) and Android APK format.
    */
   async restoreBackupFromFile(file) {
     let payload;
@@ -63,23 +64,101 @@ class ExportEngine {
     } catch (e) {
       throw new Error('That file is not valid JSON, so it can’t be a Money Tracker backup.');
     }
-    if (!payload || payload.app !== 'money-tracker' || typeof payload.stores !== 'object' || payload.stores === null) {
+    if (!payload || typeof payload !== 'object') {
       throw new Error('That file is not a Money Tracker backup.');
     }
-    if (typeof payload.schemaVersion !== 'number' || payload.schemaVersion > 1) {
+
+    const isWebFormat = payload.app === 'money-tracker' && typeof payload.stores === 'object' && payload.stores !== null;
+    const isAndroidFormat = Array.isArray(payload.transactions) && (payload.version || payload.exportDate);
+
+    if (!isWebFormat && !isAndroidFormat) {
+      throw new Error('That file is not a Money Tracker backup.');
+    }
+
+    if (isWebFormat && typeof payload.schemaVersion === 'number' && payload.schemaVersion > 1) {
       throw new Error('This backup was made by a newer version of Money Tracker. Update the app before restoring it.');
     }
 
     const allowed = ['transactions', 'accounts', 'categories', 'budgets', 'rules', 'statements'];
     const data = {};
-    for (const name of allowed) {
-      const rows = payload.stores[name];
-      if (rows === undefined) continue;
-      if (!Array.isArray(rows) || rows.some(r => !r || typeof r !== 'object' || typeof r.id !== 'string')) {
-        throw new Error(`The backup's "${name}" data is damaged, so nothing was restored.`);
+    const ID_REGEX = /^[a-zA-Z0-9_\-.:@]{1,128}$/;
+
+    if (isWebFormat) {
+      for (const name of allowed) {
+        const rows = payload.stores[name];
+        if (rows === undefined) continue;
+        if (!Array.isArray(rows) || rows.some(r => !r || typeof r !== 'object' || typeof r.id !== 'string' || !ID_REGEX.test(r.id))) {
+          throw new Error(`The backup's "${name}" data is damaged or contains invalid identifiers, so nothing was restored.`);
+        }
+        data[name] = rows;
       }
-      data[name] = rows;
+    } else {
+      // Convert Android APK backup schema to Web IndexedDB schema
+      const rawTxns = payload.transactions || [];
+      data.transactions = rawTxns.map(t => {
+        let dateStr = t.date;
+        if (typeof t.date === 'number') {
+          dateStr = DateUtil.toISODate(new Date(t.date));
+        }
+        const typeStr = String(t.type || 'expense').toLowerCase();
+        const safeId = (typeof t.id === 'string' && ID_REGEX.test(t.id))
+          ? t.id
+          : ('txn_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6));
+        const safeAccountId = (typeof t.accountId === 'string' && ID_REGEX.test(t.accountId))
+          ? t.accountId
+          : '';
+        return {
+          id: safeId,
+          date: dateStr,
+          time: t.time || '',
+          description: t.description || 'Imported Transaction',
+          amount: Number(t.amount) || 0,
+          type: typeStr,
+          category: t.category || 'Uncategorized',
+          accountId: safeAccountId,
+          accountName: t.accountName || '',
+          notes: t.note || t.notes || '',
+          referenceNo: t.referenceNo || '',
+          paymentMode: t.paymentMode || 'Online',
+          sourceFile: t.sourceFile || 'Android Backup',
+          rawNarration: t.rawNarration || '',
+          isDuplicate: Boolean(t.isDuplicate),
+          duplicateWithId: t.duplicateWithId || null,
+          duplicateStatus: t.duplicateStatus || 'none',
+          duplicateConfidence: Number(t.duplicateConfidence) || 0,
+          duplicateReason: t.duplicateReason || '',
+          needsReview: Boolean(t.needsReview),
+          confidence: t.confidence || 'high',
+          currency: t.currency || 'INR'
+        };
+      });
+
+      if (Array.isArray(payload.accounts)) {
+        data.accounts = payload.accounts.map(a => ({
+          id: a.id || ('acc_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6)),
+          name: a.name || 'Account',
+          type: String(a.type || 'bank').toLowerCase().replace(/\s+/g, '_'),
+          bankName: a.bankName || a.name || '',
+          accountNumberLast4: a.lastFour || a.accountNumberLast4 || '',
+          balance: Number(a.balance) || 0,
+          computedBalance: Number(a.balance) || 0,
+          creditLimit: Number(a.creditLimit) || 100000,
+          gradientIndex: Number(a.gradientIndex) || 0,
+          currency: a.currency || 'INR'
+        }));
+      }
+
+      if (Array.isArray(payload.rules)) {
+        data.rules = payload.rules.map(r => ({
+          id: r.id || ('rule_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6)),
+          pattern: r.pattern || '',
+          category: r.category || 'Uncategorized',
+          type: String(r.type || 'expense').toLowerCase(),
+          createdAt: typeof r.createdAt === 'number' ? new Date(r.createdAt).toISOString() : (r.createdAt || new Date().toISOString())
+        }));
+      }
     }
+
     if (!data.transactions) throw new Error('The backup contains no transactions section, so nothing was restored.');
 
     await window.db.replaceStores(data);
@@ -102,15 +181,18 @@ class ExportEngine {
     const validTxns = transactions.filter(t => t.duplicateStatus !== 'merged');
 
     // --- Sheet 1: Executive Summary ---
+    const active = window.profileManager?.getActiveProfile();
+    const primaryCurrency = (active && active.currency) || 'INR';
+
     const summaryData = [
       ['FINANCIAL HEALTH & EXECUTIVE SUMMARY'],
       ['Generated On', new Date().toLocaleString()],
       ['Report Period', 'All Time / Current Month Overview'],
       [''],
-      ['Key Performance Indicator', 'Value (INR)'],
-      ['Total Recorded Income', `₹ ${budgetStatus.totalIncome.toLocaleString('en-IN')}`],
-      ['Total Recorded Expense', `₹ ${budgetStatus.totalExpense.toLocaleString('en-IN')}`],
-      ['Net Savings', `₹ ${budgetStatus.netSavings.toLocaleString('en-IN')}`],
+      ['Key Performance Indicator', `Value (${primaryCurrency})`],
+      ['Total Recorded Income', window.CurrencyEngine ? window.CurrencyEngine.format(budgetStatus.totalIncome, primaryCurrency) : `₹ ${budgetStatus.totalIncome.toLocaleString('en-IN')}`],
+      ['Total Recorded Expense', window.CurrencyEngine ? window.CurrencyEngine.format(budgetStatus.totalExpense, primaryCurrency) : `₹ ${budgetStatus.totalExpense.toLocaleString('en-IN')}`],
+      ['Net Savings', window.CurrencyEngine ? window.CurrencyEngine.format(budgetStatus.netSavings, primaryCurrency) : `₹ ${budgetStatus.netSavings.toLocaleString('en-IN')}`],
       ['Savings Rate', `${budgetStatus.savingsRate}%`],
       ['Financial Health Score', `${budgetStatus.healthScore} / 100`],
       ['Total Active Accounts', accounts.length],
@@ -119,7 +201,7 @@ class ExportEngine {
     const wsSummary = XLSX.utils.aoa_to_sheet(summaryData);
 
     // --- Sheet 2: All Transactions Register ---
-    const txnsHeaders = ['Date', 'Time', 'Type', 'Category', 'Description', 'Amount (INR)', 'Account', 'Payment Mode', 'Reference / UTR', 'Source File', 'Notes'];
+    const txnsHeaders = ['Date', 'Time', 'Type', 'Category', 'Description', `Amount (${primaryCurrency})`, 'Account', 'Payment Mode', 'Reference / UTR', 'Source File', 'Notes'];
     const txnsRows = validTxns.map(t => {
       const acc = accounts.find(a => a.id === t.accountId);
       return [
@@ -139,7 +221,7 @@ class ExportEngine {
     const wsTxns = XLSX.utils.aoa_to_sheet([txnsHeaders, ...txnsRows]);
 
     // --- Sheet 3: Category Breakdown & Budgets ---
-    const catHeaders = ['Category Name', 'Type', 'Total Spent (INR)', 'Monthly Budget (INR)', 'Remaining Budget (INR)', 'Budget Status'];
+    const catHeaders = ['Category Name', 'Type', `Total Spent (${primaryCurrency})`, `Monthly Budget (${primaryCurrency})`, `Remaining Budget (${primaryCurrency})`, 'Budget Status'];
     const catRows = budgetStatus.budgets.map(b => [
       b.name,
       b.type,
@@ -151,7 +233,7 @@ class ExportEngine {
     const wsCategories = XLSX.utils.aoa_to_sheet([catHeaders, ...catRows]);
 
     // --- Sheet 4: Accounts Ledger ---
-    const accHeaders = ['Account Name', 'Type', 'Bank / Institution', 'Current Balance (INR)', 'Total Inflow (INR)', 'Total Outflow (INR)', 'Credit Utilization (%)'];
+    const accHeaders = ['Account Name', 'Type', 'Bank / Institution', `Current Balance (${primaryCurrency})`, `Total Inflow (${primaryCurrency})`, `Total Outflow (${primaryCurrency})`, 'Credit Utilization (%)'];
     const accRows = accounts.map(a => [
       a.name,
       a.type.toUpperCase(),
@@ -181,6 +263,8 @@ class ExportEngine {
    */
   async exportCSV() {
     const transactions = await window.db.getAll('transactions');
+    const accounts = await window.db.getAll('accounts');
+    const accMap = new Map((accounts || []).map(a => [a.id, a.name]));
     const validTxns = transactions.filter(t => t.duplicateStatus !== 'merged');
 
     const csvContent = Papa.unparse(validTxns.map(t => ({
@@ -190,6 +274,8 @@ class ExportEngine {
       Category: t.category,
       Description: t.description,
       Amount: t.amount,
+      Currency: (t.currency || 'INR').toUpperCase(),
+      Account: accMap.get(t.accountId) || t.accountName || '',
       PaymentMode: t.paymentMode,
       ReferenceNo: t.referenceNo,
       SourceFile: t.sourceFile,
@@ -212,6 +298,8 @@ class ExportEngine {
     const accounts = await window.accountsManager.getAccountsWithMetrics();
     const budgetStatus = await window.budgetsManager.getBudgetsStatus();
     const validTxns = transactions.filter(t => t.duplicateStatus !== 'merged').slice(0, 30);
+    const active = window.profileManager?.getActiveProfile();
+    const primaryCurrency = (active && active.currency) || 'INR';
 
     // Render report HTML inside temporary printable container
     const printArea = document.createElement('div');
@@ -231,15 +319,15 @@ class ExportEngine {
       <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:16px; margin: 16px 0;">
         <div style="background:#1e293b; padding:16px; border-radius:8px; border:1px solid rgba(255,255,255,0.1);">
           <div style="font-size:0.75rem; color:#94a3b8; text-transform:uppercase;">Total Income</div>
-          <div style="font-size:1.4rem; font-weight:bold; color:#10b981; margin-top:4px;">₹ ${budgetStatus.totalIncome.toLocaleString('en-IN')}</div>
+          <div style="font-size:1.4rem; font-weight:bold; color:#10b981; margin-top:4px;">${window.CurrencyEngine ? window.CurrencyEngine.format(budgetStatus.totalIncome, primaryCurrency) : '₹ ' + budgetStatus.totalIncome}</div>
         </div>
         <div style="background:#1e293b; padding:16px; border-radius:8px; border:1px solid rgba(255,255,255,0.1);">
           <div style="font-size:0.75rem; color:#94a3b8; text-transform:uppercase;">Total Expense</div>
-          <div style="font-size:1.4rem; font-weight:bold; color:#f43f5e; margin-top:4px;">₹ ${budgetStatus.totalExpense.toLocaleString('en-IN')}</div>
+          <div style="font-size:1.4rem; font-weight:bold; color:#f43f5e; margin-top:4px;">${window.CurrencyEngine ? window.CurrencyEngine.format(budgetStatus.totalExpense, primaryCurrency) : '₹ ' + budgetStatus.totalExpense}</div>
         </div>
         <div style="background:#1e293b; padding:16px; border-radius:8px; border:1px solid rgba(255,255,255,0.1);">
           <div style="font-size:0.75rem; color:#94a3b8; text-transform:uppercase;">Net Savings</div>
-          <div style="font-size:1.4rem; font-weight:bold; color:#3b82f6; margin-top:4px;">₹ ${budgetStatus.netSavings.toLocaleString('en-IN')}</div>
+          <div style="font-size:1.4rem; font-weight:bold; color:#3b82f6; margin-top:4px;">${window.CurrencyEngine ? window.CurrencyEngine.format(budgetStatus.netSavings, primaryCurrency) : '₹ ' + budgetStatus.netSavings}</div>
         </div>
         <div style="background:#1e293b; padding:16px; border-radius:8px; border:1px solid rgba(255,255,255,0.1);">
           <div style="font-size:0.75rem; color:#94a3b8; text-transform:uppercase;">Health Score</div>
@@ -264,7 +352,7 @@ class ExportEngine {
               <td style="padding:8px; text-transform:uppercase;">${this.escape(a.type)}</td>
               <td style="padding:8px;">${this.escape(a.bankName)}</td>
               <td style="padding:8px; text-align:right; font-weight:bold; color:${a.computedBalance >= 0 ? '#10b981' : '#f43f5e'}">
-                ₹ ${a.computedBalance.toLocaleString('en-IN')}
+                ${window.CurrencyEngine ? window.CurrencyEngine.format(a.computedBalance, a.currency || primaryCurrency) : '₹ ' + a.computedBalance}
               </td>
             </tr>
           `).join('')}
@@ -289,8 +377,8 @@ class ExportEngine {
               <td style="padding:8px;">${this.escape(t.description)}</td>
               <td style="padding:8px;">${this.escape(t.category)}</td>
               <td style="padding:8px;">${this.escape(t.paymentMode || 'Online')}</td>
-              <td style="padding:8px; text-align:right; font-weight:bold; color:${t.type === 'income' ? '#10b981' : '#f43f5e'}">
-                ${t.type === 'income' ? '+' : '-'} ₹ ${t.amount.toLocaleString('en-IN')}
+              <td style="padding:8px; text-align:right; font-weight:bold; color:${t.type === 'income' ? '#10b981' : (t.type === 'refund' ? '#06b6d4' : '#f43f5e')}">
+                ${(t.type === 'income' || t.type === 'refund') ? '+' : '-'} ${window.CurrencyEngine ? window.CurrencyEngine.format(t.amount, t.currency || primaryCurrency) : '₹ ' + t.amount}
               </td>
             </tr>
           `).join('')}

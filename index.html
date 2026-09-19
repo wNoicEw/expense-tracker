@@ -63,6 +63,15 @@
 
       <!-- Create new profile row -->
       <div class="profile-chooser-create">
+        <div class="currency-selector-section" style="margin-bottom: 12px;">
+          <label class="currency-selector-label" id="chooserCurrencyLabel">
+            <i data-lucide="coins" style="width:14px;height:14px;"></i>
+            Primary Currency
+          </label>
+          <div class="currency-backlight-grid" id="chooserCurrencyGrid" role="radiogroup" aria-labelledby="chooserCurrencyLabel">
+            <!-- Rendered by JS -->
+          </div>
+        </div>
         <div class="profile-create-row">
           <div class="pci-input-wrap">
             <i data-lucide="user" style="width:15px;height:15px;color:var(--text-dim);flex-shrink:0;"></i>
@@ -91,6 +100,9 @@
 
   <div class="app-container">
     
+    <!-- SIDEBAR BACKDROP FOR MOBILE -->
+    <div class="sidebar-backdrop" id="sidebarBackdrop" aria-hidden="true"></div>
+
     <!-- SIDEBAR NAVIGATION -->
     <aside class="sidebar" id="sidebar" aria-label="Main navigation">
       <div class="brand-header">
@@ -151,6 +163,12 @@
           <button data-tab="reports">
             <i data-lucide="file-spreadsheet" style="width:18px; height:18px;"></i>
             <span>Export Reports</span>
+          </button>
+        </li>
+        <li class="nav-item">
+          <button data-tab="currency">
+            <i data-lucide="coins" style="width:18px; height:18px;"></i>
+            <span>Exchange Rates</span>
           </button>
         </li>
       </ul>
@@ -594,6 +612,19 @@
               <option value="expense">Expenses Only</option>
               <option value="income">Income Only</option>
               <option value="transfer">Transfers</option>
+              <option value="refund">Refunds Only</option>
+            </select>
+          </div>
+
+          <div style="width:140px;">
+            <select id="txnCurrencyFilter" class="select-control" aria-label="Filter by currency">
+              <option value="all">All Currencies</option>
+              <option value="INR">₹ INR</option>
+              <option value="USD">$ USD</option>
+              <option value="EUR">€ EUR</option>
+              <option value="GBP">£ GBP</option>
+              <option value="CHF">₣ CHF</option>
+              <option value="JPY">¥ JPY</option>
             </select>
           </div>
 
@@ -697,11 +728,14 @@
       <!-- ==================== TAB 7: LEARNED RULES ==================== -->
       <section class="tab-panel" id="panel-rules">
         <div class="glass-card" style="margin-bottom:20px;">
-          <div class="glass-card-header">
+          <div class="glass-card-header" style="display:flex; justify-content:space-between; align-items:center;">
             <div class="glass-card-title">
               <i data-lucide="brain" style="width:20px; height:20px; color:#06b6d4;"></i>
               <span>AI Auto-Classification Memory (Learned Rules)</span>
             </div>
+            <button type="button" class="btn btn-primary btn-sm" onclick="app.openAddRuleModal()">
+              <i data-lucide="plus" style="width:14px; height:14px;"></i> Add Custom Rule
+            </button>
           </div>
           <p style="color:var(--text-muted); font-size:0.88rem;">
             Below are the custom merchant patterns, UPI IDs, and payee keywords that Money Tracker has memorized. Future transactions matching any of these will be classified automatically.
@@ -827,6 +861,39 @@
         </div>
       </section>
 
+      <!-- ==================== TAB 9: CURRENCY & EXCHANGE RATES ==================== -->
+      <section class="tab-panel" id="panel-currency">
+        <!-- Hero card with ambient backlight -->
+        <div class="currency-hero-card">
+          <div class="currency-hero-info">
+            <div class="currency-hero-icon-ring">
+              <i data-lucide="coins" style="width:24px; height:24px; color:var(--color-primary);"></i>
+            </div>
+            <div>
+              <div style="font-size:1.15rem; font-weight:800; color:var(--text-main);">Currency Information &amp; Exchange Rates</div>
+              <div class="currency-hero-status-row">
+                <span class="currency-pulse-dot" id="currencyPulseDot"></span>
+                <span id="currencyLastUpdatedLabel" style="font-size:0.82rem; color:var(--text-muted);">Checking rates...</span>
+                <span id="currencyBaseBadge" class="currency-badge-pill primary" style="margin-left:8px; font-weight:700;">Base: INR</span>
+              </div>
+            </div>
+          </div>
+          <div class="currency-hero-actions">
+            <button class="btn btn-secondary btn-sm" id="btnResetAllRates" onclick="app.resetAllCurrencyRates()" style="display:none;">
+              <i data-lucide="rotate-ccw" style="width:14px; height:14px;"></i> Reset All to API
+            </button>
+            <button class="btn btn-primary btn-sm" id="btnForceSyncRates" onclick="app.forceSyncCurrencyRates()">
+              <i data-lucide="refresh-cw" id="currencySyncIcon" style="width:14px; height:14px;"></i> Force Sync from API
+            </button>
+          </div>
+        </div>
+
+        <!-- Dynamic Grid of Backlit Currency Cards -->
+        <div class="currency-rates-grid" id="currencyRatesGrid">
+          <!-- Rendered dynamically by app.renderCurrencyView() -->
+        </div>
+      </section>
+
     </main>
   </div>
 
@@ -854,11 +921,23 @@
                 <option value="expense">Expense (Debit)</option>
                 <option value="income">Income (Credit)</option>
                 <option value="transfer">Transfer</option>
+                <option value="refund">Refund (Reversal)</option>
               </select>
             </div>
             <div class="form-group">
-              <label class="form-label" for="mTxnAmount">Amount (INR ₹)</label>
-              <input type="number" step="0.01" min="0.01" id="mTxnAmount" class="input-control" placeholder="0.00" required>
+              <label class="form-label" for="mTxnAmount">Amount &amp; Currency</label>
+              <div style="display:flex; gap:8px;">
+                <select id="mTxnCurrency" class="select-control" style="width:115px; flex-shrink:0;" aria-label="Transaction currency">
+                  <option value="INR">₹ INR</option>
+                  <option value="USD">$ USD</option>
+                  <option value="EUR">€ EUR</option>
+                  <option value="GBP">£ GBP</option>
+                  <option value="CHF">₣ CHF</option>
+                  <option value="JPY">¥ JPY</option>
+                </select>
+                <input type="number" step="0.01" min="0.01" id="mTxnAmount" class="input-control" placeholder="0.00" required style="flex:1;">
+              </div>
+              <div id="mTxnConversionHint" class="currency-conversion-hint" style="display:none;"></div>
             </div>
           </div>
 
@@ -973,11 +1052,23 @@
                 <option value="expense">Expense (Debit)</option>
                 <option value="income">Income (Credit)</option>
                 <option value="transfer">Transfer</option>
+                <option value="refund">Refund (Reversal)</option>
               </select>
             </div>
             <div class="form-group">
-              <label class="form-label" for="eTxnAmount">Amount (INR ₹)</label>
-              <input type="number" step="0.01" min="0.01" id="eTxnAmount" class="input-control" placeholder="0.00" required>
+              <label class="form-label" for="eTxnAmount">Amount &amp; Currency</label>
+              <div style="display:flex; gap:8px;">
+                <select id="eTxnCurrency" class="select-control" style="width:115px; flex-shrink:0;" aria-label="Transaction currency">
+                  <option value="INR">₹ INR</option>
+                  <option value="USD">$ USD</option>
+                  <option value="EUR">€ EUR</option>
+                  <option value="GBP">£ GBP</option>
+                  <option value="CHF">₣ CHF</option>
+                  <option value="JPY">¥ JPY</option>
+                </select>
+                <input type="number" step="0.01" min="0.01" id="eTxnAmount" class="input-control" placeholder="0.00" required style="flex:1;">
+              </div>
+              <div id="eTxnConversionHint" class="currency-conversion-hint" style="display:none;"></div>
             </div>
           </div>
 
@@ -1234,8 +1325,21 @@
 
       <!-- Profile list -->
       <div class="pmm-body">
+        <div class="pmm-section-label" style="font-size:0.75rem; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:8px;">Your Profiles</div>
         <div id="profileManagerList" class="pmm-list">
           <!-- Rendered by JS -->
+        </div>
+
+        <!-- Active Profile Primary Currency Section -->
+        <div class="currency-selector-section" style="padding:12px 14px; background:rgba(255,255,255,0.02); border-radius:14px; border:1px solid var(--border-color); margin:12px 0;">
+          <label class="currency-selector-label" id="activeProfileCurrencyLabel">
+            <i data-lucide="coins" style="width:14px;height:14px; color:var(--color-primary);"></i>
+            Active Profile Primary Currency
+          </label>
+          <div class="currency-backlight-grid" id="managerCurrencyGrid" role="radiogroup" aria-labelledby="activeProfileCurrencyLabel" style="margin-top:6px;">
+            <!-- Rendered by JS -->
+          </div>
+          <div style="font-size:0.7rem; color:var(--text-dim); margin-top:6px;">All financial summaries, graphs, budgets, and dashboards display in your selected primary currency.</div>
         </div>
 
         <!-- Add new profile -->
@@ -1268,11 +1372,132 @@
     </div>
   </div>
 
+  <!-- ==================== ADD CUSTOM RULE MODAL ==================== -->
+  <div class="modal-overlay" id="addRuleModal" style="display:none;">
+    <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="addRuleModalTitle" tabindex="-1" style="max-width:440px;">
+      <div class="modal-header">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <div style="width:32px; height:32px; border-radius:8px; background:rgba(6, 182, 212, 0.2); color:#06b6d4; display:flex; align-items:center; justify-content:center;">
+            <i data-lucide="brain" style="width:18px; height:18px;"></i>
+          </div>
+          <div>
+            <h3 id="addRuleModalTitle" style="font-size:1.1rem; font-weight:700;">Add Custom Rule</h3>
+            <p style="font-size:0.8rem; color:var(--text-muted); margin:0;">AI Auto-Classification Memory</p>
+          </div>
+        </div>
+        <button class="btn btn-ghost btn-sm btn-icon-only" onclick="app.closeAddRuleModal()" type="button" aria-label="Close">
+          <i data-lucide="x" style="width:18px; height:18px;"></i>
+        </button>
+      </div>
+
+      <form id="addRuleForm" onsubmit="event.preventDefault(); app.saveCustomRule();">
+        <div class="modal-body" style="padding-top:16px;">
+          <div class="form-group">
+            <label class="form-label" for="rulePatternInput">Keyword Pattern / UPI ID / Payee</label>
+            <input
+              type="text"
+              id="rulePatternInput"
+              class="input-control"
+              placeholder="e.g. starbucks, chai point, merchant@upi"
+              required
+              autocomplete="off"
+            >
+            <div style="font-size:0.75rem; color:var(--text-dim); margin-top:4px;">
+              Case-insensitive pattern matched against narrations and payee descriptions.
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label" for="ruleCategorySelect">Category</label>
+              <select id="ruleCategorySelect" class="select-control" required>
+                <!-- Populated dynamically with categories -->
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="ruleTypeSelect">Transaction Type</label>
+              <select id="ruleTypeSelect" class="select-control" required>
+                <option value="expense">Expense (Debit)</option>
+                <option value="income">Income (Credit)</option>
+                <option value="transfer">Transfer</option>
+                <option value="refund">Refund (Reversal)</option>
+              </select>
+            </div>
+          </div>
+
+          <div id="addRuleError" class="profile-create-error" style="display:none; margin-top:10px;"></div>
+        </div>
+
+        <div class="modal-footer" style="display:flex; justify-content:flex-end; gap:10px; margin-top:16px;">
+          <button type="button" class="btn btn-secondary btn-sm" onclick="app.closeAddRuleModal()">Cancel</button>
+          <button type="submit" class="btn btn-primary btn-sm">
+            <i data-lucide="check" style="width:14px; height:14px;"></i> Save &amp; Apply Rule
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ==================== EDIT EXCHANGE RATE MODAL ==================== -->
+  <div class="modal-overlay" id="editCurrencyModal" style="display:none;">
+    <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="editCurrencyModalTitle" tabindex="-1" style="max-width:440px;">
+      <div class="modal-header">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <div id="editCurrencyFlagCircle" style="font-size:1.6rem; line-height:1;">🇮🇳</div>
+          <div>
+            <h3 id="editCurrencyModalTitle" style="font-size:1.1rem; font-weight:700;">Edit Exchange Rate</h3>
+            <p id="editCurrencyModalSubtitle" style="font-size:0.8rem; color:var(--text-muted); margin:0;">1 USD conversion rate</p>
+          </div>
+        </div>
+        <button class="btn btn-ghost btn-sm btn-icon-only" onclick="app.closeEditCurrencyModal()" type="button" aria-label="Close">
+          <i data-lucide="x" style="width:18px; height:18px;"></i>
+        </button>
+      </div>
+
+      <div class="modal-body" style="padding-top:16px;">
+        <input type="hidden" id="editCurrencyCodeInput">
+        <div class="form-group">
+          <label class="form-label" for="editCurrencyRateInput" id="editCurrencyRateLabel">Rate for 1 USD</label>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span id="editCurrencyBasePrefix" style="font-weight:700; color:var(--text-muted); font-size:0.95rem; white-space:nowrap;">1 USD =</span>
+            <input
+              type="number"
+              step="any"
+              min="0.000001"
+              id="editCurrencyRateInput"
+              class="input-control"
+              placeholder="e.g. 83.50"
+              required
+              style="font-family:var(--font-mono); font-weight:700; font-size:1.05rem;"
+              oninput="app.onEditCurrencyInputChange()"
+            >
+            <span id="editCurrencyCodeSuffix" style="font-weight:800; color:var(--color-primary); font-size:0.95rem;">INR</span>
+          </div>
+        </div>
+
+        <div id="editCurrencyPreviewBox" class="currency-conversion-preview" style="margin-top:12px; padding:12px; border-radius:10px; background:rgba(255,255,255,0.04); border:1px solid var(--border-color);">
+          <div style="font-size:0.75rem; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-muted); font-weight:700;">Profile Equivalent</div>
+          <div id="editCurrencyPreviewText" style="font-size:0.92rem; font-weight:700; color:var(--color-primary); margin-top:2px;">1 INR ≈ 1.00 INR</div>
+        </div>
+
+        <div id="editCurrencyError" class="profile-create-error" style="display:none; margin-top:10px;"></div>
+      </div>
+
+      <div class="modal-footer" style="display:flex; justify-content:flex-end; gap:10px; margin-top:16px;">
+        <button type="button" class="btn btn-secondary btn-sm" onclick="app.closeEditCurrencyModal()">Cancel</button>
+        <button type="button" class="btn btn-primary btn-sm" onclick="app.saveManualCurrencyRate()">
+          <i data-lucide="check" style="width:14px; height:14px;"></i> Save Rate
+        </button>
+      </div>
+    </div>
+  </div>
+
   </div><!-- end .app-container -->
 
   <!-- Application Logic Scripts -->
   <script src="js/dateutil.js?v=1"></script>
   <script src="js/profiles.js?v=2"></script>
+  <script src="js/currency.js?v=1"></script>
   <script src="js/db.js?v=3"></script>
   <script src="js/categorizer.js?v=3"></script>
   <script src="js/parser.js?v=5"></script>

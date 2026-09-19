@@ -1,5 +1,6 @@
 package com.wnoicew.expensetracker
 
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.compose.BackHandler
 import androidx.activity.ComponentActivity
@@ -18,6 +19,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.*
+import androidx.compose.material.icons.automirrored.outlined.*
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
@@ -32,6 +35,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.wnoicew.expensetracker.data.engine.CurrencyEngine
 import com.wnoicew.expensetracker.ui.MainViewModel
 import com.wnoicew.expensetracker.ui.components.HigGlassCard
 import com.wnoicew.expensetracker.ui.components.HigInsetGroup
@@ -51,7 +55,7 @@ enum class BottomTab(
     DASHBOARD("Dashboard", Icons.Filled.Dashboard, Icons.Outlined.Dashboard),
     TRANSACTIONS("Ledger", Icons.Filled.Receipt, Icons.Outlined.Receipt),
     UPLOAD("Upload", Icons.Filled.CloudUpload, Icons.Outlined.CloudUpload),
-    REVIEW("Review", Icons.Filled.HelpOutline, Icons.Outlined.HelpOutline),
+    REVIEW("Review", Icons.AutoMirrored.Filled.HelpOutline, Icons.AutoMirrored.Outlined.HelpOutline),
     MORE("More", Icons.Filled.GridView, Icons.Outlined.GridView)
 }
 
@@ -60,7 +64,8 @@ enum class SubScreen {
     ACCOUNTS,
     DUPLICATES,
     RULES,
-    REPORTS
+    REPORTS,
+    CURRENCY_RATES
 }
 
 class MainActivity : ComponentActivity() {
@@ -68,6 +73,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        setupHighRefreshRate()
         try {
             com.tom_roush.pdfbox.android.PDFBoxResourceLoader.init(applicationContext)
         } catch (_: Exception) {}
@@ -79,6 +85,45 @@ class MainActivity : ComponentActivity() {
                 MainAppRoot(viewModel = viewModel)
             }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        setupHighRefreshRate()
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) {
+            setupHighRefreshRate()
+        }
+    }
+
+    /**
+     * Explicitly requests the display's maximum supported refresh rate (e.g. 144Hz, 120Hz, 90Hz).
+     * Bypasses OEM vendor display driver policies that throttle non-gaming apps to 60Hz.
+     */
+    private fun setupHighRefreshRate() {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                val currentDisplay = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    display
+                } else {
+                    @Suppress("DEPRECATION")
+                    windowManager.defaultDisplay
+                }
+                val modes = currentDisplay?.supportedModes
+                val maxMode = modes?.maxByOrNull { it.refreshRate }
+                if (maxMode != null && maxMode.refreshRate > 60f) {
+                    val lp = window.attributes
+                    lp.preferredDisplayModeId = maxMode.modeId
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                        lp.preferredRefreshRate = maxMode.refreshRate
+                    }
+                    window.attributes = lp
+                }
+            }
+        } catch (_: Exception) {}
     }
 }
 
@@ -207,11 +252,11 @@ fun MainAppRoot(viewModel: MainViewModel) {
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                                    .padding(start = 4.dp, end = 12.dp, top = 2.dp, bottom = 2.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 IconButton(onClick = { activeSubScreen = SubScreen.NONE }) {
-                                    Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+                                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                                 }
                                 Text(
                                     text = when (activeSubScreen) {
@@ -219,6 +264,7 @@ fun MainAppRoot(viewModel: MainViewModel) {
                                         SubScreen.DUPLICATES -> "Duplicate Resolver"
                                         SubScreen.RULES -> "Learned Rules"
                                         SubScreen.REPORTS -> "Reports & Exports"
+                                        SubScreen.CURRENCY_RATES -> "Currency & Rates"
                                         else -> ""
                                     },
                                     style = MaterialTheme.typography.titleMedium,
@@ -231,6 +277,7 @@ fun MainAppRoot(viewModel: MainViewModel) {
                                 SubScreen.DUPLICATES -> DuplicateResolverScreen(viewModel = viewModel)
                                 SubScreen.RULES -> LearnedRulesScreen(viewModel = viewModel)
                                 SubScreen.REPORTS -> ReportsScreen(viewModel = viewModel)
+                                SubScreen.CURRENCY_RATES -> CurrencyRatesScreen(viewModel = viewModel)
                                 else -> {}
                             }
                         }
@@ -260,6 +307,7 @@ fun MainAppRoot(viewModel: MainViewModel) {
                                 onNavigateToDuplicates = { activeSubScreen = SubScreen.DUPLICATES },
                                 onNavigateToRules = { activeSubScreen = SubScreen.RULES },
                                 onNavigateToReports = { activeSubScreen = SubScreen.REPORTS },
+                                onNavigateToCurrencyRates = { activeSubScreen = SubScreen.CURRENCY_RATES },
                                 onOpenProfileManager = { showProfileManagerSheet = true }
                             )
                         }
@@ -277,10 +325,12 @@ fun MainAppRoot(viewModel: MainViewModel) {
 
             // Add Transaction Modal Sheet
             if (showAddTxnSheet) {
+                val profileCur = activeProfile?.currency ?: CurrencyEngine.DEFAULT_CURRENCY
                 AddTransactionBottomSheet(
                     accounts = accounts.map { it.name },
+                    defaultCurrency = profileCur,
                     onDismiss = { showAddTxnSheet = false },
-                    onAdd = { desc, amount, type, category, accountName, mode, notes, date ->
+                    onAdd = { desc, amount, type, category, accountName, mode, notes, date, cur ->
                         viewModel.addTransaction(
                             description = desc,
                             amount = amount,
@@ -289,7 +339,8 @@ fun MainAppRoot(viewModel: MainViewModel) {
                             accountName = accountName,
                             paymentMode = mode,
                             notes = notes,
-                            date = date
+                            date = date,
+                            currency = cur
                         )
                         showAddTxnSheet = false
                     }
@@ -306,6 +357,7 @@ fun MoreMenuScreen(
     onNavigateToDuplicates: () -> Unit,
     onNavigateToRules: () -> Unit,
     onNavigateToReports: () -> Unit,
+    onNavigateToCurrencyRates: () -> Unit,
     onOpenProfileManager: () -> Unit
 ) {
     val isDarkMode by viewModel.isDarkMode
@@ -435,7 +487,18 @@ fun MoreMenuScreen(
                     showDivider = true
                 )
 
-                // 5. Profiles Manager
+                // 5. Currency & Exchange Rates
+                MoreMenuRow(
+                    title = "Currency & Exchange Rates",
+                    subtitle = "Real-time rates, manual overrides & API sync",
+                    icon = Icons.Default.CurrencyExchange,
+                    iconColor = WarningAmber,
+                    badgeText = null,
+                    onClick = onNavigateToCurrencyRates,
+                    showDivider = true
+                )
+
+                // 6. Profiles Manager
                 MoreMenuRow(
                     title = "Manage Profiles",
                     subtitle = "Switch, rename, or create user memory profiles",

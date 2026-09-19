@@ -19,6 +19,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.wnoicew.expensetracker.data.engine.CurrencyEngine
 import com.wnoicew.expensetracker.data.model.TransactionEntity
 import com.wnoicew.expensetracker.data.model.TransactionType
 import com.wnoicew.expensetracker.ui.ALL_CATEGORIES
@@ -39,11 +40,10 @@ fun NeedsReviewScreen(
     viewModel: MainViewModel
 ) {
     val reviewTransactions by viewModel.needsReviewTransactions.collectAsState()
+    val primaryCurrency = viewModel.activeProfile.value?.currency ?: CurrencyEngine.DEFAULT_CURRENCY
 
-    val currencyFormat = remember {
-        NumberFormat.getCurrencyInstance(Locale("en", "IN")).apply {
-            maximumFractionDigits = 0
-        }
+    val currencyFormat = remember(primaryCurrency) {
+        CurrencyEngine.getFormat(primaryCurrency)
     }
 
     val dateFormat = remember { SimpleDateFormat("EEEE, dd MMM yyyy", Locale.getDefault()) }
@@ -146,16 +146,16 @@ fun NeedsReviewScreen(
             items(reviewTransactions, key = { it.id }) { txn ->
                 ReviewTransactionCard(
                     transaction = txn,
-                    currencyFormat = currencyFormat,
+                    primaryCurrency = primaryCurrency,
                     dateFormat = dateFormat,
-                    onClassify = { selectedCat, txnType ->
+                    onClassify = { selectedCat, txnType, pattern ->
                         val updated = txn.copy(
                             category = selectedCat,
                             type = txnType,
                             needsReview = false
                         )
                         viewModel.updateTransaction(updated)
-                        viewModel.learnRuleAndReclassify(txn.description, selectedCat, txnType)
+                        viewModel.learnRuleAndReclassify(pattern.ifBlank { txn.description }, selectedCat, txnType)
                     },
                     onDelete = { pendingDelete = txn }
                 )
@@ -168,14 +168,24 @@ fun NeedsReviewScreen(
 @Composable
 private fun ReviewTransactionCard(
     transaction: TransactionEntity,
-    currencyFormat: NumberFormat,
+    primaryCurrency: String,
     dateFormat: SimpleDateFormat,
-    onClassify: (String, TransactionType) -> Unit,
+    onClassify: (String, TransactionType, String) -> Unit,
     onDelete: () -> Unit
 ) {
     var selectedCategory by remember { mutableStateOf(if (transaction.category != "Uncategorized") transaction.category else ALL_CATEGORIES.first()) }
     var selectedType by remember { mutableStateOf(transaction.type) }
+    var customPattern by remember { mutableStateOf(transaction.description) }
     var dropdownExpanded by remember { mutableStateOf(false) }
+    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
+
+    val typeOptions = listOf("Expense", "Income", "Refund", "Transfer")
+    val selectedTypeIndex = when (selectedType) {
+        TransactionType.EXPENSE -> 0
+        TransactionType.INCOME -> 1
+        TransactionType.REFUND -> 2
+        TransactionType.TRANSFER -> 3
+    }
 
     Surface(
         modifier = Modifier
@@ -208,10 +218,15 @@ private fun ReviewTransactionCard(
                 }
 
                 Text(
-                    text = currencyFormat.format(transaction.amount),
+                    text = CurrencyEngine.format(transaction.amount, transaction.currency.ifBlank { primaryCurrency }),
                     fontWeight = FontWeight.ExtraBold,
                     fontSize = 17.sp,
-                    color = if (transaction.type == TransactionType.INCOME) IncomeGreen else ExpenseRose
+                    color = when (selectedType) {
+                        TransactionType.INCOME -> IncomeGreen
+                        TransactionType.REFUND -> Color(0xFF06B6D4)
+                        TransactionType.TRANSFER -> Color(0xFF8B5CF6)
+                        else -> ExpenseRose
+                    }
                 )
             }
 
@@ -228,6 +243,29 @@ private fun ReviewTransactionCard(
                         modifier = Modifier.padding(8.dp)
                     )
                 }
+            }
+
+            // Transaction Type Reclassification Selector
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(
+                    text = "Transaction Type",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                com.wnoicew.expensetracker.ui.components.HigSegmentedControl(
+                    items = typeOptions,
+                    selectedIndex = selectedTypeIndex,
+                    onItemSelected = { idx ->
+                        selectedType = when (idx) {
+                            0 -> TransactionType.EXPENSE
+                            1 -> TransactionType.INCOME
+                            2 -> TransactionType.REFUND
+                            else -> TransactionType.TRANSFER
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth().height(42.dp)
+                )
             }
 
             // Category Selection Dropdown
@@ -260,12 +298,25 @@ private fun ReviewTransactionCard(
                 }
             }
 
+            // Editable Pattern for Learned Rule
+            OutlinedTextField(
+                value = customPattern,
+                onValueChange = { customPattern = it },
+                label = { Text("Learned Rule Pattern") },
+                singleLine = true,
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier.fillMaxWidth()
+            )
+
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Button(
-                    onClick = { onClassify(selectedCategory, selectedType) },
+                    onClick = {
+                        haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                        onClassify(selectedCategory, selectedType, customPattern)
+                    },
                     shape = RoundedCornerShape(10.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = PrimaryBlue),
                     modifier = Modifier.weight(1f).height(44.dp)
@@ -276,7 +327,10 @@ private fun ReviewTransactionCard(
                 }
 
                 IconButton(
-                    onClick = onDelete,
+                    onClick = {
+                        haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                        onDelete()
+                    },
                     modifier = Modifier.size(44.dp)
                 ) {
                     Icon(Icons.Default.DeleteOutline, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error)

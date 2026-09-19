@@ -1,5 +1,6 @@
 package com.wnoicew.expensetracker.ui
 
+import com.wnoicew.expensetracker.data.engine.CurrencyEngine
 import com.wnoicew.expensetracker.data.model.TransactionEntity
 import com.wnoicew.expensetracker.data.model.TransactionType
 import kotlinx.coroutines.delay
@@ -44,16 +45,19 @@ object KpiMath {
         transactions: List<TransactionEntity>,
         range: KpiRange,
         today: LocalDate,
-        zone: ZoneId = ZoneId.systemDefault()
+        zone: ZoneId = ZoneId.systemDefault(),
+        targetCurrency: String = "INR"
     ): KpiTotals {
         val cutoff = cutoffMillis(range, today, zone)
         var inflow = 0.0
         var outflow = 0.0
         for (t in transactions) {
             if (t.duplicateStatus == "merged" || t.date < cutoff) continue
+            val convertedAmount = CurrencyEngine.convert(t.amount, t.currency, targetCurrency)
             when (t.type) {
-                TransactionType.INCOME -> inflow += t.amount
-                TransactionType.EXPENSE -> outflow += t.amount
+                TransactionType.INCOME -> inflow += convertedAmount
+                TransactionType.REFUND -> inflow += convertedAmount
+                TransactionType.EXPENSE -> outflow += convertedAmount
                 TransactionType.TRANSFER -> {}
             }
         }

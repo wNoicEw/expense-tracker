@@ -4,6 +4,135 @@ All notable changes to **Money Tracker (Offline AI Expense Tracker & Financial I
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0] - 2026-09-19
+
+### Added - Currency Hub, Refund Intelligence, Cross-Platform Interoperability & Dedicated Ledger Filtering
+- **144Hz & High-Refresh-Rate Display Compatibility (Android)**:
+  - Configured `preferredDisplayModeId` and `preferredRefreshRate` on `MainActivity.window.attributes` across `onCreate`, `onResume`, and `onWindowFocusChanged` to dynamically lock the window to the hardware display's maximum supported refresh rate (144Hz, 120Hz, 90Hz).
+  - Bypasses vendor OEM display throttles (Motorola, Xiaomi, ASUS ROG, Realme) that clamp non-game Compose applications to 60Hz.
+  - Declared `android:hardwareAccelerated="true"` explicitly on `<application>` and `<activity>` in `AndroidManifest.xml`.
+  - Replaced expensive GPU `Modifier.blur()` RenderEffect passes with single-pass `Brush.radialGradient` ambient backlights across `HigGlassCard`, `BacklitCurrencySelector`, `DashboardScreen`, and `ProfileChooserScreen`, keeping GPU frame times well under the 6.94ms 144Hz budget.
+  - Implemented zero-allocation currency formatting via `ThreadLocal<HashMap<String, NumberFormat>>` in `CurrencyEngine` and memoized date/string formatting in `TransactionRowItem`, eliminating ICU allocations and GC pauses during fast scroll frames.
+  - Added `contentType = { _, txn -> txn.type }` in `TransactionsScreen.kt` for efficient Compose `LazyColumn` item slot recycling.
+- **Currency Information & Exchange Rates Hub (Android APK & Web App)**:
+  - Added dedicated Currency Information & Rates screen in Android APK (under *More* tab -> `Currency & Exchange Rates`) and Web App (sidebar navigation -> `Exchange Rates`).
+  - **Dynamic Default Base Currency Architecture**: Dynamically calculates and formats all rates relative to whatever currency is set as the active profile's default/primary currency (e.g. `1 EUR = 90.76 INR`, `1 INR = 0.012 USD`).
+  - **Clean UI & Self-Reference Omission**: The active profile's default currency is automatically excluded from the card list (e.g., if EUR is default, 1 EUR = 1 EUR is omitted, displaying the remaining 5 currencies).
+  - Shows last updated timestamp (date and time) and API sync health indicator with ambient pulse dot and active base badge.
+  - Added "Force Sync from API" button with rotating sync animation to bypass daily limits and pull fresh rates on demand.
+  - **Dynamic Manual Rate Overrides**: Allows user to input custom rates directly relative to their active default currency (e.g., set `1 EUR = 100 INR`) with instant real-time inverse conversion preview.
+  - Dedicated "Reset to API" per-card button and global "Reset All" button to revert overrides back to the pristine cached API rates relative to the base currency.
+  - Vibrant Apple HIG / FinTech ambient backlight glow cards with signature neon color halos per currency (Emerald Green for INR, Electric Blue for USD, Royal Violet for EUR, Rose Crimson for GBP, Alpine Cyan for CHF, Golden Amber for JPY).
+- **Profile Manager & Chooser Usability Polish (Android & Web)**:
+  - Unified currency selection into a single intuitive selector for the active profile, eliminating duplicate selectors.
+  - **Single-Surface Currency Selector Redesign (Android & Web)**: Eliminated the nested "double box" visual defect in light mode by replacing multi-layer surface wrappers with a clean, unified single-surface card. Features pure solid white backgrounds (`#ffffff`), delicate 1dp borders (`#e2e8f0`), and subtle 8% signature accent tint on selection in light theme, paired with deep dark cards (`#131b2e`) and luminous 16% accent glow in dark theme. Added top-row national flags, crisp checkmark badge indicators, and tactile haptic feedback.
+  - Fixed mobile soft keyboard layout compression on the profile name input field with `BoxWithConstraints` and responsive vertical scroll containers.
+  - **Screen Top Spacing & WindowInsets Harmonization (Android)**:
+    - Fixed excessive blank space gaps under top navigation bars on subscreens (`Cards & Accounts`, `Currency & Rates`) by setting `contentWindowInsets = WindowInsets(0.dp)` on nested `Scaffold` composables, eliminating redundant double-status-bar insets.
+    - Eliminated large top gaps in `ModalBottomSheet` containers (`ProfileManagerSheet`, `AddEditTransactionSheet`, `TransactionDetailsSheet`, `AddAccountSheet`, `AddRuleSheet`, `PasswordPromptSheet`) by replacing `safeDrawingPadding()` (which erroneously applied status-bar height to sheet tops) with `navigationBarsPadding()` and compact `top = 2.dp` padding.
+    - Synchronized `contentPadding` top alignments across all tabs and subscreens for a cohesive, homogeneous visual rhythm.
+- **Refund Inflow Intelligence & Deduplication Isolation (Web & Android)**:
+  - Added dedicated `REFUND` transaction type across Web (`'refund'`) and Android (`TransactionType.REFUND`).
+  - Auto-detection of refunds and reversal credits across bank and card statement parsers (Navi, Paytm, generic PDF, spatial table, line-based, CSV).
+  - Deduplication strictly separates transactions of different types: an expense and a refund of identical amount/merchant are never merged as duplicates.
+  - Financial aggregators and KPI math (Web `accounts.js`, `budgets.js`, `charts.js` & Android `KpiMath`, `DayClock`, `CalendarAggregator`, `MainViewModel`) count refunds as positive inflow without misclassifying them as earned income.
+  - UI styled with dedicated Alpine Cyan badge & amount coloring (`#06b6d4` / `Color(0xFF06B6D4)`) and `Refresh` icon across ledger cards, details sheets, edit dialogs, and filters.
+  - Added a dedicated 4th `"Refunds"` filter segment in the Android ledger (`HigSegmentedControl`).
+- **Web App & Android App Functional Parity Harmonization**:
+  - Added manual **Add Custom Rule** dialog (`addRuleModal`) and header button to the Web AI Learned Rules tab, bringing 100% parity with Android's `AddRuleSheet` with instant retroactive reclassification of existing matching records.
+  - Added `Refund (Reversal)` transaction type option to Web transaction edit modal dropdown (`eTxnType`), resolving the gap where editing a refund transaction could reset its type to expense.
+  - Updated Web accounts view credits calculation (`totalCredits` in `accounts.js`/`app.js`) to include refund transactions as positive inflows alongside income and transfers.
+  - Updated multi-format PDF export engine (`export.js`) so refund rows render with a positive `+` prefix and signature Alpine Cyan styling.
+- **Bi-Directional Cross-Platform Backup Interoperability**:
+  - Web `ExportEngine.restoreBackupFromFile`: Supports importing Android APK JSON backups, auto-converting epoch millisecond timestamps into ISO `YYYY-MM-DD` strings, mapping `accountId`/`accountName`, and deserializing categories and rules.
+  - Android `ExportEngine.parseJsonBackup`: Supports importing Web `stores` JSON backups, auto-parsing ISO dates to epoch milliseconds, and mapping Web property names and enums.
+- **Android Statement Picker Modernization & Password Resilience**:
+  - Replaced legacy `GetContent()` with Android Storage Access Framework `ActivityResultContracts.OpenDocument()` in `UploadScreen.kt`.
+  - Added in-memory byte caching for password-protected statements in `UploadScreen`, eliminating transient URI permission expiration on Android 14/15 while entering PDF passwords.
+- **Security Audit, Bug Hunt & Data Integrity Hardening (Web & Android)**:
+  - Cross-Currency Deduplication Isolation: Bucketed amount keys and comparison logic in `js/duplicateDetector.js` and `DuplicateDetectorEngine.kt` now strictly require identical currency codes, preventing false-positive duplicates across different currencies with matching nominal values.
+  - Android Dashboard Reactive Currency Invalidation: Wired `currencyStateVersion` into `MainViewModel.kt`'s `totalNetWorth`, `totals30D`, and `categoryBreakdown` flows, ensuring instant real-time KPI updates upon manual rate overrides or API syncs.
+  - Web Database Connection Teardown: Added `close()` to `Database` in `js/db.js` so profile deletion via `indexedDB.deleteDatabase()` executes cleanly without blocked connection locks.
+  - CSV & Excel Export Accuracy: Added `Currency` and `Account` columns to CSV exports and dynamically bound primary currency codes to Excel header labels in `js/export.js`.
+  - Cleartext Traffic Blocked: Configured `android:usesCleartextTraffic="false"` in `AndroidManifest.xml` to enforce strict HTTPS transport security.
+  - Web Calendar Inflow Accuracy: Corrected refund arithmetic in `js/calendar.js` monthly inflows and day-ledger badge styling.
+  - Profile-Scoped Storage Sandboxing (Web): Scoped `CurrencyEngine` manual rates and overrides to the active user profile ID (`money_tracker_currency_overrides_<profileId>`) with seamless legacy fallback.
+  - Mobile Sidebar Scrim Backdrop (Web): Added animated `.sidebar-backdrop` with backdrop blur and tap-to-dismiss handling on mobile viewports.
+  - Daylight Ambient Glow Tuning (Web): Strengthened border opacity and colored drop shadows on currency cards in light theme for crisp daytime visibility.
+  - Multi-Currency Ledger Filtering (Web & Android): Added currency filter controls allowing transactions to be isolated by currency code (`INR`, `USD`, `EUR`, `GBP`, `CHF`, `JPY`).
+  - Android NeedsReview Parity: Added transaction type reclassification segmented control (`Expense`, `Income`, `Refund`, `Transfer`) and custom regex/string pattern editing for persistent rule learning.
+  - Adaptive Filter Chips (Android): Replaced squeezed segmented control with smooth horizontally scrollable `LazyRow` filter chips for type and currency filtering on all viewport widths.
+  - Tactile Haptic Feedback (Android): Added subtle haptic responses (`LocalHapticFeedback`) across manual rate overrides, rule learning, delete confirmations, and filter switches.
+  - Proguard / R8 Keep Rules (Android): Added `proguard-rules.pro` protecting Room entities, DAOs, PDFBox Android, Apache Commons CSV, and serialization models.
+  - Temp & Junk Files Cleanup: Cleared stale intermediate build caches, transforms, stopped all orphaned Gradle daemons, and pruned old APK archives.
+
+### Fixed & Enhanced - Comprehensive Security, Accessibility & UX Hardening
+- **Stored XSS Defense & Strict ID Validation (Web)**:
+  - Enforced strict alphanumeric regex validation (`^[a-zA-Z0-9_\-.:@]{1,128}$`) on imported entity IDs during backup restoration.
+  - Replaced inline string-interpolated IDs with safe `data-id` dataset attributes in transaction action buttons, rule cards, review resolutions, duplicate pairs, and account lists.
+  - Escaped category names dynamically in dropdown selections.
+- **Soft Keyboard Insets & Bottom Sheet Scrolling (Android)**:
+  - Applied `.verticalScroll(rememberScrollState())` and `.imePadding()` across `AddTransactionBottomSheet`, `TransactionDetailBottomSheet`, `AddAccountBottomSheet`, and `ProfileManagerSheet`, preventing button occlusion and ensuring all form inputs scroll smoothly into view when the soft keyboard is active.
+- **Multi-Currency Formatting Consistency (Android)**:
+  - Integrated `CurrencyEngine` formatting into `DuplicateResolverScreen`, `NeedsReviewScreen`, and `UploadScreen` preview cards, honoring the user profile's active primary currency with proper locale-aware decimal formatting.
+  - Added dedicated Alpine Cyan coloring (`Color(0xFF06B6D4)`) for refund transaction amounts in `NeedsReviewScreen`.
+- **Atomic Account Deletion & Transaction Reassignment (Android)**:
+  - Added `@Query` in `TransactionDao` to automatically reassign transactions to `"Cash / Unassigned"` and empty `accountId` within an atomic Room `db.withTransaction { ... }` block when an account is deleted.
+- **Accessible Modal Focus Trapping (Web)**:
+  - Implemented `trapModalFocus(modal)` and `releaseModalFocus(modal)` to constrain `Tab` and `Shift+Tab` cycling within open dialogs according to WCAG 2.1 AA accessibility guidelines.
+- **IndexedDB Deletion Blocked Fix (Web)**:
+  - Safely closed active IndexedDB connections prior to calling `indexedDB.deleteDatabase()` during profile removal.
+- **Modern AutoMirrored Icons (Android)**:
+  - Replaced deprecated Compose icons with `Icons.AutoMirrored` equivalents (`HelpOutline`, `ArrowBack`, `TrendingUp`, `ShowChart`).
+- **Centralized Lucide Icon Hydration (Web)**:
+  - Consolidated safe icon hydration helper `hydrateIcons(root)` on `App` and `window.hydrateIcons` with existence guards and root-scoping support.
+- **Dynamic Touch Dial Precision (Web)**:
+  - Upgraded interactive timepicker touch math to dynamically compute plate center coordinates from `getBoundingClientRect()`, ensuring pixel-accurate clock face dragging on small mobile screens.
+- **Deduplication Floating Point Precision Fix (Android)**:
+  - Replaced `(amount * 100).toLong()` with `kotlin.math.round(abs(amount) * 100).toLong()` in Android duplicate engine, eliminating truncation mismatches on cents/paise amounts like `19.99`.
+- **Search Debouncing & UI Performance Optimization (Android & Web)**:
+  - Added 200ms debounce on transaction search queries in Compose `TransactionsScreen` to eliminate main-thread stutter on large datasets.
+  - Event listener leaks eliminated in Web interactive timepicker by binding document move/up listeners dynamically during active dragging only.
+
+## [1.5.1] - 2026-09-19
+
+### Changed - Currency Portfolio Adjustment
+- **Replaced Chinese Yuan (`CNY`) with British Pound (`GBP`) and Swiss Franc (`CHF`)**:
+  - Removed `CNY` (`¥` / `元`) across Web and Android platforms.
+  - Added British Pound (`GBP`, `£`) with Rose Crimson ambient backlight halo (`#E11D48`).
+  - Added Swiss Franc (`CHF`, `₣`) with Alpine Cyan ambient backlight halo (`#06B6D4`).
+  - Updated offline baseline rates: `1 USD = 0.78 GBP`, `1 USD = 0.89 CHF`.
+  - Updated Backlit Currency Selector, Transaction Creation/Edit modal selects, unit tests, and cross-currency conversion engines.
+
+## [1.5.0] - 2026-09-19
+
+### Added - Multi-Currency Architecture & Live Exchange Rates
+- **Global Currency Engine (Web & Android)**:
+  - Full support for 5 major global currencies: Indian Rupee (`INR`, `₹`), US Dollar (`USD`, `$`), Euro (`EUR`, `€`), Japanese Yen (`JPY`, `¥`), and Chinese Yuan (`CNY`, `¥`).
+  - **Live Daily Exchange Rates**: Integrated with Fawaz Ahmed's Currency API (`jsdelivr` CDN with fallback to Cloudflare Pages) using USD base cross-rate math `(amount / rateFromUsd) * rateToUsd`.
+  - **Strict Once-a-Day Sync Policy**: Rates are fetched only once per calendar day upon the first app opening. If the app is not opened on a given day, no background fetch is triggered. Offline baseline snapshot is maintained for complete offline resilience.
+  - User-Agent header `Mozilla/5.0 MoneyTrackerApp/1.5.0` to ensure reliable CDN response delivery.
+- **Ambient Backlit Currency Selector**:
+  - Custom UI component inspired by Apple Human Interface Guidelines and `ui-ux-pro-max` styling principles.
+  - Features radiant per-currency ambient glow halos (Emerald Green for INR, Electric Blue for USD, Royal Violet for EUR, Golden Amber for JPY, Coral Red for CNY), flag badges, currency symbols, and currency codes.
+  - Smooth micro-animations with animated elevation and border outlines on selection.
+- **Profile-Level Primary Currency**:
+  - Default currency is selected with the backlit selector during account/profile setup.
+  - Can be switched anytime from Settings / Profile Manager sheet.
+  - All dashboards, cashflow graphs, KPI metrics, category breakdowns, budgets, and monthly calendar views automatically convert and aggregate in the profile's active primary currency.
+- **Multi-Currency Manual Entry & Live Conversion Preview**:
+  - Record transactions in any supported currency with the integrated Backlit Currency Selector.
+  - Real-time conversion preview badge (`≈ ...`) showing the primary currency equivalent as you type.
+  - Transaction ledger cards display the original transaction currency alongside the converted primary currency value.
+- **Multi-Currency Accounts & Cards**:
+  - Accounts can be created in their native currency with custom symbols.
+- **Data Persistence & Database Migration**:
+  - Android Room database bumped to Version 4 with seamless SQLite migration `MIGRATION_3_4` adding `currency` columns with `DEFAULT 'INR'` to `transactions` and `accounts`.
+  - Export & Backup engines updated across Web and Android: JSON and CSV backups preserve currency tags per row without schema breakage.
+- **Tests**:
+  - Added unit test suite for `CurrencyEngine` conversions, cross-rates, once-a-day logic, and multi-currency KPI aggregation.
+  - Web regression test suite updated (28/28 tests passing).
+
 ## [1.4.2] - 2026-09-18
 
 Found by running the real parser against an actual SBI account statement and a Navi UPI history (kept local, never committed).

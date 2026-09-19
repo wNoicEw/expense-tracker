@@ -6,6 +6,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -23,15 +25,19 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.wnoicew.expensetracker.data.engine.CurrencyEngine
 import com.wnoicew.expensetracker.data.model.TransactionEntity
 import com.wnoicew.expensetracker.data.model.TransactionType
 import com.wnoicew.expensetracker.ui.ALL_CATEGORIES
 import com.wnoicew.expensetracker.ui.MainViewModel
 import com.wnoicew.expensetracker.ui.rememberExportLaunchers
+import com.wnoicew.expensetracker.ui.components.BacklitCurrencySelector
 import com.wnoicew.expensetracker.ui.components.CalendarMonthView
 import com.wnoicew.expensetracker.ui.components.DeleteTransactionDialog
 import com.wnoicew.expensetracker.ui.components.HigGlassCard
@@ -51,16 +57,25 @@ fun TransactionsScreen(
 ) {
     val launchers = rememberExportLaunchers(viewModel)
 
+    val primaryCurrency = viewModel.activeProfile.value?.currency ?: CurrencyEngine.DEFAULT_CURRENCY
+
     val transactions by viewModel.transactions.collectAsState()
     val accounts by viewModel.accounts.collectAsState()
     val needsReviewCount by viewModel.needsReviewCount.collectAsState()
 
     var searchQuery by rememberSaveable { mutableStateOf("") }
-    var filterTypeIndex by rememberSaveable { mutableIntStateOf(0) } // 0: All, 1: Expenses, 2: Income, 3: Transfers, 4: Review
+    var debouncedSearchQuery by rememberSaveable { mutableStateOf("") }
+    LaunchedEffect(searchQuery) {
+        kotlinx.coroutines.delay(200)
+        debouncedSearchQuery = searchQuery
+    }
+    var filterTypeIndex by rememberSaveable { mutableIntStateOf(0) } // 0: All, 1: Expenses, 2: Income, 3: Refunds, 4: Transfers, 5: Review
     var selectedCategoryFilter by rememberSaveable { mutableStateOf<String?>(null) }
     var selectedAccountFilter by rememberSaveable { mutableStateOf<String?>(null) }
+    var selectedCurrencyFilter by rememberSaveable { mutableStateOf<String?>(null) }
     var viewModeIndex by rememberSaveable { mutableIntStateOf(0) } // 0: List, 1: Calendar
     var prefillDateMillis by rememberSaveable { mutableStateOf<Long?>(null) }
+    val haptic = LocalHapticFeedback.current
 
     var showAddSheet by rememberSaveable { mutableStateOf(false) }
     var selectedTxnId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -81,10 +96,15 @@ fun TransactionsScreen(
         if (selectedTxnForDetail != null) selectedTxnId = null
     }
 
-    val currencyFormat = remember {
+    val currencyFormat = remember(primaryCurrency) {
         NumberFormat.getCurrencyInstance(Locale("en", "IN")).apply {
-            maximumFractionDigits = 0
+            currency = java.util.Currency.getInstance(primaryCurrency)
+            maximumFractionDigits = 2
         }
+    }
+
+    val fullDateFormat = remember {
+        SimpleDateFormat("dd MMMM yyyy, hh:mm a", Locale.getDefault())
     }
 
     pendingDelete?.let { txn ->
@@ -92,6 +112,7 @@ fun TransactionsScreen(
             transaction = txn,
             currencyFormat = currencyFormat,
             onConfirm = {
+                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                 viewModel.deleteTransaction(txn)
                 if (selectedTxnId == txn.id) selectedTxnId = null
                 pendingDelete = null
@@ -100,26 +121,32 @@ fun TransactionsScreen(
         )
     }
 
-    val filteredList = remember(transactions, searchQuery, filterTypeIndex, selectedCategoryFilter, selectedAccountFilter) {
+    val filteredList = remember(transactions, debouncedSearchQuery, filterTypeIndex, selectedCategoryFilter, selectedAccountFilter, selectedCurrencyFilter) {
         transactions.filter { txn ->
-            val matchesSearch = txn.description.contains(searchQuery, ignoreCase = true) ||
-                    txn.category.contains(searchQuery, ignoreCase = true) ||
-                    txn.accountName.contains(searchQuery, ignoreCase = true) ||
-                    txn.referenceNo.contains(searchQuery, ignoreCase = true)
+            val matchesSearch = txn.description.contains(debouncedSearchQuery, ignoreCase = true) ||
+                    txn.category.contains(debouncedSearchQuery, ignoreCase = true) ||
+                    txn.accountName.contains(debouncedSearchQuery, ignoreCase = true) ||
+                    txn.referenceNo.contains(debouncedSearchQuery, ignoreCase = true)
             val matchesType = when (filterTypeIndex) {
                 1 -> txn.type == TransactionType.EXPENSE
                 2 -> txn.type == TransactionType.INCOME
-                3 -> txn.type == TransactionType.TRANSFER
-                4 -> txn.needsReview || txn.category == "Uncategorized" || txn.duplicateStatus == "pending_review"
+                3 -> txn.type == TransactionType.REFUND
+                4 -> txn.type == TransactionType.TRANSFER
+                5 -> txn.needsReview || txn.category == "Uncategorized" || txn.duplicateStatus == "pending_review"
                 else -> true
             }
             val matchesCat = if (selectedCategoryFilter != null) txn.category == selectedCategoryFilter else true
             val matchesAcc = if (selectedAccountFilter != null) txn.accountName == selectedAccountFilter || txn.accountId == selectedAccountFilter else true
-            matchesSearch && matchesType && matchesCat && matchesAcc
+            val matchesCur = if (selectedCurrencyFilter != null) {
+                val c = txn.currency.ifBlank { primaryCurrency }.uppercase()
+                c == selectedCurrencyFilter?.uppercase()
+            } else true
+            matchesSearch && matchesType && matchesCat && matchesAcc && matchesCur
         }
     }
 
     Scaffold(
+        contentWindowInsets = WindowInsets(0.dp),
         floatingActionButton = {
             FloatingActionButton(
                 onClick = {
@@ -128,7 +155,8 @@ fun TransactionsScreen(
                 },
                 containerColor = PrimaryBlue,
                 contentColor = Color.White,
-                shape = RoundedCornerShape(18.dp)
+                shape = RoundedCornerShape(18.dp),
+                elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 6.dp, pressedElevation = 10.dp)
             ) {
                 Icon(Icons.Default.Add, contentDescription = "Add Transaction")
             }
@@ -139,7 +167,7 @@ fun TransactionsScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding),
-            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 16.dp),
+            contentPadding = PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 80.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             item {
@@ -182,6 +210,7 @@ fun TransactionsScreen(
                 item {
                     CalendarMonthView(
                         transactions = transactions,
+                        currency = primaryCurrency,
                         currencyFormat = currencyFormat,
                         onSelectTransaction = { openDetail(it, editing = false) },
                         onEditTransaction = { openDetail(it, editing = true) },
@@ -215,13 +244,77 @@ fun TransactionsScreen(
                     )
                 }
 
-                // Type Filter Segmented Control (All, Expenses, Income, Transfers, Review)
+                // Type Filter Scrollable Chips Row (All, Expenses, Income, Refunds, Transfers, Review)
                 item {
-                    HigSegmentedControl(
-                        items = listOf("All", "Expenses", "Income", "Transfers", "Review (${needsReviewCount})"),
-                        selectedIndex = filterTypeIndex,
-                        onItemSelected = { filterTypeIndex = it }
+                    val typeItems = listOf(
+                        "All",
+                        "Expenses",
+                        "Income",
+                        "Refunds",
+                        "Transfers",
+                        "Review ($needsReviewCount)"
                     )
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        contentPadding = PaddingValues(vertical = 2.dp)
+                    ) {
+                        itemsIndexed(typeItems) { index, label ->
+                            FilterChip(
+                                selected = filterTypeIndex == index,
+                                onClick = {
+                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    filterTypeIndex = index
+                                },
+                                label = {
+                                    Text(
+                                        text = label,
+                                        fontWeight = if (filterTypeIndex == index) FontWeight.Bold else FontWeight.Normal
+                                    )
+                                },
+                                leadingIcon = if (index == 5 && needsReviewCount > 0) {
+                                    {
+                                        Icon(
+                                            imageVector = Icons.Default.Warning,
+                                            contentDescription = null,
+                                            tint = com.wnoicew.expensetracker.ui.theme.WarningAmber,
+                                            modifier = Modifier.size(14.dp)
+                                        )
+                                    }
+                                } else null
+                            )
+                        }
+                    }
+                }
+
+                // Currency Filter Scrollable Chips Row
+                item {
+                    val supportedCurrencies = listOf("INR", "USD", "EUR", "GBP", "CHF", "JPY")
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        contentPadding = PaddingValues(vertical = 2.dp)
+                    ) {
+                        item {
+                            FilterChip(
+                                selected = selectedCurrencyFilter == null,
+                                onClick = {
+                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    selectedCurrencyFilter = null
+                                },
+                                label = { Text("All Currencies") }
+                            )
+                        }
+                        items(supportedCurrencies) { code ->
+                            val symbol = CurrencyEngine.getSymbol(code)
+                            FilterChip(
+                                selected = selectedCurrencyFilter == code,
+                                onClick = {
+                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    selectedCurrencyFilter = if (selectedCurrencyFilter == code) null else code
+                                },
+                                label = { Text("$symbol $code") }
+                            )
+                        }
+                    }
                 }
 
                 // Category Chips Row
@@ -303,7 +396,11 @@ fun TransactionsScreen(
                         }
                     }
                 } else {
-                    itemsIndexed(filteredList, key = { _, txn -> txn.id }) { index, txn ->
+                    itemsIndexed(
+                        items = filteredList,
+                        key = { _, txn -> txn.id },
+                        contentType = { _, txn -> txn.type }
+                    ) { index, txn ->
                         val shape = when {
                             filteredList.size == 1 -> RoundedCornerShape(16.dp)
                             index == 0 -> RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
@@ -319,7 +416,8 @@ fun TransactionsScreen(
                                 TransactionRowItem(
                                     transaction = txn,
                                     currencyFormat = currencyFormat,
-                                    showDivider = index < filteredList.size - 1
+                                    showDivider = index < filteredList.size - 1,
+                                    primaryCurrency = primaryCurrency
                                 )
                             }
                         }
@@ -332,12 +430,13 @@ fun TransactionsScreen(
         if (showAddSheet) {
             AddTransactionBottomSheet(
                 accounts = accounts.map { it.name },
+                defaultCurrency = primaryCurrency,
                 initialDateMillis = prefillDateMillis,
                 onDismiss = {
                     showAddSheet = false
                     prefillDateMillis = null
                 },
-                onAdd = { desc, amount, type, category, accountName, mode, notes, date ->
+                onAdd = { desc, amount, type, category, accountName, mode, notes, date, cur ->
                     viewModel.addTransaction(
                         description = desc,
                         amount = amount,
@@ -346,7 +445,8 @@ fun TransactionsScreen(
                         accountName = accountName,
                         paymentMode = mode,
                         notes = notes,
-                        date = date
+                        date = date,
+                        currency = cur
                     )
                     showAddSheet = false
                     prefillDateMillis = null
@@ -360,6 +460,7 @@ fun TransactionsScreen(
                 transaction = txn,
                 accounts = accounts.map { it.name },
                 currencyFormat = currencyFormat,
+                primaryCurrency = primaryCurrency,
                 startInEditMode = detailStartsEditing,
                 onDismiss = { selectedTxnId = null },
                 onUpdateCategory = { newCat, learnRule ->
@@ -385,12 +486,14 @@ fun TransactionsScreen(
 fun AddTransactionBottomSheet(
     accounts: List<String>,
     onDismiss: () -> Unit,
-    onAdd: (String, Double, TransactionType, String, String, String, String, Long) -> Unit,
-    initialDateMillis: Long? = null
+    onAdd: (String, Double, TransactionType, String, String, String, String, Long, String) -> Unit,
+    initialDateMillis: Long? = null,
+    defaultCurrency: String = CurrencyEngine.DEFAULT_CURRENCY
 ) {
     val context = LocalContext.current
     var description by rememberSaveable { mutableStateOf("") }
     var amountText by rememberSaveable { mutableStateOf("") }
+    var selectedCurrency by rememberSaveable { mutableStateOf(defaultCurrency) }
     var selectedTypeIndex by rememberSaveable { mutableIntStateOf(0) } // 0: Expense, 1: Income, 2: Transfer
     var selectedCategory by rememberSaveable { mutableStateOf(ALL_CATEGORIES.first()) }
     var selectedAccount by rememberSaveable { mutableStateOf(accounts.firstOrNull() ?: "Main Account") }
@@ -410,11 +513,14 @@ fun AddTransactionBottomSheet(
         containerColor = MaterialTheme.colorScheme.surface,
         shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
     ) {
+        val scrollState = rememberScrollState()
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 8.dp)
-                .safeDrawingPadding(),
+                .verticalScroll(scrollState)
+                .padding(start = 20.dp, end = 20.dp, top = 2.dp, bottom = 20.dp)
+                .imePadding()
+                .navigationBarsPadding(),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Text(
@@ -423,22 +529,43 @@ fun AddTransactionBottomSheet(
                 color = MaterialTheme.colorScheme.onSurface
             )
 
+            // Backlit Currency Selector
+            BacklitCurrencySelector(
+                selectedCurrency = selectedCurrency,
+                onCurrencySelected = { selectedCurrency = it },
+                label = "TRANSACTION CURRENCY"
+            )
+
             HigSegmentedControl(
-                items = listOf("Expense", "Income", "Transfer"),
+                items = listOf("Expense", "Income", "Transfer", "Refund"),
                 selectedIndex = selectedTypeIndex,
                 onItemSelected = { selectedTypeIndex = it }
             )
 
-            OutlinedTextField(
-                value = amountText,
-                onValueChange = { amountText = it },
-                label = { Text("Amount (₹)") },
-                placeholder = { Text("0.00") },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                singleLine = true,
-                shape = RoundedCornerShape(12.dp),
-                modifier = Modifier.fillMaxWidth()
-            )
+            Column {
+                OutlinedTextField(
+                    value = amountText,
+                    onValueChange = { amountText = it },
+                    label = { Text("Amount (${CurrencyEngine.getSymbol(selectedCurrency)})") },
+                    placeholder = { Text("0.00") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    singleLine = true,
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                val enteredAmt = amountText.toDoubleOrNull()
+                if (enteredAmt != null && enteredAmt > 0 && !selectedCurrency.equals(defaultCurrency, ignoreCase = true)) {
+                    val converted = CurrencyEngine.convert(enteredAmt, selectedCurrency, defaultCurrency)
+                    Text(
+                        text = "≈ ${CurrencyEngine.format(converted, defaultCurrency)} ($defaultCurrency primary equivalent)",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = PrimaryBlue,
+                        modifier = Modifier.padding(start = 4.dp, top = 4.dp)
+                    )
+                }
+            }
 
             OutlinedTextField(
                 value = description,
@@ -683,15 +810,19 @@ fun AddTransactionBottomSheet(
                     val type = when (selectedTypeIndex) {
                         0 -> TransactionType.EXPENSE
                         1 -> TransactionType.INCOME
-                        else -> TransactionType.TRANSFER
+                        2 -> TransactionType.TRANSFER
+                        3 -> TransactionType.REFUND
+                        else -> TransactionType.EXPENSE
                     }
-                    onAdd(description.trim(), amount, type, selectedCategory, selectedAccount, paymentMode.trim(), notes.trim(), selectedTimestamp)
+                    onAdd(description.trim(), amount, type, selectedCategory, selectedAccount, paymentMode.trim(), notes.trim(), selectedTimestamp, selectedCurrency)
                 },
                 shape = RoundedCornerShape(14.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = when (selectedTypeIndex) {
                         0 -> ExpenseRose
                         1 -> IncomeGreen
+                        2 -> PrimaryBlue
+                        3 -> Color(0xFF06B6D4)
                         else -> PrimaryBlue
                     }
                 ),
@@ -713,6 +844,7 @@ fun TransactionDetailBottomSheet(
     transaction: TransactionEntity,
     accounts: List<String>,
     currencyFormat: NumberFormat,
+    primaryCurrency: String = CurrencyEngine.DEFAULT_CURRENCY,
     onDismiss: () -> Unit,
     onUpdateCategory: (String, Boolean) -> Unit,
     onUpdateTransaction: (TransactionEntity) -> Unit,
@@ -723,6 +855,7 @@ fun TransactionDetailBottomSheet(
     var isEditing by remember { mutableStateOf(startInEditMode) }
 
     // Edit states
+    var editCurrency by rememberSaveable(transaction.id) { mutableStateOf(transaction.currency.ifBlank { primaryCurrency }) }
     var editDescription by remember(transaction) { mutableStateOf(transaction.description) }
     var editAmountText by remember(transaction) {
         mutableStateOf(if (transaction.amount % 1.0 == 0.0) transaction.amount.toLong().toString() else transaction.amount.toString())
@@ -733,6 +866,7 @@ fun TransactionDetailBottomSheet(
                 TransactionType.EXPENSE -> 0
                 TransactionType.INCOME -> 1
                 TransactionType.TRANSFER -> 2
+                TransactionType.REFUND -> 3
             }
         )
     }
@@ -758,11 +892,14 @@ fun TransactionDetailBottomSheet(
         containerColor = MaterialTheme.colorScheme.surface,
         shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
     ) {
+        val scrollState = rememberScrollState()
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 8.dp)
-                .safeDrawingPadding(),
+                .verticalScroll(scrollState)
+                .padding(start = 20.dp, end = 20.dp, top = 2.dp, bottom = 20.dp)
+                .imePadding()
+                .navigationBarsPadding(),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             // Header with Title & Edit toggle button
@@ -797,22 +934,42 @@ fun TransactionDetailBottomSheet(
 
             if (isEditing) {
                 // EDIT MODE
+                BacklitCurrencySelector(
+                    selectedCurrency = editCurrency,
+                    onCurrencySelected = { editCurrency = it },
+                    label = "TRANSACTION CURRENCY"
+                )
+
                 HigSegmentedControl(
-                    items = listOf("Expense", "Income", "Transfer"),
+                    items = listOf("Expense", "Income", "Transfer", "Refund"),
                     selectedIndex = editTypeIndex,
                     onItemSelected = { editTypeIndex = it }
                 )
 
-                OutlinedTextField(
-                    value = editAmountText,
-                    onValueChange = { editAmountText = it },
-                    label = { Text("Amount (₹)") },
-                    placeholder = { Text("0.00") },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    singleLine = true,
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.fillMaxWidth()
-                )
+                Column {
+                    OutlinedTextField(
+                        value = editAmountText,
+                        onValueChange = { editAmountText = it },
+                        label = { Text("Amount (${CurrencyEngine.getSymbol(editCurrency)})") },
+                        placeholder = { Text("0.00") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    val amtDouble = editAmountText.toDoubleOrNull()
+                    if (amtDouble != null && amtDouble > 0 && !editCurrency.equals(primaryCurrency, ignoreCase = true)) {
+                        val converted = CurrencyEngine.convert(amtDouble, editCurrency, primaryCurrency)
+                        Text(
+                            text = "≈ ${CurrencyEngine.format(converted, primaryCurrency)} ($primaryCurrency primary equivalent)",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = PrimaryBlue,
+                            modifier = Modifier.padding(start = 4.dp, top = 4.dp)
+                        )
+                    }
+                }
 
                 OutlinedTextField(
                     value = editDescription,
@@ -1062,7 +1219,9 @@ fun TransactionDetailBottomSheet(
                         val finalType = when (editTypeIndex) {
                             0 -> TransactionType.EXPENSE
                             1 -> TransactionType.INCOME
-                            else -> TransactionType.TRANSFER
+                            2 -> TransactionType.TRANSFER
+                            3 -> TransactionType.REFUND
+                            else -> TransactionType.EXPENSE
                         }
                         val updated = transaction.copy(
                             description = editDescription.trim(),
@@ -1074,7 +1233,8 @@ fun TransactionDetailBottomSheet(
                             paymentMode = editMode.trim().ifBlank { "Online" },
                             referenceNo = editRef.trim(),
                             note = editNotes.trim(),
-                            needsReview = false
+                            needsReview = false,
+                            currency = editCurrency
                         )
                         onUpdateTransaction(updated)
                     },
@@ -1107,12 +1267,28 @@ fun TransactionDetailBottomSheet(
                         )
                     }
 
-                    Text(
-                        text = currencyFormat.format(transaction.amount),
-                        fontSize = 22.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = if (transaction.type == TransactionType.INCOME) IncomeGreen else ExpenseRose
-                    )
+                    Column(horizontalAlignment = Alignment.End) {
+                        val txnCur = transaction.currency.ifBlank { CurrencyEngine.DEFAULT_CURRENCY }
+                        Text(
+                            text = CurrencyEngine.format(transaction.amount, txnCur),
+                            fontSize = 22.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = when (transaction.type) {
+                                TransactionType.INCOME -> IncomeGreen
+                                TransactionType.REFUND -> Color(0xFF06B6D4)
+                                else -> ExpenseRose
+                            }
+                        )
+                        if (!txnCur.equals(primaryCurrency, ignoreCase = true)) {
+                            val converted = CurrencyEngine.convert(transaction.amount, txnCur, primaryCurrency)
+                            Text(
+                                text = "≈ ${CurrencyEngine.format(converted, primaryCurrency)}",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = PrimaryBlue
+                            )
+                        }
+                    }
                 }
 
                 HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f))

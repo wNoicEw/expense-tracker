@@ -5,6 +5,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -22,6 +24,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.wnoicew.expensetracker.data.ProfileManager
 import com.wnoicew.expensetracker.data.UserProfile
+import com.wnoicew.expensetracker.data.engine.CurrencyEngine
+import com.wnoicew.expensetracker.ui.components.BacklitCurrencySelector
 import com.wnoicew.expensetracker.ui.components.HigInsetGroup
 import com.wnoicew.expensetracker.ui.theme.IncomeGreen
 import com.wnoicew.expensetracker.ui.theme.PrimaryBlue
@@ -50,11 +54,14 @@ fun ProfileManagerSheet(
         containerColor = MaterialTheme.colorScheme.surface,
         shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
     ) {
+        val scrollState = rememberScrollState()
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 8.dp)
-                .safeDrawingPadding(),
+                .verticalScroll(scrollState)
+                .padding(start = 20.dp, end = 20.dp, top = 2.dp, bottom = 20.dp)
+                .imePadding()
+                .navigationBarsPadding(),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             Row(
@@ -92,43 +99,47 @@ fun ProfileManagerSheet(
                             .padding(horizontal = 14.dp, vertical = 12.dp)
                     ) {
                         if (isEditing) {
-                            // Inline Rename Row
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                OutlinedTextField(
-                                    value = renameText,
-                                    onValueChange = { renameText = it },
-                                    singleLine = true,
-                                    shape = RoundedCornerShape(10.dp),
-                                    modifier = Modifier.weight(1f)
-                                )
-                                Button(
-                                    onClick = {
-                                        try {
-                                            profileManager.renameProfile(profile.id, renameText)
-                                            editingProfileId = null
-                                            renameError = null
-                                        } catch (e: Exception) {
-                                            renameError = e.message
-                                        }
-                                    },
-                                    shape = RoundedCornerShape(10.dp),
-                                    colors = ButtonDefaults.buttonColors(containerColor = PrimaryBlue)
+                            // Inline Rename
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
-                                    Text("Save", fontSize = 13.sp)
+                                    OutlinedTextField(
+                                        value = renameText,
+                                        onValueChange = { renameText = it },
+                                        label = { Text("Profile Name") },
+                                        singleLine = true,
+                                        shape = RoundedCornerShape(10.dp),
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    Button(
+                                        onClick = {
+                                            try {
+                                                profileManager.renameProfile(profile.id, renameText)
+                                                editingProfileId = null
+                                                renameError = null
+                                            } catch (e: Exception) {
+                                                renameError = e.message
+                                            }
+                                        },
+                                        shape = RoundedCornerShape(10.dp),
+                                        colors = ButtonDefaults.buttonColors(containerColor = PrimaryBlue)
+                                    ) {
+                                        Text("Save", fontSize = 13.sp)
+                                    }
+                                    OutlinedButton(
+                                        onClick = { editingProfileId = null },
+                                        shape = RoundedCornerShape(10.dp)
+                                    ) {
+                                        Text("Cancel", fontSize = 13.sp)
+                                    }
                                 }
-                                OutlinedButton(
-                                    onClick = { editingProfileId = null },
-                                    shape = RoundedCornerShape(10.dp)
-                                ) {
-                                    Text("Cancel", fontSize = 13.sp)
+
+                                if (renameError != null) {
+                                    Text(renameError!!, color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
                                 }
-                            }
-                            if (renameError != null) {
-                                Text(renameError!!, color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
                             }
                         } else if (isDeleting) {
                             // Inline Delete Confirmation
@@ -211,6 +222,13 @@ fun ProfileManagerSheet(
                                                 }
                                             }
                                         }
+
+                                        Text(
+                                            text = "Primary: ${CurrencyEngine.getSymbol(profile.currency)} ${profile.currency}",
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
                                     }
                                 }
 
@@ -256,37 +274,50 @@ fun ProfileManagerSheet(
                 }
             }
 
-            // Quick Add Section
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                OutlinedTextField(
-                    value = newProfileName,
-                    onValueChange = {
-                        newProfileName = it
-                        createError = null
-                    },
-                    placeholder = { Text("Add new profile...", fontSize = 14.sp) },
-                    singleLine = true,
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.weight(1f)
-                )
-
-                Button(
-                    onClick = {
-                        try {
-                            profileManager.createProfile(newProfileName)
-                            newProfileName = ""
-                        } catch (e: Exception) {
-                            createError = e.message
+            // Default Currency Selector & Quick Add Section
+            val currentCurrency = activeProfile?.currency ?: CurrencyEngine.DEFAULT_CURRENCY
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                BacklitCurrencySelector(
+                    selectedCurrency = currentCurrency,
+                    onCurrencySelected = { newCurrency ->
+                        activeProfile?.let { active ->
+                            profileManager.updateProfileCurrency(active.id, newCurrency)
                         }
                     },
-                    shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = PrimaryBlue)
+                    label = "DEFAULT CURRENCY"
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                    OutlinedTextField(
+                        value = newProfileName,
+                        onValueChange = {
+                            newProfileName = it
+                            createError = null
+                        },
+                        placeholder = { Text("Add new profile...", fontSize = 14.sp) },
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.weight(1f)
+                    )
+
+                    Button(
+                        onClick = {
+                            try {
+                                profileManager.createProfile(newProfileName, currentCurrency)
+                                newProfileName = ""
+                            } catch (e: Exception) {
+                                createError = e.message
+                            }
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = PrimaryBlue)
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                    }
                 }
             }
 

@@ -35,7 +35,7 @@ object ExportEngine {
     ): String {
         val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.ENGLISH)
         val sb = StringBuilder()
-        sb.append("Date,Type,Category,Description,Amount,Account,PaymentMode,ReferenceNo,SourceFile,Notes\n")
+        sb.append("Date,Type,Category,Description,Amount,Account,PaymentMode,ReferenceNo,SourceFile,Notes,Currency\n")
 
         for (t in transactions) {
             if (t.duplicateStatus == "merged") continue
@@ -51,7 +51,8 @@ object ExportEngine {
                 .append(csvField(t.paymentMode)).append(',')
                 .append(csvField(t.referenceNo)).append(',')
                 .append(csvField(t.sourceFile)).append(',')
-                .append(csvField(t.note)).append('\n')
+                .append(csvField(t.note)).append(',')
+                .append(csvField(t.currency.ifBlank { "INR" })).append('\n')
         }
 
         return sb.toString()
@@ -91,6 +92,7 @@ object ExportEngine {
             obj.put("duplicateReason", t.duplicateReason)
             obj.put("needsReview", t.needsReview)
             obj.put("confidence", t.confidence)
+            obj.put("currency", t.currency.ifBlank { "INR" })
             txnsArray.put(obj)
         }
         root.put("transactions", txnsArray)
@@ -106,6 +108,7 @@ object ExportEngine {
             obj.put("gradientIndex", a.gradientIndex)
             obj.put("lastFour", a.lastFour)
             obj.put("bankName", a.bankName)
+            obj.put("currency", a.currency.ifBlank { "INR" })
             accsArray.put(obj)
         }
         root.put("accounts", accsArray)
@@ -151,27 +154,63 @@ object ExportEngine {
         } catch (e: JSONException) {
             throw BackupFormatException("This file is not a valid Money Tracker backup.")
         }
-        checkBackupVersion(if (root.has("version")) root.optString("version") else null)
+
+        val isWebFormat = root.has("stores") || root.optString("app") == "money-tracker"
+        val stores = if (isWebFormat) root.optJSONObject("stores") else null
+
+        if (!isWebFormat) {
+            checkBackupVersion(if (root.has("version")) root.optString("version") else null)
+        } else {
+            val schemaVersion = root.optInt("schemaVersion", root.optInt("version", 1))
+            if (schemaVersion > 5) {
+                throw BackupFormatException("This backup was made by a newer version of Money Tracker. Update the app to restore it.")
+            }
+        }
 
         val txnsList = mutableListOf<TransactionEntity>()
         val accsList = mutableListOf<AccountEntity>()
         val rulesList = mutableListOf<RuleEntity>()
+        val isoFormat = SimpleDateFormat("yyyy-MM-dd", Locale.ENGLISH)
 
-        if (root.has("transactions")) {
-            val array = root.getJSONArray("transactions")
-            for (i in 0 until array.length()) {
-                val obj = array.getJSONObject(i)
+        val txnsArray = when {
+            stores != null && stores.has("transactions") -> stores.getJSONArray("transactions")
+            root.has("transactions") -> root.getJSONArray("transactions")
+            else -> null
+        }
+
+        if (txnsArray != null) {
+            for (i in 0 until txnsArray.length()) {
+                val obj = txnsArray.getJSONObject(i)
+                var dateMs = System.currentTimeMillis()
+                if (obj.has("date")) {
+                    val rawDate = obj.get("date")
+                    if (rawDate is Number) {
+                        dateMs = rawDate.toLong()
+                    } else if (rawDate is String) {
+                        try {
+                            dateMs = isoFormat.parse(rawDate.take(10))?.time ?: System.currentTimeMillis()
+                        } catch (_: Exception) {}
+                    }
+                }
+
+                val typeStr = obj.optString("type", "EXPENSE").uppercase()
+                val parsedType = try {
+                    TransactionType.valueOf(typeStr)
+                } catch (_: Exception) {
+                    TransactionType.EXPENSE
+                }
+
                 txnsList.add(
                     TransactionEntity(
                         id = obj.optString("id", UUID.randomUUID().toString()),
-                        date = obj.optLong("date", System.currentTimeMillis()),
+                        date = dateMs,
                         description = obj.optString("description", "Imported Transaction"),
                         amount = obj.optDouble("amount", 0.0),
-                        type = try { TransactionType.valueOf(obj.optString("type", "EXPENSE")) } catch (e: Exception) { TransactionType.EXPENSE },
+                        type = parsedType,
                         category = obj.optString("category", "Uncategorized"),
                         accountId = obj.optString("accountId", ""),
-                        accountName = obj.optString("accountName", ""),
-                        note = obj.optString("note", ""),
+                        accountName = obj.optString("accountName", obj.optString("account", "")),
+                        note = obj.optString("note", obj.optString("notes", "")),
                         referenceNo = obj.optString("referenceNo", ""),
                         paymentMode = obj.optString("paymentMode", "Online"),
                         sourceFile = obj.optString("sourceFile", "Backup Restore"),
@@ -182,42 +221,67 @@ object ExportEngine {
                         duplicateConfidence = obj.optInt("duplicateConfidence", 0),
                         duplicateReason = obj.optString("duplicateReason", ""),
                         needsReview = obj.optBoolean("needsReview", false),
-                        confidence = obj.optString("confidence", "high")
+                        confidence = obj.optString("confidence", "high"),
+                        currency = obj.optString("currency", "INR")
                     )
                 )
             }
         }
 
-        if (root.has("accounts")) {
-            val array = root.getJSONArray("accounts")
-            for (i in 0 until array.length()) {
-                val obj = array.getJSONObject(i)
+        val accsArray = when {
+            stores != null && stores.has("accounts") -> stores.getJSONArray("accounts")
+            root.has("accounts") -> root.getJSONArray("accounts")
+            else -> null
+        }
+
+        if (accsArray != null) {
+            for (i in 0 until accsArray.length()) {
+                val obj = accsArray.getJSONObject(i)
+                val rawLastFour = obj.optString("lastFour", obj.optString("accountNumberLast4", ""))
                 accsList.add(
                     AccountEntity(
                         id = obj.optString("id", UUID.randomUUID().toString()),
                         name = obj.optString("name", "Account"),
                         type = obj.optString("type", "Bank Account"),
                         balance = obj.optDouble("balance", 0.0),
-                        creditLimit = obj.optDouble("creditLimit", 0.0),
+                        creditLimit = obj.optDouble("creditLimit", 100000.0),
                         gradientIndex = obj.optInt("gradientIndex", 0),
-                        lastFour = obj.optString("lastFour", ""),
-                        bankName = obj.optString("bankName", "")
+                        lastFour = rawLastFour,
+                        bankName = obj.optString("bankName", ""),
+                        currency = obj.optString("currency", "INR")
                     )
                 )
             }
         }
 
-        if (root.has("rules")) {
-            val array = root.getJSONArray("rules")
-            for (i in 0 until array.length()) {
-                val obj = array.getJSONObject(i)
+        val rulesArray = when {
+            stores != null && stores.has("rules") -> stores.getJSONArray("rules")
+            root.has("rules") -> root.getJSONArray("rules")
+            else -> null
+        }
+
+        if (rulesArray != null) {
+            for (i in 0 until rulesArray.length()) {
+                val obj = rulesArray.getJSONObject(i)
+                val typeStr = obj.optString("type", "EXPENSE").uppercase()
+                val parsedType = try {
+                    TransactionType.valueOf(typeStr)
+                } catch (_: Exception) {
+                    TransactionType.EXPENSE
+                }
+                var createdMs = System.currentTimeMillis()
+                if (obj.has("createdAt")) {
+                    val raw = obj.get("createdAt")
+                    if (raw is Number) createdMs = raw.toLong()
+                }
+
                 rulesList.add(
                     RuleEntity(
                         id = obj.optString("id", "rule_" + System.currentTimeMillis()),
                         pattern = obj.optString("pattern", ""),
                         category = obj.optString("category", "Uncategorized"),
-                        type = try { TransactionType.valueOf(obj.optString("type", "EXPENSE")) } catch (e: Exception) { TransactionType.EXPENSE },
-                        createdAt = obj.optLong("createdAt", System.currentTimeMillis())
+                        type = parsedType,
+                        createdAt = createdMs
                     )
                 )
             }

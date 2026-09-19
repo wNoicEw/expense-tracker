@@ -512,8 +512,13 @@ class MoneyTrackerCalendar {
         txnsByDate[t.date].count++;
         txnsByDate[t.date].items.push(t);
 
-        const amt = parseFloat(t.amount) || 0;
-        if (t.type === 'income') {
+        const rawAmt = parseFloat(t.amount) || 0;
+        const primaryCurrency = (window.profileManager?.getActiveProfile()?.currency) || 'INR';
+        const amt = window.CurrencyEngine
+          ? window.CurrencyEngine.convert(rawAmt, t.currency || primaryCurrency, primaryCurrency)
+          : rawAmt;
+
+        if (t.type === 'income' || t.type === 'refund') {
           txnsByDate[t.date].income += amt;
           monthTotalIncome += amt;
         } else if (t.type === 'expense') {
@@ -523,6 +528,7 @@ class MoneyTrackerCalendar {
       }
     });
 
+    const primaryCurrency = (window.profileManager?.getActiveProfile()?.currency) || 'INR';
     const netCashflow = monthTotalIncome - monthTotalExpense;
 
     let html = `
@@ -554,15 +560,15 @@ class MoneyTrackerCalendar {
           <div class="mt-fin-summary-row">
             <div class="mt-fin-summary-pill income">
               <span class="pill-label">Total Inflow</span>
-              <span class="pill-val">₹ ${monthTotalIncome.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</span>
+              <span class="pill-val">${window.CurrencyEngine ? window.CurrencyEngine.format(monthTotalIncome, primaryCurrency, { maximumFractionDigits: 0 }) : '₹ ' + Math.round(monthTotalIncome)}</span>
             </div>
             <div class="mt-fin-summary-pill expense">
               <span class="pill-label">Total Outflow</span>
-              <span class="pill-val">₹ ${monthTotalExpense.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</span>
+              <span class="pill-val">${window.CurrencyEngine ? window.CurrencyEngine.format(monthTotalExpense, primaryCurrency, { maximumFractionDigits: 0 }) : '₹ ' + Math.round(monthTotalExpense)}</span>
             </div>
             <div class="mt-fin-summary-pill net ${netCashflow >= 0 ? 'positive' : 'negative'}">
               <span class="pill-label">Net Cash Flow</span>
-              <span class="pill-val">${netCashflow >= 0 ? '+' : ''}₹ ${netCashflow.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</span>
+              <span class="pill-val">${netCashflow >= 0 ? '+' : ''}${window.CurrencyEngine ? window.CurrencyEngine.format(netCashflow, primaryCurrency, { maximumFractionDigits: 0 }) : '₹ ' + Math.round(netCashflow)}</span>
             </div>
           </div>
         </div>
@@ -604,13 +610,13 @@ class MoneyTrackerCalendar {
           
           <div class="mt-day-fin-badges">
             ${dayData && dayData.expense > 0 ? `
-              <div class="mt-day-badge expense" title="Expense: ₹${dayData.expense.toLocaleString('en-IN')}">
-                -₹${dayData.expense >= 1000 ? (dayData.expense / 1000).toFixed(1) + 'k' : Math.round(dayData.expense)}
+              <div class="mt-day-badge expense" title="Expense: ${window.CurrencyEngine ? window.CurrencyEngine.format(dayData.expense, primaryCurrency) : '₹' + dayData.expense}">
+                -${window.CurrencyEngine ? window.CurrencyEngine.formatCompact(dayData.expense, primaryCurrency) : '₹' + Math.round(dayData.expense)}
               </div>
             ` : ''}
             ${dayData && dayData.income > 0 ? `
-              <div class="mt-day-badge income" title="Income: ₹${dayData.income.toLocaleString('en-IN')}">
-                +₹${dayData.income >= 1000 ? (dayData.income / 1000).toFixed(1) + 'k' : Math.round(dayData.income)}
+              <div class="mt-day-badge income" title="Income: ${window.CurrencyEngine ? window.CurrencyEngine.format(dayData.income, primaryCurrency) : '₹' + dayData.income}">
+                +${window.CurrencyEngine ? window.CurrencyEngine.formatCompact(dayData.income, primaryCurrency) : '₹' + Math.round(dayData.income)}
               </div>
             ` : ''}
           </div>
@@ -827,8 +833,9 @@ class MoneyTrackerCalendar {
         const amt = parseFloat(t.amount) || 0;
         const isExp = t.type === 'expense';
         const isInc = t.type === 'income';
-        const badgeClass = isExp ? 'expense' : (isInc ? 'income' : 'transfer');
-        const sign = isExp ? '-' : (isInc ? '+' : '');
+        const isRef = t.type === 'refund';
+        const badgeClass = isExp ? 'expense' : (isInc ? 'income' : (isRef ? 'refund' : 'transfer'));
+        const sign = isExp ? '-' : (isInc || isRef ? '+' : '');
 
         return `
           <div class="mt-ledger-item">
@@ -843,7 +850,12 @@ class MoneyTrackerCalendar {
             </div>
             <div class="mt-ledger-right">
               <div class="mt-ledger-amount ${badgeClass}">
-                ${sign}₹ ${amt.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                ${sign}${window.CurrencyEngine ? window.CurrencyEngine.format(amt, t.currency || primaryCurrency) : '₹ ' + amt.toFixed(2)}
+                ${(t.currency && t.currency !== primaryCurrency && window.CurrencyEngine) ? `
+                  <div style="font-size:0.7rem; color:var(--text-dim); font-weight:normal;">
+                    ≈ ${window.CurrencyEngine.format(window.CurrencyEngine.convert(amt, t.currency, primaryCurrency), primaryCurrency)}
+                  </div>
+                ` : ''}
               </div>
               <div class="mt-ledger-actions">
                 <button type="button" class="btn btn-ghost btn-sm btn-icon-only mt-ledger-edit-btn" data-txn-id="${this.escapeHtml(t.id)}" title="Edit Transaction">

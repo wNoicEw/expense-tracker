@@ -7,7 +7,8 @@ import java.util.UUID
 enum class TransactionType {
     EXPENSE,
     INCOME,
-    TRANSFER
+    TRANSFER,
+    REFUND
 }
 
 @Entity(tableName = "transactions")
@@ -32,7 +33,8 @@ data class TransactionEntity(
     val duplicateConfidence: Int = 0,
     val duplicateReason: String = "",
     val needsReview: Boolean = false,
-    val confidence: String = "high" // "high", "learned", "low"
+    val confidence: String = "high", // "high", "learned", "low"
+    val currency: String = "INR"
 )
 
 @Entity(tableName = "accounts")
@@ -45,7 +47,8 @@ data class AccountEntity(
     val creditLimit: Double = 0.0,
     val gradientIndex: Int = 0,
     val lastFour: String = "",
-    val bankName: String = ""
+    val bankName: String = "",
+    val currency: String = "INR"
 )
 
 @Entity(tableName = "rules")

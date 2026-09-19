@@ -14,27 +14,87 @@ class App {
     this.categoryFilter = 'all';
     this.accountFilter = 'all';
     this.typeFilter = 'all';
+    this.currencyFilter = 'all';
     this.chartViewMode = 'cumulative';
     this.theme = 'dark';
     this.txnViewMode = 'table';
     this._modalFocusReturn = new Map();
   }
 
-  // --- MODAL ACCESSIBILITY (focus in on open, focus restore on close) ---
+  // --- MODAL ACCESSIBILITY (focus trapping, focus in on open, focus restore on close) ---
+  trapModalFocus(modal) {
+    if (!modal) return;
+    this.releaseModalFocus(modal);
+
+    const focusableSelectors = 'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+    const keyHandler = (e) => {
+      if (e.key !== 'Tab') return;
+      const focusables = Array.from(modal.querySelectorAll(focusableSelectors)).filter(
+        el => el.offsetParent !== null && !el.hasAttribute('disabled') && getComputedStyle(el).visibility !== 'hidden'
+      );
+      if (focusables.length === 0) {
+        e.preventDefault();
+        return;
+      }
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+
+      if (e.shiftKey) {
+        if (document.activeElement === first || !modal.contains(document.activeElement)) {
+          e.preventDefault();
+          last.focus();
+        }
+      } else {
+        if (document.activeElement === last || !modal.contains(document.activeElement)) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+    };
+
+    modal._focusTrapHandler = keyHandler;
+    modal.addEventListener('keydown', keyHandler);
+  }
+
+  releaseModalFocus(modal) {
+    if (!modal || !modal._focusTrapHandler) return;
+    modal.removeEventListener('keydown', modal._focusTrapHandler);
+    modal._focusTrapHandler = null;
+  }
+
   focusModal(modal) {
     if (!modal) return;
     this._modalFocusReturn.set(modal.id, document.activeElement);
+    this.trapModalFocus(modal);
     const dialogEl = modal.querySelector('[role="dialog"]') || modal;
-    const focusable = dialogEl.querySelector('input, select, textarea, button, [tabindex]');
+    const focusable = dialogEl.querySelector('input:not([disabled]), select:not([disabled]), textarea:not([disabled]), button:not([disabled]), [tabindex]:not([tabindex="-1"])');
     (focusable || dialogEl).focus();
   }
 
   restoreModalFocus(modal) {
     if (!modal) return;
+    this.releaseModalFocus(modal);
     const returnEl = this._modalFocusReturn.get(modal.id);
     this._modalFocusReturn.delete(modal.id);
     if (returnEl && typeof returnEl.focus === 'function' && document.contains(returnEl)) {
       returnEl.focus();
+    }
+  }
+
+  // --- SAFE LUCIDE ICON HYDRATION ---
+  hydrateIcons(root = null) {
+    const lucideObj = window.lucide || (typeof lucide !== 'undefined' ? lucide : null);
+    if (lucideObj && typeof lucideObj.createIcons === 'function') {
+      try {
+        if (root) {
+          lucideObj.createIcons({ root });
+        } else {
+          lucideObj.createIcons();
+        }
+      } catch (err) {
+        console.warn('Lucide icon hydration warning:', err);
+      }
     }
   }
 
@@ -105,12 +165,17 @@ class App {
       // If no active profile exists, show the profile chooser and halt the app boot.
       if (!window.profileManager.hasActiveProfile()) {
         this.showProfileChooser();
-        if (window.lucide) lucide.createIcons();
+        this.hydrateIcons();
         return; // Don't init DB or render anything until a profile is chosen.
       }
 
       // Profile is set — update the sidebar profile pill
       this.updateSidebarProfilePill();
+
+      // Sync daily exchange rates in background (once per calendar day)
+      if (window.CurrencyEngine) {
+        window.CurrencyEngine.checkAndFetchDailyRates().catch(() => {});
+      }
 
       // Initialize IndexedDB (uses active profile's isolated namespace)
       await window.db.init();
@@ -136,9 +201,7 @@ class App {
       await this.refreshAllViews();
 
       // Lucide icons initialization
-      if (window.lucide) {
-        lucide.createIcons();
-      }
+      this.hydrateIcons();
 
       this.showToast('App initialized offline. All data is securely stored on your device.', 'info');
     } catch (err) {
@@ -176,9 +239,7 @@ class App {
       }
     }
 
-    if (window.lucide) {
-      lucide.createIcons();
-    }
+    this.hydrateIcons();
 
     if (reRenderCharts) {
       this.refreshCurrentTab();
@@ -195,14 +256,30 @@ class App {
       });
     });
 
-    // Mobile sidebar toggle
+    // Mobile sidebar toggle & backdrop
     const mobileBtn = document.getElementById('mobileMenuToggle');
     const sidebar = document.querySelector('.sidebar');
-    if (mobileBtn && sidebar) {
-      mobileBtn.addEventListener('click', () => {
-        const open = sidebar.classList.toggle('open');
+    const backdrop = document.getElementById('sidebarBackdrop');
+
+    const setSidebarOpen = (open) => {
+      if (sidebar) sidebar.classList.toggle('open', open);
+      if (backdrop) backdrop.classList.toggle('active', open);
+      if (mobileBtn) {
         mobileBtn.setAttribute('aria-expanded', String(open));
         mobileBtn.setAttribute('aria-label', open ? 'Close navigation menu' : 'Open navigation menu');
+      }
+    };
+
+    if (mobileBtn && sidebar) {
+      mobileBtn.addEventListener('click', () => {
+        const isOpen = sidebar.classList.contains('open');
+        setSidebarOpen(!isOpen);
+      });
+    }
+
+    if (backdrop) {
+      backdrop.addEventListener('click', () => {
+        setSidebarOpen(false);
       });
     }
 
@@ -269,6 +346,8 @@ class App {
     // Close mobile menu if open
     const sidebar = document.querySelector('.sidebar');
     if (sidebar) sidebar.classList.remove('open');
+    const backdrop = document.getElementById('sidebarBackdrop');
+    if (backdrop) backdrop.classList.remove('active');
     const menuBtn = document.getElementById('mobileMenuToggle');
     if (menuBtn) {
       menuBtn.setAttribute('aria-expanded', 'false');
@@ -278,9 +357,7 @@ class App {
     // Refresh view specific data
     this.refreshCurrentTab();
 
-    if (window.lucide) {
-      lucide.createIcons();
-    }
+    this.hydrateIcons();
   }
 
   async refreshAllViews() {
@@ -315,13 +392,14 @@ class App {
       case 'reports':
         await this.renderReportsView();
         break;
+      case 'currency':
+        await this.renderCurrencyView();
+        break;
       case 'import':
         await this.renderImportView();
         break;
     }
-    if (window.lucide) {
-      lucide.createIcons();
-    }
+    this.hydrateIcons();
   }
 
   async updateSidebarBadges() {
@@ -385,9 +463,16 @@ class App {
     }
     const accounts = await window.accountsManager.getAccountsWithMetrics();
 
+    const active = window.profileManager?.getActiveProfile();
+    const primaryCurrency = (active && active.currency) || 'INR';
+
     let totalNetWorth = 0;
     accounts.forEach(a => {
-      totalNetWorth += a.computedBalance;
+      const accCurr = a.currency || primaryCurrency;
+      const converted = window.CurrencyEngine
+        ? window.CurrencyEngine.convert(a.computedBalance, accCurr, primaryCurrency)
+        : a.computedBalance;
+      totalNetWorth += converted;
     });
 
     const kpiBalance = document.getElementById('kpiTotalBalance');
@@ -395,9 +480,9 @@ class App {
     const kpiExpense = document.getElementById('kpiTotalExpense');
     const kpiSavings = document.getElementById('kpiSavingsRate');
 
-    if (kpiBalance) kpiBalance.textContent = '₹ ' + totalNetWorth.toLocaleString('en-IN', { maximumFractionDigits: 0 });
-    if (kpiIncome) kpiIncome.textContent = '₹ ' + budgetStatus.totalIncome.toLocaleString('en-IN', { maximumFractionDigits: 0 });
-    if (kpiExpense) kpiExpense.textContent = '₹ ' + budgetStatus.totalExpense.toLocaleString('en-IN', { maximumFractionDigits: 0 });
+    if (kpiBalance) kpiBalance.textContent = window.CurrencyEngine ? window.CurrencyEngine.format(totalNetWorth, primaryCurrency, { maximumFractionDigits: 0 }) : '₹ ' + Math.round(totalNetWorth);
+    if (kpiIncome) kpiIncome.textContent = window.CurrencyEngine ? window.CurrencyEngine.format(budgetStatus.totalIncome, primaryCurrency, { maximumFractionDigits: 0 }) : '₹ ' + Math.round(budgetStatus.totalIncome);
+    if (kpiExpense) kpiExpense.textContent = window.CurrencyEngine ? window.CurrencyEngine.format(budgetStatus.totalExpense, primaryCurrency, { maximumFractionDigits: 0 }) : '₹ ' + Math.round(budgetStatus.totalExpense);
     if (kpiSavings) kpiSavings.textContent = `${budgetStatus.savingsRate}%`;
 
     // Hero Flow Bar & Labels
@@ -406,8 +491,8 @@ class App {
     const heroBarIn = document.getElementById('heroFlowBarIncome');
     const heroBarOut = document.getElementById('heroFlowBarExpense');
 
-    if (heroInflow) heroInflow.textContent = 'Inflow: ₹ ' + budgetStatus.totalIncome.toLocaleString('en-IN');
-    if (heroOutflow) heroOutflow.textContent = 'Outflow: ₹ ' + budgetStatus.totalExpense.toLocaleString('en-IN');
+    if (heroInflow) heroInflow.textContent = 'Inflow: ' + (window.CurrencyEngine ? window.CurrencyEngine.format(budgetStatus.totalIncome, primaryCurrency) : '₹ ' + budgetStatus.totalIncome);
+    if (heroOutflow) heroOutflow.textContent = 'Outflow: ' + (window.CurrencyEngine ? window.CurrencyEngine.format(budgetStatus.totalExpense, primaryCurrency) : '₹ ' + budgetStatus.totalExpense);
 
     const totalCashflow = budgetStatus.totalIncome + budgetStatus.totalExpense;
     if (heroBarIn && heroBarOut) {
@@ -450,8 +535,13 @@ class App {
               <td><span class="badge-account">${this.escape(acc ? acc.name : 'Account')}</span></td>
               <td style="text-align:right;">
                 <span class="amount-display ${t.type}">
-                  ${t.type === 'income' ? '+' : '-'} ₹ ${Number(t.amount).toLocaleString('en-IN')}
+                  ${t.type === 'income' || t.type === 'refund' ? '+' : '-'} ${window.CurrencyEngine ? window.CurrencyEngine.format(t.amount, t.currency || primaryCurrency) : '₹ ' + Number(t.amount).toLocaleString('en-IN')}
                 </span>
+                ${(t.currency && t.currency !== primaryCurrency && window.CurrencyEngine) ? `
+                  <div style="font-size:0.7rem; color:var(--text-dim); font-weight:normal;">
+                    ≈ ${window.CurrencyEngine.format(window.CurrencyEngine.convert(t.amount, t.currency, primaryCurrency), primaryCurrency)}
+                  </div>
+                ` : ''}
               </td>
             </tr>
           `;
@@ -532,7 +622,7 @@ class App {
               </div>
               <div style="display:flex; align-items:center; gap:8px;">
                 <span style="font-size:0.75rem; color:#94a3b8;">${percent}%</span>
-                <span class="cat-amount">₹ ${Number(amt).toLocaleString('en-IN')}</span>
+                <span class="cat-amount">${window.CurrencyEngine ? window.CurrencyEngine.format(amt, primaryCurrency) : '₹ ' + Number(amt).toLocaleString('en-IN')}</span>
               </div>
             </div>
           `;
@@ -588,7 +678,7 @@ class App {
               </div>
             </div>
             <div style="font-size:1.4rem; font-weight:700; font-family:var(--font-mono); color:#f59e0b;">
-              ₹ ${Number(t.amount).toLocaleString('en-IN')}
+              ${window.CurrencyEngine ? window.CurrencyEngine.format(t.amount, t.currency || primaryCurrency) : '₹ ' + Number(t.amount).toLocaleString('en-IN')}
             </div>
           </div>
 
@@ -611,11 +701,12 @@ class App {
                 <option value="expense" ${t.type === 'expense' ? 'selected' : ''}>Expense (Debit)</option>
                 <option value="income" ${t.type === 'income' ? 'selected' : ''}>Income (Credit)</option>
                 <option value="transfer" ${t.type === 'transfer' ? 'selected' : ''}>Transfer</option>
+                <option value="refund" ${t.type === 'refund' ? 'selected' : ''}>Refund (Reversal)</option>
               </select>
             </div>
 
             <div style="align-self:flex-end;">
-              <button class="btn btn-primary" onclick="app.resolveUndetectedSingle('${t.id}')">
+              <button class="btn btn-primary" data-id="${this.escape(t.id)}" onclick="app.resolveUndetectedSingle(this.dataset.id)">
                 <i data-lucide="sparkles" style="width:14px; height:14px;"></i> Save &amp; Teach AI
               </button>
             </div>
@@ -691,7 +782,7 @@ class App {
                 <span class="badge-tag ${r.type}">${this.escape(r.type)}</span>
               </div>
             </div>
-            <button class="btn btn-ghost btn-sm btn-icon-only" onclick="app.deleteRule('${r.id}')" title="Delete Rule">
+            <button class="btn btn-ghost btn-sm btn-icon-only" data-id="${this.escape(r.id)}" onclick="app.deleteRule(this.dataset.id)" title="Delete Rule">
               <i data-lucide="trash-2" style="width:14px; height:14px; color:#f43f5e;"></i>
             </button>
           </div>
@@ -705,6 +796,63 @@ class App {
       await window.db.delete('rules', ruleId);
       this.showToast('Rule deleted', 'info');
       await this.renderRulesView();
+    }
+  }
+
+  async openAddRuleModal() {
+    const modal = document.getElementById('addRuleModal');
+    if (!modal) return;
+    const catSelect = document.getElementById('ruleCategorySelect');
+    if (catSelect) {
+      const categories = (await window.db.getAll('categories')).filter(c => c.name !== 'Uncategorized');
+      catSelect.innerHTML = categories.map(c => `<option value="${this.escape(c.name)}">${this.escape(c.name)}</option>`).join('');
+    }
+    const patternInput = document.getElementById('rulePatternInput');
+    if (patternInput) {
+      patternInput.value = '';
+    }
+    const errEl = document.getElementById('addRuleError');
+    if (errEl) errEl.style.display = 'none';
+
+    modal.style.display = 'flex';
+    this.hydrateIcons(modal);
+    if (patternInput) patternInput.focus();
+  }
+
+  closeAddRuleModal() {
+    const modal = document.getElementById('addRuleModal');
+    if (modal) modal.style.display = 'none';
+  }
+
+  async saveCustomRule() {
+    const patternInput = document.getElementById('rulePatternInput');
+    const catSelect = document.getElementById('ruleCategorySelect');
+    const typeSelect = document.getElementById('ruleTypeSelect');
+    const errEl = document.getElementById('addRuleError');
+
+    const pattern = (patternInput?.value || '').trim();
+    const category = catSelect?.value || 'General';
+    const type = typeSelect?.value || 'expense';
+
+    if (!pattern) {
+      if (errEl) {
+        errEl.textContent = 'Please enter a keyword pattern or UPI ID';
+        errEl.style.display = 'block';
+      }
+      return;
+    }
+
+    try {
+      const { reclassifiedCount } = await window.categorizer.learnRuleAndReclassify(pattern, category, type);
+      this.closeAddRuleModal();
+      this.showToast(`Custom rule saved! ${reclassifiedCount > 0 ? `Reclassified ${reclassifiedCount} existing transaction${reclassifiedCount > 1 ? 's' : ''}.` : ''}`, 'success');
+      await this.refreshAllViews();
+    } catch (err) {
+      console.error('Error saving rule:', err);
+      if (errEl) {
+        errEl.textContent = 'Failed to save rule: ' + err.message;
+        errEl.style.display = 'block';
+      }
     }
   }
 
@@ -743,6 +891,15 @@ class App {
     if (typeSelect) {
       typeSelect.addEventListener('change', (e) => {
         this.typeFilter = e.target.value;
+        this.transactionsPage = 1;
+        this.renderTransactionsTable();
+      });
+    }
+
+    const curSelect = document.getElementById('txnCurrencyFilter');
+    if (curSelect) {
+      curSelect.addEventListener('change', (e) => {
+        this.currencyFilter = e.target.value;
         this.transactionsPage = 1;
         this.renderTransactionsTable();
       });
@@ -786,6 +943,11 @@ class App {
 
       if (this.categoryFilter !== 'all' && t.category !== this.categoryFilter) return false;
       if (this.accountFilter !== 'all' && t.accountId !== this.accountFilter) return false;
+
+      if (this.currencyFilter && this.currencyFilter !== 'all') {
+        const txnCur = (t.currency || 'INR').toUpperCase();
+        if (txnCur !== this.currencyFilter.toUpperCase()) return false;
+      }
 
       if (this.typeFilter === 'needs_review') {
         if (!t.needsReview && t.category !== 'Uncategorized') return false;
@@ -841,15 +1003,20 @@ class App {
               <td><span class="badge-tag ${t.type}">${this.escape(t.type)}</span></td>
               <td style="text-align:right;">
                 <span class="amount-display ${t.type}">
-                  ${t.type === 'income' ? '+' : '-'} ₹ ${Number(t.amount).toLocaleString('en-IN')}
+                  ${t.type === 'income' || t.type === 'refund' ? '+' : '-'} ${window.CurrencyEngine ? window.CurrencyEngine.format(t.amount, t.currency || primaryCurrency) : '₹ ' + Number(t.amount).toLocaleString('en-IN')}
                 </span>
+                ${(t.currency && t.currency !== primaryCurrency && window.CurrencyEngine) ? `
+                  <div style="font-size:0.7rem; color:var(--text-dim); font-weight:normal;">
+                    ≈ ${window.CurrencyEngine.format(window.CurrencyEngine.convert(t.amount, t.currency, primaryCurrency), primaryCurrency)}
+                  </div>
+                ` : ''}
               </td>
               <td style="text-align:center;">
                 <div style="display:inline-flex; align-items:center; gap:4px;">
-                  <button class="btn btn-ghost btn-sm btn-icon-only" onclick="app.openEditTxnModal('${t.id}')" title="Edit Transaction">
+                  <button class="btn btn-ghost btn-sm btn-icon-only" data-id="${this.escape(t.id)}" onclick="app.openEditTxnModal(this.dataset.id)" title="Edit Transaction">
                     <i data-lucide="edit-3" style="width:14px; height:14px; color:#3b82f6;"></i>
                   </button>
-                  <button class="btn btn-ghost btn-sm btn-icon-only" onclick="app.deleteTransaction('${t.id}')" title="Delete">
+                  <button class="btn btn-ghost btn-sm btn-icon-only" data-id="${this.escape(t.id)}" onclick="app.deleteTransaction(this.dataset.id)" title="Delete">
                     <i data-lucide="trash-2" style="width:14px; height:14px; color:#f43f5e;"></i>
                   </button>
                 </div>
@@ -857,6 +1024,9 @@ class App {
             </tr>
           `;
         }).join('');
+        if (tbody) {
+          this.hydrateIcons(tbody);
+        }
       }
     }
 
@@ -929,7 +1099,7 @@ class App {
       if (calContainer) calContainer.style.display = 'none';
       this.renderTransactionsTable();
     }
-    if (window.lucide) lucide.createIcons();
+    this.hydrateIcons();
   }
 
   async renderTxnCalendar() {
@@ -1021,13 +1191,13 @@ class App {
             </div>
 
             <div style="display:flex; justify-content:flex-end; gap:8px; flex-wrap:wrap;">
-              <button class="btn btn-ghost btn-sm" onclick="app.dismissDuplicate('${pair.tx1.id}', '${pair.tx2.id}')">
+              <button class="btn btn-ghost btn-sm" data-id1="${this.escape(pair.tx1.id)}" data-id2="${this.escape(pair.tx2.id)}" onclick="app.dismissDuplicate(this.dataset.id1, this.dataset.id2)">
                 Mark as Separate
               </button>
-              <button class="btn btn-danger btn-sm" onclick="app.deleteDuplicateSingle('${pair.tx2.id}', '${pair.tx1.id}')">
+              <button class="btn btn-danger btn-sm" data-id1="${this.escape(pair.tx2.id)}" data-id2="${this.escape(pair.tx1.id)}" onclick="app.deleteDuplicateSingle(this.dataset.id1, this.dataset.id2)">
                 Keep Left Only
               </button>
-              <button class="btn btn-primary btn-sm" onclick="app.mergeDuplicatePair('${pair.tx1.id}', '${pair.tx2.id}')">
+              <button class="btn btn-primary btn-sm" data-id1="${this.escape(pair.tx1.id)}" data-id2="${this.escape(pair.tx2.id)}" onclick="app.mergeDuplicatePair(this.dataset.id1, this.dataset.id2)">
                 <i data-lucide="merge" style="width:14px; height:14px;"></i> Merge & Enrich
               </button>
             </div>
@@ -1124,7 +1294,7 @@ class App {
         .sort((a, b) => DateUtil.compareTxnDesc(a, b));
 
       const totalSpend = accTxns.filter(t => t.type === 'expense').reduce((s, t) => s + Math.abs(t.amount || 0), 0);
-      const totalCredits = accTxns.filter(t => t.type === 'income' || t.type === 'transfer').reduce((s, t) => s + Math.abs(t.amount || 0), 0);
+      const totalCredits = accTxns.filter(t => t.type === 'income' || t.type === 'transfer' || t.type === 'refund').reduce((s, t) => s + Math.abs(t.amount || 0), 0);
 
       // This Month Spend
       const thisMonthTxns = accTxns.filter(t => {
@@ -1158,7 +1328,8 @@ class App {
           <!-- Physical Card Face -->
           <div class="credit-card-ui ${cardClass}" 
                style="${acc.color ? `background: linear-gradient(135deg, ${acc.color} 0%, rgba(15,23,42,0.95) 100%);` : ''}"
-               onclick="app.toggleAccountExpand('${acc.id}')"
+               data-id="${this.escape(acc.id)}"
+               onclick="app.toggleAccountExpand(this.dataset.id)"
                title="Click to view full card details & transactions">
             
             <div class="card-top">
@@ -1170,10 +1341,10 @@ class App {
                 </div>
               </div>
               <div style="display:flex; align-items:center; gap:8px;">
-                <button class="btn-card-action" onclick="event.stopPropagation(); app.openAccountModal('${acc.id}')" title="Edit Account" style="background:rgba(255,255,255,0.18); border:none; color:#fff; border-radius:6px; width:28px; height:28px; display:flex; align-items:center; justify-content:center; cursor:pointer; transition:0.2s;">
+                <button class="btn-card-action" data-id="${this.escape(acc.id)}" onclick="event.stopPropagation(); app.openAccountModal(this.dataset.id)" title="Edit Account" style="background:rgba(255,255,255,0.18); border:none; color:#fff; border-radius:6px; width:28px; height:28px; display:flex; align-items:center; justify-content:center; cursor:pointer; transition:0.2s;">
                   <i data-lucide="edit-2" style="width:14px; height:14px;"></i>
                 </button>
-                <button class="btn-card-action" onclick="event.stopPropagation(); app.deleteAccount('${acc.id}')" title="Delete Account" style="background:rgba(239,68,68,0.3); border:none; color:#fff; border-radius:6px; width:28px; height:28px; display:flex; align-items:center; justify-content:center; cursor:pointer; transition:0.2s;">
+                <button class="btn-card-action" data-id="${this.escape(acc.id)}" onclick="event.stopPropagation(); app.deleteAccount(this.dataset.id)" title="Delete Account" style="background:rgba(239,68,68,0.3); border:none; color:#fff; border-radius:6px; width:28px; height:28px; display:flex; align-items:center; justify-content:center; cursor:pointer; transition:0.2s;">
                   <i data-lucide="trash-2" style="width:14px; height:14px;"></i>
                 </button>
                 <div class="card-chip"></div>
@@ -1272,7 +1443,8 @@ class App {
               ${recentTxns.length > 0 ? recentTxns.map(t => {
                 const isExp = t.type === 'expense';
                 const isTrf = t.type === 'transfer';
-                const amtCol = isExp ? '#f43f5e' : (isTrf ? '#8b5cf6' : '#10b981');
+                const isRefund = t.type === 'refund';
+                const amtCol = isExp ? '#f43f5e' : (isTrf ? '#8b5cf6' : (isRefund ? '#06b6d4' : '#10b981'));
                 const amtSign = isExp ? '-' : '+';
                 return `
                   <div class="card-drawer-txn-item">
@@ -1309,7 +1481,7 @@ class App {
       `;
     }).join('');
 
-    if (window.lucide) lucide.createIcons();
+    this.hydrateIcons();
   }
 
   toggleAccountExpand(accountId) {
@@ -1324,7 +1496,7 @@ class App {
     });
 
     wrapper.classList.toggle('expanded', !isExpanded);
-    if (window.lucide) lucide.createIcons();
+    this.hydrateIcons();
   }
 
   openManualTxnModalWithAccount(accountId) {
@@ -1373,7 +1545,7 @@ class App {
         if (cardDetailsRow) cardDetailsRow.style.display = isCard ? 'flex' : 'none';
 
         modal.classList.add('active');
-        if (window.lucide) lucide.createIcons();
+        this.hydrateIcons();
         this.focusModal(modal);
       });
     } else {
@@ -1392,7 +1564,7 @@ class App {
       if (cardDetailsRow) cardDetailsRow.style.display = 'none';
 
       modal.classList.add('active');
-      if (window.lucide) lucide.createIcons();
+      this.hydrateIcons();
       this.focusModal(modal);
     }
   }
@@ -1748,7 +1920,7 @@ class App {
     }
 
     if (modal) modal.classList.add('active');
-    if (window.lucide) window.lucide.createIcons();
+    this.hydrateIcons();
     setTimeout(() => {
       this.focusModal(modal);
     }, 150);
@@ -1779,7 +1951,7 @@ class App {
       inputEl.type = 'password';
       if (eyeIcon) eyeIcon.setAttribute('data-lucide', 'eye');
     }
-    if (window.lucide) window.lucide.createIcons();
+    this.hydrateIcons();
   }
 
   async submitPdfPassword() {
@@ -1810,7 +1982,7 @@ class App {
       if (btn) {
         btn.disabled = false;
         btn.innerHTML = '<i data-lucide="unlock" style="width:16px; height:16px;"></i> Unlock &amp; Import';
-        if (window.lucide) window.lucide.createIcons();
+        this.hydrateIcons();
       }
       if (e && e.isPasswordProtected) {
         if (errEl) {
@@ -1844,13 +2016,16 @@ class App {
   // --- REPORTS VIEW ---
   async renderReportsView() {
     const budgetStatus = await window.budgetsManager.getBudgetsStatus();
+    const active = window.profileManager?.getActiveProfile();
+    const primaryCurrency = (active && active.currency) || 'INR';
+
     const rIncome = document.getElementById('reportIncomeVal');
     const rExpense = document.getElementById('reportExpenseVal');
     const rSavings = document.getElementById('reportSavingsVal');
 
-    if (rIncome) rIncome.textContent = '₹ ' + budgetStatus.totalIncome.toLocaleString('en-IN');
-    if (rExpense) rExpense.textContent = '₹ ' + budgetStatus.totalExpense.toLocaleString('en-IN');
-    if (rSavings) rSavings.textContent = '₹ ' + budgetStatus.netSavings.toLocaleString('en-IN');
+    if (rIncome) rIncome.textContent = window.CurrencyEngine ? window.CurrencyEngine.format(budgetStatus.totalIncome, primaryCurrency) : '₹ ' + budgetStatus.totalIncome.toLocaleString('en-IN');
+    if (rExpense) rExpense.textContent = window.CurrencyEngine ? window.CurrencyEngine.format(budgetStatus.totalExpense, primaryCurrency) : '₹ ' + budgetStatus.totalExpense.toLocaleString('en-IN');
+    if (rSavings) rSavings.textContent = window.CurrencyEngine ? window.CurrencyEngine.format(budgetStatus.netSavings, primaryCurrency) : '₹ ' + budgetStatus.netSavings.toLocaleString('en-IN');
   }
 
   // --- MANUAL & EDIT TRANSACTION MODALS ---
@@ -1866,6 +2041,17 @@ class App {
         this.openManualTxnModal();
       });
     }
+
+    // Live Currency Conversion Hint Listeners
+    const mAmount = document.getElementById('mTxnAmount');
+    const mCurrency = document.getElementById('mTxnCurrency');
+    const eAmount = document.getElementById('eTxnAmount');
+    const eCurrency = document.getElementById('eTxnCurrency');
+
+    if (mAmount) mAmount.addEventListener('input', () => this.updateTxnConversionHint('m'));
+    if (mCurrency) mCurrency.addEventListener('change', () => this.updateTxnConversionHint('m'));
+    if (eAmount) eAmount.addEventListener('input', () => this.updateTxnConversionHint('e'));
+    if (eCurrency) eCurrency.addEventListener('change', () => this.updateTxnConversionHint('e'));
 
     const closeModal = () => {
       if (modal) modal.classList.remove('active');
@@ -1897,11 +2083,16 @@ class App {
           return;
         }
 
+        const active = window.profileManager?.getActiveProfile();
+        const primaryCurrency = (active && active.currency) || 'INR';
+        const currency = document.getElementById('mTxnCurrency')?.value || primaryCurrency;
+
         const newTxn = {
           id: 'txn_manual_' + Date.now(),
           date,
           time,
           amount,
+          currency,
           type,
           category,
           needsReview: false,
@@ -1975,8 +2166,13 @@ class App {
           return;
         }
 
+        const active = window.profileManager?.getActiveProfile();
+        const primaryCurrency = (active && active.currency) || 'INR';
+        const currency = document.getElementById('eTxnCurrency')?.value || txn.currency || primaryCurrency;
+
         txn.type = type;
         txn.amount = amount;
+        txn.currency = currency;
         txn.date = date;
         txn.time = time;
         txn.category = category;
@@ -2042,8 +2238,16 @@ class App {
       }
     }
 
+    const active = window.profileManager?.getActiveProfile();
+    const primaryCurrency = (active && active.currency) || 'INR';
+    const currSelect = document.getElementById('mTxnCurrency');
+    if (currSelect) {
+      currSelect.value = primaryCurrency;
+    }
+    this.updateTxnConversionHint('m');
+
     modal.classList.add('active');
-    if (window.lucide) lucide.createIcons();
+    this.hydrateIcons();
     this.focusModal(modal);
   }
 
@@ -2097,7 +2301,7 @@ class App {
     }
 
     if (catSelect) {
-      catSelect.innerHTML = categories.map(c => `<option value="${c.name}">${c.name}</option>`).join('');
+      catSelect.innerHTML = categories.map(c => `<option value="${this.escape(c.name)}">${this.escape(c.name)}</option>`).join('');
       if (txn.category) catSelect.value = txn.category;
     }
 
@@ -2154,9 +2358,17 @@ class App {
     if (refInput) refInput.value = txn.referenceNo || '';
     if (notesInput) notesInput.value = txn.notes || '';
 
+    const active = window.profileManager?.getActiveProfile();
+    const primaryCurrency = (active && active.currency) || 'INR';
+    const currSelect = document.getElementById('eTxnCurrency');
+    if (currSelect) {
+      currSelect.value = txn.currency || primaryCurrency;
+    }
+    this.updateTxnConversionHint('e');
+
     if (modal) {
       modal.classList.add('active');
-      if (window.lucide) lucide.createIcons();
+      this.hydrateIcons();
       this.focusModal(modal);
     }
   }
@@ -2180,7 +2392,7 @@ class App {
 
     const catSelect = document.getElementById('mTxnCategory');
     if (catSelect) {
-      catSelect.innerHTML = categories.map(c => `<option value="${c.name}">${c.name}</option>`).join('');
+      catSelect.innerHTML = categories.map(c => `<option value="${this.escape(c.name)}">${this.escape(c.name)}</option>`).join('');
     }
 
     const dateInput = document.getElementById('mTxnDate');
@@ -2200,6 +2412,71 @@ class App {
     if (screen) {
       screen.style.display = 'flex';
       this.renderProfileChooserCards();
+      this.renderChooserCurrencyCards();
+
+      const chooserInput = document.getElementById('newProfileNameInput');
+      if (chooserInput && !chooserInput.dataset.scrollBound) {
+        chooserInput.dataset.scrollBound = '1';
+        chooserInput.addEventListener('focus', () => {
+          setTimeout(() => {
+            chooserInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }, 300);
+        });
+      }
+    }
+  }
+
+  renderChooserCurrencyCards() {
+    const grid = document.getElementById('chooserCurrencyGrid');
+    if (!grid) return;
+    const currencies = window.CurrencyEngine ? window.CurrencyEngine.getSupportedCurrencies() : [];
+    if (!this.chooserCurrency) this.chooserCurrency = 'INR';
+
+    grid.innerHTML = currencies.map(c => `
+      <div class="currency-backlight-card ${c.code === this.chooserCurrency ? 'selected' : ''}"
+           role="radio"
+           aria-checked="${c.code === this.chooserCurrency}"
+           tabindex="0"
+           onclick="app.selectChooserCurrency('${c.code}')"
+           onkeydown="if(event.key==='Enter'||event.key===' ') app.selectChooserCurrency('${c.code}')"
+           title="${c.name} (${c.code})">
+        <div class="cbc-top-row">
+          <span class="cbc-flag">${c.flag || ''}</span>
+          <span class="cbc-badge" aria-hidden="true">
+            <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+          </span>
+        </div>
+        <div class="cbc-symbol">${c.symbol}</div>
+        <div class="cbc-code">${c.code}</div>
+        <div class="cbc-name">${c.name.split(' ')[0]}</div>
+      </div>
+    `).join('');
+  }
+
+  selectChooserCurrency(code) {
+    this.chooserCurrency = code;
+    this.renderChooserCurrencyCards();
+  }
+
+  updateTxnConversionHint(prefix) {
+    const hint = document.getElementById(`${prefix}TxnConversionHint`);
+    const amountInput = document.getElementById(`${prefix}TxnAmount`);
+    const currencySelect = document.getElementById(`${prefix}TxnCurrency`);
+    if (!hint || !amountInput || !currencySelect) return;
+
+    const amount = parseFloat(amountInput.value) || 0;
+    const currency = currencySelect.value;
+    const active = window.profileManager?.getActiveProfile();
+    const primaryCurrency = (active && active.currency) || 'INR';
+
+    if (currency !== primaryCurrency && amount > 0 && window.CurrencyEngine) {
+      const converted = window.CurrencyEngine.convert(amount, currency, primaryCurrency);
+      const rate = window.CurrencyEngine.getExchangeRate(currency, primaryCurrency);
+      hint.innerHTML = `<span>≈ ${window.CurrencyEngine.format(converted, primaryCurrency)}</span> <span style="opacity:0.65; margin-left:auto;">1 ${currency} = ${rate.toFixed(4)} ${primaryCurrency}</span>`;
+      hint.style.display = 'flex';
+    } else {
+      hint.style.display = 'none';
+      hint.innerHTML = '';
     }
   }
 
@@ -2223,7 +2500,7 @@ class App {
       `).join('');
     }
 
-    if (window.lucide) lucide.createIcons();
+    this.hydrateIcons();
   }
 
   selectProfile(id) {
@@ -2240,7 +2517,7 @@ class App {
       return;
     }
     try {
-      window.profileManager.createProfile(name); // triggers reload
+      window.profileManager.createProfile(name, this.chooserCurrency || 'INR'); // triggers reload
     } catch (err) {
       if (errorEl) { errorEl.textContent = err.message; errorEl.style.display = 'block'; }
     }
@@ -2282,16 +2559,58 @@ class App {
     this.renderProfileChooserCards();
   }
 
-  // --- PROFILE MANAGER MODAL (in-app switching) ---
   openProfileModal() {
     const modal = document.getElementById('profileManagerModal');
     if (!modal) return;
     this.renderProfileManagerList();
-    if (window.lucide) lucide.createIcons();
+    this.renderManagerCurrencyCards();
+    this.hydrateIcons();
     requestAnimationFrame(() => {
       modal.classList.add('active');
       this.focusModal(modal);
     });
+  }
+
+  renderManagerCurrencyCards() {
+    const grid = document.getElementById('managerCurrencyGrid');
+    if (!grid) return;
+    const active = window.profileManager.getActiveProfile();
+    const activeCurrency = (active && active.currency) || 'INR';
+    const currencies = window.CurrencyEngine ? window.CurrencyEngine.getSupportedCurrencies() : [];
+
+    grid.innerHTML = currencies.map(c => `
+      <div class="currency-backlight-card ${c.code === activeCurrency ? 'selected' : ''}"
+           role="radio"
+           aria-checked="${c.code === activeCurrency}"
+           tabindex="0"
+           onclick="app.setActiveProfileCurrency('${c.code}')"
+           onkeydown="if(event.key==='Enter'||event.key===' ') app.setActiveProfileCurrency('${c.code}')"
+           title="${c.name} (${c.code})">
+        <div class="cbc-top-row">
+          <span class="cbc-flag">${c.flag || ''}</span>
+          <span class="cbc-badge" aria-hidden="true">
+            <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+          </span>
+        </div>
+        <div class="cbc-symbol">${c.symbol}</div>
+        <div class="cbc-code">${c.code}</div>
+        <div class="cbc-name">${c.name.split(' ')[0]}</div>
+      </div>
+    `).join('');
+  }
+
+  setActiveProfileCurrency(code) {
+    const active = window.profileManager.getActiveProfile();
+    if (!active) return;
+    if (active.currency === code) return;
+    window.profileManager.updateProfileCurrency(active.id, code);
+    this.renderManagerCurrencyCards();
+    this.renderProfileManagerList();
+    this.renderDashboard();
+    this.renderTransactionsTable();
+    this.renderAccounts();
+    this.renderReportsView();
+    this.showToast(`Primary currency changed to ${code} (${window.CurrencyEngine.getSymbol(code)})`, 'success');
   }
 
   closeProfileModal() {
@@ -2332,7 +2651,7 @@ class App {
       `;
     }).join('');
 
-    if (window.lucide) lucide.createIcons();
+    this.hydrateIcons();
   }
 
   createProfileFromManager() {
@@ -2345,7 +2664,8 @@ class App {
       return;
     }
     try {
-      window.profileManager.createProfile(name); // triggers reload
+      const activeCur = window.profileManager?.getActiveProfile()?.currency || 'INR';
+      window.profileManager.createProfile(name, activeCur); // triggers reload
     } catch (err) {
       if (errorEl) { errorEl.textContent = err.message; errorEl.style.display = 'block'; }
     }
@@ -2411,7 +2731,7 @@ class App {
       </div>
     `;
 
-    if (window.lucide) lucide.createIcons();
+    this.hydrateIcons();
 
     // Auto-focus the input
     const input = document.getElementById(`profile-rename-input-${id}`);
@@ -2450,7 +2770,7 @@ class App {
         `;
       }
 
-      if (window.lucide) lucide.createIcons();
+      this.hydrateIcons();
     } catch (err) {
       if (errorEl) { errorEl.textContent = err.message; errorEl.style.display = 'block'; }
     }
@@ -2469,7 +2789,7 @@ class App {
       ${this.escape(profile.name)}
       ${isActive ? '<span class="profile-active-badge">Active</span>' : ''}
     `;
-    if (window.lucide) lucide.createIcons();
+    this.hydrateIcons();
   }
 
   bindProfileModalEvents() {
@@ -2480,18 +2800,28 @@ class App {
         if (e.target === modal) this.closeProfileModal();
       });
     }
-    // Enter key on new profile input
+    // Enter key & focus scroll on new profile input
     const input = document.getElementById('newProfileNameManagerInput');
     if (input) {
       input.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') this.createProfileFromManager();
       });
+      input.addEventListener('focus', () => {
+        setTimeout(() => {
+          input.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }, 300);
+      });
     }
-    // Enter key on chooser input
+    // Enter key & focus scroll on chooser input
     const chooserInput = document.getElementById('newProfileNameInput');
     if (chooserInput) {
       chooserInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') this.createProfileFromChooser();
+      });
+      chooserInput.addEventListener('focus', () => {
+        setTimeout(() => {
+          chooserInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }, 300);
       });
     }
   }
@@ -2508,7 +2838,7 @@ class App {
       </div>
       <i data-lucide="chevrons-up-down" style="width:13px;height:13px;opacity:0.4;flex-shrink:0;"></i>
     `;
-    if (window.lucide) lucide.createIcons();
+    this.hydrateIcons();
   }
 
   // --- TOAST NOTIFICATIONS (Disabled per user request) ---
@@ -2583,10 +2913,250 @@ class App {
     document.body.prepend(box);
     retry.focus();
   }
+
+  // ==========================================
+  // CURRENCY INFORMATION & EXCHANGE RATES HUB
+  // ==========================================
+
+  async renderCurrencyView() {
+    const grid = document.getElementById('currencyRatesGrid');
+    if (!grid) return;
+
+    const engine = window.CurrencyEngine;
+    if (!engine) return;
+
+    const currencies = engine.getSupportedCurrencies();
+    const activeProfile = window.profileManager ? window.profileManager.getActiveProfile() : null;
+    const primaryCurrency = activeProfile ? (activeProfile.currency || 'INR') : 'INR';
+
+    // Update Hero sync state & base badge
+    const tsLabel = document.getElementById('currencyLastUpdatedLabel');
+    if (tsLabel) {
+      tsLabel.textContent = `Last API Sync: ${engine.getLastFetchTimestamp()}`;
+    }
+
+    const baseBadge = document.getElementById('currencyBaseBadge');
+    if (baseBadge) {
+      baseBadge.textContent = `Base: ${primaryCurrency}`;
+    }
+
+    const dot = document.getElementById('currencyPulseDot');
+    if (dot) {
+      const isOffline = engine.getLastFetchTimestamp().toLowerCase().includes('offline');
+      dot.classList.toggle('offline', isOffline);
+    }
+
+    const resetAllBtn = document.getElementById('btnResetAllRates');
+    if (resetAllBtn) {
+      resetAllBtn.style.display = engine.hasAnyManualOverride() ? 'inline-flex' : 'none';
+    }
+
+    // Filter out the primary base currency (e.g. if EUR is default, EUR is omitted as 1 EUR = 1 EUR)
+    const displayCurrencies = currencies.filter(curr => curr.code.toUpperCase() !== primaryCurrency.toUpperCase());
+
+    const formatRate = (r) => {
+      if (r >= 100) return r.toFixed(2);
+      if (r >= 1) return r.toFixed(4);
+      return r.toFixed(6);
+    };
+
+    let cardsHtml = '';
+    for (const curr of displayCurrencies) {
+      const currentRate = engine.getRateAgainstBase(curr.code, primaryCurrency);
+      const apiRate = engine.getApiRateAgainstBase(curr.code, primaryCurrency);
+      const isOverridden = engine.isManualOverride(curr.code);
+      const inverseRate = currentRate > 0 ? (1.0 / currentRate) : 0;
+
+      const flag = curr.code === 'INR' ? '🇮🇳' :
+                   curr.code === 'USD' ? '🇺🇸' :
+                   curr.code === 'EUR' ? '🇪🇺' :
+                   curr.code === 'GBP' ? '🇬🇧' :
+                   curr.code === 'CHF' ? '🇨🇭' :
+                   curr.code === 'JPY' ? '🇯🇵' : '🌐';
+
+      cardsHtml += `
+        <div class="currency-rate-card" data-code="${curr.code}">
+          <div class="currency-card-header">
+            <div class="currency-card-title-group">
+              <div class="currency-card-flag-circle">${flag}</div>
+              <div>
+                <div style="display:flex; align-items:center;">
+                  <span class="currency-card-code">${curr.code}</span>
+                  <span class="currency-card-symbol">(${curr.symbol})</span>
+                </div>
+                <div class="currency-card-name">${curr.name}</div>
+              </div>
+            </div>
+            <div class="currency-card-badges">
+              ${isOverridden ? '<span class="currency-badge-pill custom">Custom</span>' : ''}
+            </div>
+          </div>
+
+          <div class="currency-metrics-box">
+            <div class="currency-metric-row">
+              <span class="currency-metric-label">Rate vs ${primaryCurrency}</span>
+              <span class="currency-metric-value">1 ${primaryCurrency} = ${formatRate(currentRate)} ${curr.code}</span>
+            </div>
+            <div class="currency-metric-row">
+              <span class="currency-metric-label">Inverse Equivalent</span>
+              <span class="currency-metric-value" style="color:var(--color-primary);">1 ${curr.code} ≈ ${engine.format(inverseRate, primaryCurrency)}</span>
+            </div>
+          </div>
+
+          ${isOverridden ? `
+            <div class="currency-api-hint">
+              API Baseline: 1 ${primaryCurrency} = ${formatRate(apiRate)} ${curr.code}
+            </div>
+          ` : ''}
+
+          <div class="currency-card-actions">
+            ${isOverridden ? `
+              <button type="button" class="btn btn-ghost btn-sm" onclick="app.resetCurrencyRate('${curr.code}')" style="color:#f59e0b; font-size:0.75rem;">
+                <i data-lucide="rotate-ccw" style="width:12px; height:12px;"></i> Reset to API
+              </button>
+            ` : ''}
+            <button type="button" class="btn btn-secondary btn-sm" onclick="app.openEditCurrencyModal('${curr.code}')" style="font-size:0.78rem;">
+              <i data-lucide="edit-3" style="width:12px; height:12px;"></i> Edit Rate
+            </button>
+          </div>
+        </div>
+      `;
+    }
+
+    grid.innerHTML = cardsHtml;
+    this.hydrateIcons(grid);
+  }
+
+  async forceSyncCurrencyRates() {
+    const icon = document.getElementById('currencySyncIcon');
+    if (icon) icon.classList.add('currency-spinning');
+
+    const success = await window.CurrencyEngine.forceFetchRates();
+
+    if (icon) icon.classList.remove('currency-spinning');
+
+    if (success) {
+      await this.refreshAllViews();
+    } else {
+      alert('Could not fetch latest rates from the exchange rate API. Please check your internet connection.');
+    }
+  }
+
+  openEditCurrencyModal(code) {
+    const engine = window.CurrencyEngine;
+    const curr = engine.getCurrency(code);
+    if (!curr) return;
+
+    const modal = document.getElementById('editCurrencyModal');
+    if (!modal) return;
+
+    const activeProfile = window.profileManager ? window.profileManager.getActiveProfile() : null;
+    const primaryCurrency = activeProfile ? (activeProfile.currency || 'INR') : 'INR';
+
+    const flag = curr.code === 'INR' ? '🇮🇳' :
+                 curr.code === 'USD' ? '🇺🇸' :
+                 curr.code === 'EUR' ? '🇪🇺' :
+                 curr.code === 'GBP' ? '🇬🇧' :
+                 curr.code === 'CHF' ? '🇨🇭' :
+                 curr.code === 'JPY' ? '🇯🇵' : '🌐';
+
+    const currentRate = engine.getRateAgainstBase(curr.code, primaryCurrency);
+
+    const formatRate = (r) => {
+      if (r >= 100) return r.toFixed(2);
+      if (r >= 1) return r.toFixed(4);
+      return r.toFixed(6);
+    };
+
+    document.getElementById('editCurrencyFlagCircle').textContent = flag;
+    document.getElementById('editCurrencyModalTitle').textContent = `Edit ${curr.name} Rate`;
+    const subtitleEl = document.getElementById('editCurrencyModalSubtitle');
+    if (subtitleEl) subtitleEl.textContent = `1 ${primaryCurrency} conversion rate`;
+
+    const labelEl = document.getElementById('editCurrencyRateLabel');
+    if (labelEl) labelEl.textContent = `Rate for 1 ${primaryCurrency}`;
+
+    const prefixEl = document.getElementById('editCurrencyBasePrefix');
+    if (prefixEl) prefixEl.textContent = `1 ${primaryCurrency} =`;
+
+    document.getElementById('editCurrencyCodeInput').value = curr.code;
+    document.getElementById('editCurrencyCodeSuffix').textContent = curr.code;
+    document.getElementById('editCurrencyRateInput').value = formatRate(currentRate);
+    document.getElementById('editCurrencyRateInput').placeholder = `e.g. ${formatRate(currentRate)}`;
+    document.getElementById('editCurrencyError').style.display = 'none';
+
+    this.onEditCurrencyInputChange();
+
+    modal.style.display = 'flex';
+    document.getElementById('editCurrencyRateInput').focus();
+    this.hydrateIcons(modal);
+  }
+
+  closeEditCurrencyModal() {
+    const modal = document.getElementById('editCurrencyModal');
+    if (modal) modal.style.display = 'none';
+  }
+
+  onEditCurrencyInputChange() {
+    const code = document.getElementById('editCurrencyCodeInput').value;
+    const inputVal = parseFloat(document.getElementById('editCurrencyRateInput').value);
+    const previewBox = document.getElementById('editCurrencyPreviewBox');
+    const previewText = document.getElementById('editCurrencyPreviewText');
+
+    const activeProfile = window.profileManager ? window.profileManager.getActiveProfile() : null;
+    const primaryCurrency = activeProfile ? (activeProfile.currency || 'INR') : 'INR';
+
+    if (isNaN(inputVal) || inputVal <= 0) {
+      if (previewBox) previewBox.style.display = 'none';
+      return;
+    }
+
+    if (previewBox) previewBox.style.display = 'block';
+
+    const inverseVal = 1.0 / inputVal;
+
+    if (previewText) {
+      previewText.textContent = `1 ${code} ≈ ${window.CurrencyEngine.format(inverseVal, primaryCurrency)}`;
+    }
+  }
+
+  async saveManualCurrencyRate() {
+    const code = document.getElementById('editCurrencyCodeInput').value;
+    const inputVal = parseFloat(document.getElementById('editCurrencyRateInput').value);
+    const errEl = document.getElementById('editCurrencyError');
+
+    const activeProfile = window.profileManager ? window.profileManager.getActiveProfile() : null;
+    const primaryCurrency = activeProfile ? (activeProfile.currency || 'INR') : 'INR';
+
+    if (isNaN(inputVal) || inputVal <= 0) {
+      if (errEl) {
+        errEl.textContent = 'Please enter a valid positive conversion rate.';
+        errEl.style.display = 'block';
+      }
+      return;
+    }
+
+    window.CurrencyEngine.updateManualRateAgainstBase(code, primaryCurrency, inputVal);
+    this.closeEditCurrencyModal();
+    await this.refreshAllViews();
+  }
+
+  async resetCurrencyRate(code) {
+    const activeProfile = window.profileManager ? window.profileManager.getActiveProfile() : null;
+    const primaryCurrency = activeProfile ? (activeProfile.currency || 'INR') : 'INR';
+    window.CurrencyEngine.resetRateToApiAgainstBase(code, primaryCurrency);
+    await this.refreshAllViews();
+  }
+
+  async resetAllCurrencyRates() {
+    window.CurrencyEngine.resetAllRatesToApi();
+    await this.refreshAllViews();
+  }
 }
 
 // Global App Instance
 window.app = new App();
+window.hydrateIcons = (root) => window.app?.hydrateIcons(root);
 
 // Boot on DOM Ready
 document.addEventListener('DOMContentLoaded', () => {

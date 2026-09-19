@@ -87,6 +87,12 @@ t('dedupe: opposite direction is never a duplicate', () => {
   assert.strictEqual(d.compareTransactions(tx({}), tx({ type: 'income' })).isMatch, false);
 });
 
+t('dedupe: cross-currency transactions with identical amount are NEVER duplicates', () => {
+  const usdTx = tx({ amount: 10, currency: 'USD', description: 'Coffee' });
+  const inrTx = tx({ amount: 10, currency: 'INR', description: 'Coffee' });
+  assert.strictEqual(d.compareTransactions(usdTx, inrTx).isMatch, false);
+});
+
 t('dedupe: same UTR merges, but transfer legs never auto-merge (confidence < 95)', () => {
   const a = tx({ referenceNo: '412345678901' });
   const b = tx({ referenceNo: '412345678901' });
@@ -387,6 +393,191 @@ paytmRows.unshift(row(['Date', 28], ['Transaction Details', 110], ['Your Account
     assert.strictEqual(await am.getOrCreateAccountFromStatement(bank('0000')), a);
     assert.strictEqual(store.length, 4);
   });
-  console.log(`
-ALL ${n} WEB REGRESSION TESTS PASSED`);
+  await ta('currency: symbols, codes, conversion math, and once-a-day sync check', async () => {
+    const storage = {};
+    global.localStorage = {
+      getItem: (k) => storage[k] || null,
+      setItem: (k, v) => { storage[k] = String(v); },
+      removeItem: (k) => { delete storage[k]; }
+    };
+    global.window = global.window || {};
+    delete require.cache[require.resolve('../js/currency.js')];
+    const { CurrencyEngine } = require('../js/currency.js');
+
+    // 1. Supported currencies & symbols
+    assert.strictEqual(CurrencyEngine.getSymbol('INR'), '₹');
+    assert.strictEqual(CurrencyEngine.getSymbol('USD'), '$');
+    assert.strictEqual(CurrencyEngine.getSymbol('EUR'), '€');
+    assert.strictEqual(CurrencyEngine.getSymbol('GBP'), '£');
+    assert.strictEqual(CurrencyEngine.getSymbol('CHF'), '₣');
+    assert.strictEqual(CurrencyEngine.getSymbol('JPY'), '¥');
+
+    // 2. Conversion math
+    const inrFromUsd = CurrencyEngine.convert(100, 'USD', 'INR');
+    assert.strictEqual(Math.round(inrFromUsd), 8350);
+
+    const usdFromInr = CurrencyEngine.convert(8350, 'INR', 'USD');
+    assert.strictEqual(Math.round(usdFromInr), 100);
+
+    const gbpFromUsd = CurrencyEngine.convert(100, 'USD', 'GBP');
+    assert.strictEqual(Math.round(gbpFromUsd), 78);
+
+    const chfFromUsd = CurrencyEngine.convert(100, 'USD', 'CHF');
+    assert.strictEqual(Math.round(chfFromUsd), 89);
+
+    assert.strictEqual(CurrencyEngine.convert(50, 'EUR', 'EUR'), 50);
+
+    // 3. Formatting
+    const formattedInr = CurrencyEngine.format(1250, 'INR', { maximumFractionDigits: 0 });
+    assert.ok(formattedInr.includes('₹') && formattedInr.includes('1,250'));
+
+    const formattedUsd = CurrencyEngine.format(99.5, 'USD');
+    assert.ok(formattedUsd.includes('$') && formattedUsd.includes('99.50'));
+
+    // 4. Once a day policy check
+    const today = CurrencyEngine._getTodayLocalDate();
+    CurrencyEngine.lastFetchDate = today;
+    const fetched = await CurrencyEngine.checkAndFetchDailyRates();
+    assert.strictEqual(fetched, false);
+  });
+
+  t('refunds: auto-detected as refund (not income) and never merged with expenses in dedupe', () => {
+    // 1. Parser auto-detection
+    const res1 = p.resolveAmountCells(null, '500.00', null, 'Amazon India Refund');
+    assert.strictEqual(res1.explicitType, 'refund');
+    assert.strictEqual(res1.amount, 500);
+
+    const res2 = p.resolveAmountCells(null, null, '349.00 Cr', 'Flipkart Reversal Credit');
+    assert.strictEqual(res2.explicitType, 'refund');
+    assert.strictEqual(res2.amount, 349);
+
+    const resSalary = p.resolveAmountCells(null, '50000.00', null, 'Monthly Salary Credit');
+    assert.strictEqual(resSalary.explicitType, 'income');
+
+    // 2. Dedupe isolation: Expense and Refund MUST NEVER merge
+    const tExpense = {
+      id: 't_exp',
+      date: '2026-09-18',
+      amount: 500,
+      type: 'expense',
+      rawNarration: 'Amazon Retail Purchase',
+      referenceNo: 'REF123456'
+    };
+    const tRefund = {
+      id: 't_ref',
+      date: '2026-09-18',
+      amount: 500,
+      type: 'refund',
+      rawNarration: 'Amazon Retail Refund',
+      referenceNo: 'REF123456'
+    };
+
+    const match = d.compareTransactions(tExpense, tRefund);
+    assert.strictEqual(match.isMatch, false, 'Expense and Refund must never be treated as duplicates');
+  });
+
+  t('profiles: createProfile inherits active profile currency when currency is omitted', () => {
+    const fs = require('fs');
+    const path = require('path');
+    const vmContext = require('vm');
+    const profilesCode = fs.readFileSync(path.join(__dirname, '..', 'js', 'profiles.js'), 'utf8');
+    const storage = {};
+    const mockWindow = {
+      localStorage: {
+        getItem: (k) => storage[k] || null,
+        setItem: (k, v) => { storage[k] = String(v); },
+        removeItem: (k) => { delete storage[k]; }
+      },
+      location: { reload: () => {} }
+    };
+    mockWindow.window = mockWindow;
+    const vm = new vmContext.Script(profilesCode);
+    const ctx = vmContext.createContext(mockWindow);
+    vm.runInContext(ctx);
+
+    const pm = ctx.profileManager;
+    // Create base profile with EUR
+    const p1 = pm.createProfile('Alpha', 'EUR');
+    assert.strictEqual(p1.currency, 'EUR');
+
+    // Create second profile without specifying currency -> must inherit active profile currency (EUR)
+    const p2 = pm.createProfile('Beta');
+    assert.strictEqual(p2.currency, 'EUR');
+  });
+
+  t('currency: manual rate overrides, override detection, and reset to API rates', () => {
+    const { CurrencyEngine } = require('../js/currency.js');
+    // 1. Initial baseline
+    assert.strictEqual(CurrencyEngine.isManualOverride('EUR'), false);
+
+    // 2. Set custom override
+    const ok = CurrencyEngine.updateManualRate('EUR', 0.80);
+    assert.strictEqual(ok, true);
+    assert.strictEqual(CurrencyEngine.rates.eur, 0.80);
+    assert.strictEqual(CurrencyEngine.isManualOverride('EUR'), true);
+    assert.strictEqual(CurrencyEngine.hasAnyManualOverride(), true);
+
+    // 3. Conversion with overridden rate (100 USD = 80 EUR, so 80 EUR = 100 USD)
+    const convertedToUsd = CurrencyEngine.convert(80, 'EUR', 'USD');
+    assert.ok(Math.abs(convertedToUsd - 100) < 0.001);
+
+    // 4. Reset single currency to API
+    CurrencyEngine.resetRateToApi('EUR');
+    assert.strictEqual(CurrencyEngine.isManualOverride('EUR'), false);
+    assert.strictEqual(CurrencyEngine.rates.eur, CurrencyEngine.apiRates.eur);
+
+    // 5. Override multiple and reset all
+    CurrencyEngine.updateManualRate('INR', 90.0);
+    CurrencyEngine.updateManualRate('JPY', 160.0);
+    assert.strictEqual(CurrencyEngine.hasAnyManualOverride(), true);
+
+    CurrencyEngine.resetAllRatesToApi();
+    assert.strictEqual(CurrencyEngine.hasAnyManualOverride(), false);
+    assert.strictEqual(CurrencyEngine.isManualOverride('INR'), false);
+    assert.strictEqual(CurrencyEngine.isManualOverride('JPY'), false);
+  });
+
+  t('currency: dynamic default base currency rates, list exclusion, and relative manual overrides', () => {
+    const { CurrencyEngine } = require('../js/currency.js');
+    CurrencyEngine.resetAllRatesToApi();
+
+    // 1. When EUR is default/base currency:
+    // API Baseline: 1 USD = 0.92 EUR, 1 USD = 83.5 INR
+    // 1 EUR = (83.5 / 0.92) INR = ~90.7608 INR
+    const apiInrPerEur = CurrencyEngine.getApiRateAgainstBase('INR', 'EUR');
+    assert.ok(Math.abs(apiInrPerEur - (83.5 / 0.92)) < 0.001);
+
+    const initialRate = CurrencyEngine.getRateAgainstBase('INR', 'EUR');
+    assert.ok(Math.abs(initialRate - (83.5 / 0.92)) < 0.001);
+
+    // 2. Base currency against itself is 1.0 (excluded from display list)
+    assert.strictEqual(CurrencyEngine.getRateAgainstBase('EUR', 'EUR'), 1.0);
+    const supported = CurrencyEngine.getSupportedCurrencies();
+    const filteredForEur = supported.filter(c => c.code !== 'EUR');
+    assert.strictEqual(filteredForEur.length, supported.length - 1);
+    assert.ok(!filteredForEur.some(c => c.code === 'EUR'));
+
+    // 3. User overrides rate against base: e.g. 1 EUR = 100 INR
+    const updated = CurrencyEngine.updateManualRateAgainstBase('INR', 'EUR', 100.0);
+    assert.strictEqual(updated, true);
+    assert.strictEqual(CurrencyEngine.isManualOverride('INR'), true);
+
+    const newRate = CurrencyEngine.getRateAgainstBase('INR', 'EUR');
+    assert.strictEqual(newRate, 100.0);
+
+    // 4. Conversions reflect 1 EUR = 100 INR
+    assert.strictEqual(CurrencyEngine.convert(10, 'EUR', 'INR'), 1000.0);
+    assert.strictEqual(CurrencyEngine.convert(1000, 'INR', 'EUR'), 10.0);
+
+    // 5. Reset INR against EUR back to API baseline
+    CurrencyEngine.resetRateToApiAgainstBase('INR', 'EUR');
+    assert.strictEqual(CurrencyEngine.isManualOverride('INR'), false);
+    const restoredRate = CurrencyEngine.getRateAgainstBase('INR', 'EUR');
+    assert.ok(Math.abs(restoredRate - (83.5 / 0.92)) < 0.001);
+
+    CurrencyEngine.resetAllRatesToApi();
+  });
+
+  console.log(`\nALL ${n} WEB REGRESSION TESTS PASSED`);
 })().catch((e) => { console.error(e); process.exit(1); });
+

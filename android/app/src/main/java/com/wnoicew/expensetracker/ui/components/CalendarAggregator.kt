@@ -1,5 +1,6 @@
 package com.wnoicew.expensetracker.ui.components
 
+import com.wnoicew.expensetracker.data.engine.CurrencyEngine
 import com.wnoicew.expensetracker.data.model.TransactionEntity
 import com.wnoicew.expensetracker.data.model.TransactionType
 import java.time.Instant
@@ -32,7 +33,8 @@ object CalendarAggregator {
         transactions: List<TransactionEntity>,
         year: Int,
         month: Int,
-        zone: ZoneId = ZoneId.systemDefault()
+        zone: ZoneId = ZoneId.systemDefault(),
+        targetCurrency: String = "INR"
     ): MonthAggregate {
         val target = YearMonth.of(year, month)
         val byDay = sortedMapOf<Int, MutableList<TransactionEntity>>()
@@ -44,9 +46,11 @@ object CalendarAggregator {
             val d = Instant.ofEpochMilli(t.date).atZone(zone).toLocalDate()
             if (YearMonth.from(d) != target) continue
             byDay.getOrPut(d.dayOfMonth) { mutableListOf() }.add(t)
+            val converted = CurrencyEngine.convert(t.amount, t.currency, targetCurrency)
             when (t.type) {
-                TransactionType.INCOME -> inflow += t.amount
-                TransactionType.EXPENSE -> outflow += t.amount
+                TransactionType.INCOME -> inflow += converted
+                TransactionType.REFUND -> inflow += converted
+                TransactionType.EXPENSE -> outflow += converted
                 TransactionType.TRANSFER -> {}
             }
         }
@@ -54,8 +58,8 @@ object CalendarAggregator {
         val days = byDay.mapValues { (day, list) ->
             DayTransactionSummary(
                 date = target.atDay(day),
-                income = list.filter { it.type == TransactionType.INCOME }.sumOf { it.amount },
-                expense = list.filter { it.type == TransactionType.EXPENSE }.sumOf { it.amount },
+                income = list.filter { it.type == TransactionType.INCOME || it.type == TransactionType.REFUND }.sumOf { CurrencyEngine.convert(it.amount, it.currency, targetCurrency) },
+                expense = list.filter { it.type == TransactionType.EXPENSE }.sumOf { CurrencyEngine.convert(it.amount, it.currency, targetCurrency) },
                 count = list.size,
                 transactions = list
             )
@@ -98,6 +102,7 @@ object CalendarAggregator {
             label(TransactionType.EXPENSE, "expense", "expenses")
             label(TransactionType.INCOME, "income", "income")
             label(TransactionType.TRANSFER, "transfer", "transfers")
+            label(TransactionType.REFUND, "refund", "refunds")
         }
         if (isSelected) parts += "selected"
         return parts.joinToString(", ")

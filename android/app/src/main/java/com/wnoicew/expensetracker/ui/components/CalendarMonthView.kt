@@ -17,6 +17,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -30,6 +31,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import com.wnoicew.expensetracker.data.engine.CurrencyEngine
 import com.wnoicew.expensetracker.data.model.TransactionEntity
 import com.wnoicew.expensetracker.ui.DayClock
 import com.wnoicew.expensetracker.ui.screens.TransactionRowItem
@@ -59,10 +61,12 @@ fun CalendarMonthView(
     onEditTransaction: (TransactionEntity) -> Unit,
     onDeleteTransaction: (TransactionEntity) -> Unit,
     onAddTransactionForDate: (Long) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    currency: String = "INR"
 ) {
     val locale = remember { Locale.getDefault() }
     val today by produceState(LocalDate.now()) { DayClock.today().collect { value = it } }
+    val currencySymbol = remember(currency) { CurrencyEngine.getSymbol(currency) }
 
     var currentYear by rememberSaveable { mutableIntStateOf(LocalDate.now().year) }
     var currentMonth by rememberSaveable { mutableIntStateOf(LocalDate.now().monthValue) } // 1..12
@@ -80,8 +84,8 @@ fun CalendarMonthView(
         }
     }
 
-    val aggregate = remember(transactions, currentYear, currentMonth) {
-        CalendarAggregator.aggregate(transactions, currentYear, currentMonth)
+    val aggregate = remember(transactions, currentYear, currentMonth, currency) {
+        CalendarAggregator.aggregate(transactions, currentYear, currentMonth, targetCurrency = currency)
     }
 
     val leadEmptyCells = remember(currentYear, currentMonth) { CalendarAggregator.leadingBlankCells(currentYear, currentMonth) }
@@ -254,6 +258,7 @@ fun CalendarMonthView(
                                 summary = summary,
                                 description = CalendarAggregator.describeDay(date, summary, isToday, isSelected, locale),
                                 onClick = { selectedEpochDay = date.toEpochDay() },
+                                currencySymbol = currencySymbol,
                                 modifier = Modifier
                                     .weight(1f)
                                     .fillMaxHeight()
@@ -273,7 +278,10 @@ fun CalendarMonthView(
                 DateTimeFormatter.ofLocalizedDate(FormatStyle.FULL).withLocale(locale).format(date)
             }
 
-            HigGlassCard(modifier = Modifier.fillMaxWidth()) {
+            HigGlassCard(
+                modifier = Modifier.fillMaxWidth(),
+                backlightColor = PrimaryBlue.copy(alpha = 0.25f)
+            ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -454,6 +462,7 @@ private fun CalendarDayCell(
     summary: DayTransactionSummary?,
     description: String,
     onClick: () -> Unit,
+    currencySymbol: String = "₹",
     modifier: Modifier = Modifier
 ) {
     val hasTxns = (summary?.count ?: 0) > 0
@@ -485,6 +494,16 @@ private fun CalendarDayCell(
         modifier = modifier
             .padding(1.5.dp)
             .heightIn(min = 56.dp)
+            .then(
+                if (isSelected) {
+                    Modifier.shadow(
+                        elevation = 8.dp,
+                        shape = RoundedCornerShape(10.dp),
+                        ambientColor = PrimaryBlueFill,
+                        spotColor = PrimaryBlueFill
+                    )
+                } else Modifier
+            )
             .clip(RoundedCornerShape(10.dp))
             .background(animatedBg)
             .then(
@@ -529,10 +548,10 @@ private fun CalendarDayCell(
             }
 
             if (summary != null && summary.expense > 0) {
-                DayAmountChip("-₹${CalendarAggregator.compactAmount(summary.expense)}", expenseColor)
+                DayAmountChip("-$currencySymbol${CalendarAggregator.compactAmount(summary.expense)}", expenseColor)
             }
             if (summary != null && summary.income > 0) {
-                DayAmountChip("+₹${CalendarAggregator.compactAmount(summary.income)}", incomeColor)
+                DayAmountChip("+$currencySymbol${CalendarAggregator.compactAmount(summary.income)}", incomeColor)
             }
         }
     }

@@ -40,10 +40,6 @@ class MoneyTrackerTimePicker {
 
     document.addEventListener('click', this.handleOutsideClick, true);
     document.addEventListener('keydown', this.handleKeyDown);
-    document.addEventListener('mousemove', this.onPlateMouseMove);
-    document.addEventListener('mouseup', this.onPlateMouseUp);
-    document.addEventListener('touchmove', this.onPlateMouseMove, { passive: false });
-    document.addEventListener('touchend', this.onPlateMouseUp);
   }
 
   /**
@@ -520,11 +516,14 @@ class MoneyTrackerTimePicker {
     if (!plate) return;
 
     const rect = plate.getBoundingClientRect();
-    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+    const clientX = (e.touches && e.touches.length > 0) ? e.touches[0].clientX : (e.changedTouches && e.changedTouches.length > 0 ? e.changedTouches[0].clientX : e.clientX);
+    const clientY = (e.touches && e.touches.length > 0) ? e.touches[0].clientY : (e.changedTouches && e.changedTouches.length > 0 ? e.changedTouches[0].clientY : e.clientY);
 
-    const x = clientX - rect.left - this.center;
-    const y = clientY - rect.top - this.center;
+    const actualCenterX = rect.width > 0 ? rect.width / 2 : this.center;
+    const actualCenterY = rect.height > 0 ? rect.height / 2 : this.center;
+
+    const x = clientX - rect.left - actualCenterX;
+    const y = clientY - rect.top - actualCenterY;
 
     let angle = Math.atan2(y, x) * (180 / Math.PI) + 90;
     if (angle < 0) angle += 360;
@@ -553,6 +552,10 @@ class MoneyTrackerTimePicker {
   onPlateMouseDown(e) {
     if (e.cancelable && e.touches) e.preventDefault();
     this.isDragging = true;
+    document.addEventListener('mousemove', this.onPlateMouseMove);
+    document.addEventListener('mouseup', this.onPlateMouseUp);
+    document.addEventListener('touchmove', this.onPlateMouseMove, { passive: false });
+    document.addEventListener('touchend', this.onPlateMouseUp);
     this.calculatePosition(e);
   }
 
@@ -565,6 +568,10 @@ class MoneyTrackerTimePicker {
   onPlateMouseUp(e) {
     if (!this.isDragging) return;
     this.isDragging = false;
+    document.removeEventListener('mousemove', this.onPlateMouseMove);
+    document.removeEventListener('mouseup', this.onPlateMouseUp);
+    document.removeEventListener('touchmove', this.onPlateMouseMove);
+    document.removeEventListener('touchend', this.onPlateMouseUp);
 
     // If we just selected an hour, smoothly auto-advance to minutes view!
     if (this.currentView === 'hours') {
@@ -626,11 +633,17 @@ class MoneyTrackerTimePicker {
    * Dismiss the popover
    */
   close() {
+    if (this.isDragging) {
+      document.removeEventListener('mousemove', this.onPlateMouseMove);
+      document.removeEventListener('mouseup', this.onPlateMouseUp);
+      document.removeEventListener('touchmove', this.onPlateMouseMove);
+      document.removeEventListener('touchend', this.onPlateMouseUp);
+      this.isDragging = false;
+    }
     if (this.activePopover) {
       this.activePopover.remove();
       this.activePopover = null;
       this.activeTargetInput = null;
-      this.isDragging = false;
     }
     if (this.focusReturnEl && typeof this.focusReturnEl.focus === 'function') {
       this.focusReturnEl.focus();

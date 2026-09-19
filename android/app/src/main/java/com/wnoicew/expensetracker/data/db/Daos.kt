@@ -29,6 +29,9 @@ interface TransactionDao {
 
     @Delete
     suspend fun deleteTransaction(transaction: TransactionEntity)
+
+    @Query("UPDATE transactions SET accountId = '', accountName = 'Cash / Unassigned' WHERE accountId = :accountId")
+    suspend fun unassignAccountFromTransactions(accountId: String)
 }
 
 @Dao

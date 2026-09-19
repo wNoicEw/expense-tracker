@@ -42,7 +42,8 @@ class DuplicateDetector {
       const t = updatedTransactions[i];
       if (t.duplicateStatus === 'merged' || t.duplicateStatus === 'dismissed') continue;
 
-      const amtKey = Math.round(Math.abs(parseFloat(t.amount) || 0) * 100);
+      const curr = (t.currency || 'INR').toUpperCase();
+      const amtKey = `${curr}_${Math.round(Math.abs(parseFloat(t.amount) || 0) * 100)}`;
       if (!amountMap.has(amtKey)) {
         amountMap.set(amtKey, []);
       }
@@ -145,8 +146,17 @@ class DuplicateDetector {
       return { isMatch: false, confidence: 0 };
     }
 
-    // Opposite directions (a debit and a credit) are never the same transaction
-    if (t1.type && t2.type && t1.type !== t2.type) {
+    // Opposite directions (a debit and a credit, or an expense and a refund) are never the same transaction
+    const type1 = (t1.type || 'expense').toLowerCase();
+    const type2 = (t2.type || 'expense').toLowerCase();
+    if (type1 !== type2) {
+      return { isMatch: false, confidence: 0 };
+    }
+
+    // Currency Check: Transactions MUST have the exact same currency
+    const curr1 = (t1.currency || 'INR').toUpperCase();
+    const curr2 = (t2.currency || 'INR').toUpperCase();
+    if (curr1 !== curr2) {
       return { isMatch: false, confidence: 0 };
     }
 
@@ -199,7 +209,7 @@ class DuplicateDetector {
       return {
         isMatch: true,
         confidence: 95,
-        reason: `Exact match: Same Date (${t1.date}), Amount (₹${amt1.toFixed(2)}), and Merchant (${t1.description})`
+        reason: `Exact match: Same Date (${t1.date}), Amount (${curr1} ${amt1.toFixed(2)}), and Merchant (${t1.description})`
       };
     }
 

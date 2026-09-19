@@ -315,8 +315,13 @@ object StatementParserEngine {
             val amt = cleanAmount(m.groupValues[4])
             if (amt <= 0) continue
 
-            val isIncome = direction.contains("received") || direction.contains("refund")
-            val explicitType = if (isIncome) TransactionType.INCOME else TransactionType.EXPENSE
+            val isRefund = direction.contains("refund")
+            val isIncome = direction.contains("received")
+            val explicitType = when {
+                isRefund -> TransactionType.REFUND
+                isIncome -> TransactionType.INCOME
+                else -> TransactionType.EXPENSE
+            }
 
             // Everything up to the next dated row belongs to this one
             val follow = mutableListOf<String>()
@@ -344,6 +349,7 @@ object StatementParserEngine {
             val isCard = split.account?.isRuPay == true
 
             val prefix = when {
+                isRefund -> "Refund from "
                 isIncome -> "Received from "
                 direction.startsWith("paid") -> "Paid to "
                 else -> m.groupValues[2].trim().replaceFirstChar { it.uppercase() } + " " // "Bill payment of "
@@ -376,7 +382,7 @@ object StatementParserEngine {
             )
             rowAccounts.add(split.account)
 
-            if (explicitType == TransactionType.INCOME) inflow += amt else outflow += amt
+            if (explicitType == TransactionType.INCOME || explicitType == TransactionType.REFUND) inflow += amt else outflow += amt
         }
 
         return StatementParseResult("Navi UPI Statement", list, inflow, outflow, rowAccounts = rowAccounts)
@@ -705,8 +711,13 @@ object StatementParserEngine {
                 val amt = cleanAmount(amtM.groupValues[1])
                 if (amt <= 0) continue
 
-                val isCredit = line.contains(" CR", ignoreCase = true) || line.contains("Payment Received", ignoreCase = true) || line.contains("Refund", ignoreCase = true)
-                val explicitType = if (isCredit) TransactionType.INCOME else TransactionType.EXPENSE
+                val isRefund = line.contains("Refund", ignoreCase = true) || line.contains("Reversal", ignoreCase = true)
+                val isCredit = line.contains(" CR", ignoreCase = true) || line.contains("Payment Received", ignoreCase = true) || isRefund
+                val explicitType = when {
+                    isRefund -> TransactionType.REFUND
+                    isCredit -> TransactionType.INCOME
+                    else -> TransactionType.EXPENSE
+                }
 
                 val narration = line.replace(dateM.value, "").replace(amtM.value, "").replace(" CR", "", ignoreCase = true).trim()
                 val cat = CategorizerEngine.categorize(narration, amt, customRules)
@@ -730,7 +741,7 @@ object StatementParserEngine {
                     )
                 )
 
-                if (explicitType == TransactionType.INCOME) inflow += amt else outflow += amt
+                if (explicitType == TransactionType.INCOME || explicitType == TransactionType.REFUND) inflow += amt else outflow += amt
             }
         }
 
@@ -771,11 +782,16 @@ object StatementParserEngine {
                 val amt = cleanAmount(amtM.groupValues[1])
                 if (amt <= 0) continue
 
+                val isRefund = line.contains("refund", ignoreCase = true) || line.contains("reversal", ignoreCase = true)
                 val isCredit = line.contains("credit", ignoreCase = true) || line.contains("deposit", ignoreCase = true) ||
-                        line.contains("received", ignoreCase = true) || line.contains("refund", ignoreCase = true) ||
+                        line.contains("received", ignoreCase = true) || isRefund ||
                         line.contains("salary", ignoreCase = true) || (line.contains("cr", ignoreCase = true) && !line.contains("debit", ignoreCase = true))
 
-                val explicitType = if (isCredit) TransactionType.INCOME else TransactionType.EXPENSE
+                val explicitType = when {
+                    isRefund -> TransactionType.REFUND
+                    isCredit -> TransactionType.INCOME
+                    else -> TransactionType.EXPENSE
+                }
                 var narration = line.replace(dateM.value, "").replace(amtM.value, "").trim()
 
                 if (i + 1 < lines.size && !dateRegex.containsMatchIn(lines[i + 1]) && lines[i + 1].length in 4..100) {
@@ -803,7 +819,7 @@ object StatementParserEngine {
                     )
                 )
 
-                if (explicitType == TransactionType.INCOME) inflow += amt else outflow += amt
+                if (explicitType == TransactionType.INCOME || explicitType == TransactionType.REFUND) inflow += amt else outflow += amt
             }
         }
 
@@ -890,13 +906,14 @@ object StatementParserEngine {
 
             var amount = 0.0
             var explicitType: TransactionType? = null
+            val isRefund = rawDesc.contains("refund", ignoreCase = true) || rawDesc.contains("reversal", ignoreCase = true)
 
             if (debitIdx >= 0 && debitIdx < cols.size && cleanAmount(cols[debitIdx]) > 0) {
                 amount = cleanAmount(cols[debitIdx])
                 explicitType = TransactionType.EXPENSE
             } else if (creditIdx >= 0 && creditIdx < cols.size && cleanAmount(cols[creditIdx]) > 0) {
                 amount = cleanAmount(cols[creditIdx])
-                explicitType = TransactionType.INCOME
+                explicitType = if (isRefund) TransactionType.REFUND else TransactionType.INCOME
             } else if (amountIdx >= 0 && amountIdx < cols.size) {
                 val rawAmt = cols[amountIdx]
                 val amtVal = cleanAmount(rawAmt)
@@ -904,7 +921,9 @@ object StatementParserEngine {
 
                 if (typeIdx >= 0 && typeIdx < cols.size) {
                     val typeStr = cols[typeIdx].lowercase()
-                    if (typeStr.contains("cr") || typeStr.contains("credit") || typeStr.contains("income")) {
+                    if (typeStr.contains("refund") || typeStr.contains("reversal") || isRefund) {
+                        explicitType = TransactionType.REFUND
+                    } else if (typeStr.contains("cr") || typeStr.contains("credit") || typeStr.contains("income")) {
                         explicitType = TransactionType.INCOME
                     } else if (typeStr.contains("dr") || typeStr.contains("debit") || typeStr.contains("expense")) {
                         explicitType = TransactionType.EXPENSE
@@ -912,14 +931,16 @@ object StatementParserEngine {
                 } else if (rawAmt.contains("-") || rawAmt.lowercase().contains("dr")) {
                     explicitType = TransactionType.EXPENSE
                 } else if (rawAmt.contains("+") || rawAmt.lowercase().contains("cr")) {
-                    explicitType = TransactionType.INCOME
+                    explicitType = if (isRefund) TransactionType.REFUND else TransactionType.INCOME
+                } else if (isRefund) {
+                    explicitType = TransactionType.REFUND
                 }
             }
 
             if (amount <= 0) continue
 
             val catResult = CategorizerEngine.categorize(rawDesc, amount, customRules)
-            val finalType = explicitType ?: catResult.type
+            val finalType = explicitType ?: (if (isRefund) TransactionType.REFUND else catResult.type)
 
             val ruPayMeta = detectRuPayCC(rawDesc)
             val txnAccountName = ruPayMeta?.name ?: effectiveAccountName
@@ -944,7 +965,7 @@ object StatementParserEngine {
 
             parsedList.add(entity)
 
-            if (finalType == TransactionType.INCOME) {
+            if (finalType == TransactionType.INCOME || finalType == TransactionType.REFUND) {
                 totalInflow += amount
             } else if (finalType == TransactionType.EXPENSE) {
                 totalOutflow += amount
@@ -1210,18 +1231,26 @@ object StatementParserEngine {
 
     private fun splitCsvLine(line: String): List<String> {
         val result = mutableListOf<String>()
-        var cur = StringBuilder()
+        val cur = StringBuilder()
         var inQuotes = false
-
-        for (ch in line) {
+        var i = 0
+        while (i < line.length) {
+            val ch = line[i]
             if (ch == '\"') {
-                inQuotes = !inQuotes
+                if (inQuotes && i + 1 < line.length && line[i + 1] == '\"') {
+                    // RFC 4180 escaped quote ""
+                    cur.append('\"')
+                    i++
+                } else {
+                    inQuotes = !inQuotes
+                }
             } else if (ch == ',' && !inQuotes) {
                 result.add(cur.toString().trim(' ', '\"'))
-                cur = StringBuilder()
+                cur.clear()
             } else {
                 cur.append(ch)
             }
+            i++
         }
         result.add(cur.toString().trim(' ', '\"'))
         return result

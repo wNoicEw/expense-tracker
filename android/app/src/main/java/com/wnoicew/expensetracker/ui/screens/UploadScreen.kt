@@ -30,6 +30,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.wnoicew.expensetracker.data.engine.CurrencyEngine
 import com.wnoicew.expensetracker.data.model.StatementParseResult
 import com.wnoicew.expensetracker.ui.MainViewModel
 import com.wnoicew.expensetracker.ui.components.HigGlassCard
@@ -64,6 +65,7 @@ fun UploadScreen(
 
     // Password-protected PDF states
     var pendingPdfUri by remember { mutableStateOf<Uri?>(null) }
+    var pendingPdfBytes by remember { mutableStateOf<ByteArray?>(null) }
     var pendingPdfFileName by remember { mutableStateOf("") }
     var showPasswordDialog by remember { mutableStateOf(false) }
     var passwordInput by remember { mutableStateOf("") }
@@ -71,10 +73,10 @@ fun UploadScreen(
     var isPasswordVisible by remember { mutableStateOf(false) }
     var isUnlockingPdf by remember { mutableStateOf(false) }
 
-    val currencyFormat = remember {
-        NumberFormat.getCurrencyInstance(Locale("en", "IN")).apply {
-            maximumFractionDigits = 0
-        }
+    val primaryCurrency = viewModel.activeProfile.value?.currency ?: CurrencyEngine.DEFAULT_CURRENCY
+
+    val currencyFormat = remember(primaryCurrency) {
+        CurrencyEngine.getFormat(primaryCurrency)
     }
 
     val dateFormat = remember { SimpleDateFormat("MMM dd, yyyy · hh:mm a", Locale.getDefault()) }
@@ -83,15 +85,28 @@ fun UploadScreen(
         parseResultToPreview = null
     }
 
+    val supportedStatementMimeTypes = remember {
+        arrayOf(
+            "application/pdf",
+            "text/csv",
+            "text/plain",
+            "text/comma-separated-values",
+            "application/vnd.ms-excel",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "*/*"
+        )
+    }
+
     // Statement File Picker (PDF, CSV, Excel, TXT)
     val statementPickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
+        contract = ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
         if (uri != null) {
             parsingError = null
             genericError = null
             isReadingFile = true
             coroutineScope.launch(Dispatchers.IO) {
+              var fileBytes: ByteArray? = null
               try {
                 var fileName = "statement"
                 // Try query filename from content resolver
@@ -114,10 +129,9 @@ fun UploadScreen(
                 currentImportFileName = fileName
                 currentProcessingFile = fileName
 
-                val inputStream = context.contentResolver.openInputStream(uri)
-                if (inputStream != null) {
-                    val parsed = viewModel.parseStatementStream(inputStream, fileName)
-                    inputStream.close()
+                fileBytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                if (fileBytes != null) {
+                    val parsed = fileBytes.inputStream().use { viewModel.parseStatementStream(it, fileName) }
                     parseResultToPreview = parsed
                 } else {
                     genericError = "Could not open file stream."
@@ -125,6 +139,7 @@ fun UploadScreen(
             } catch (e: com.wnoicew.expensetracker.data.engine.StatementParsingException) {
                 if (e.isPasswordProtected) {
                     pendingPdfUri = uri
+                    pendingPdfBytes = fileBytes
                     pendingPdfFileName = currentProcessingFile ?: "statement.pdf"
                     passwordError = if (e.isIncorrectPassword) "Incorrect password. Please try again." else null
                     showPasswordDialog = true
@@ -274,7 +289,7 @@ fun UploadScreen(
                         }
                     } else {
                         Button(
-                            onClick = { statementPickerLauncher.launch("*/*") },
+                            onClick = { statementPickerLauncher.launch(supportedStatementMimeTypes) },
                             shape = RoundedCornerShape(14.dp),
                             colors = ButtonDefaults.buttonColors(containerColor = PrimaryBlue),
                             modifier = Modifier.fillMaxWidth().height(50.dp)
@@ -349,7 +364,7 @@ fun UploadScreen(
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             Button(
-                                onClick = { statementPickerLauncher.launch("*/*") },
+                                onClick = { statementPickerLauncher.launch(supportedStatementMimeTypes) },
                                 shape = RoundedCornerShape(8.dp),
                                 colors = ButtonDefaults.buttonColors(containerColor = PrimaryBlue),
                                 modifier = Modifier.height(36.dp)
@@ -500,8 +515,8 @@ fun UploadScreen(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 8.dp)
-                    .safeDrawingPadding(),
+                    .padding(start = 20.dp, end = 20.dp, top = 2.dp, bottom = 20.dp)
+                    .navigationBarsPadding(),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 Text(
@@ -702,33 +717,45 @@ fun UploadScreen(
                         val password = passwordInput
                         isUnlockingPdf = true
                         coroutineScope.launch(Dispatchers.IO) {
-                            var stream: java.io.InputStream? = null
                             try {
-                                stream = context.contentResolver.openInputStream(uri)
+                                val stream = if (pendingPdfBytes != null) {
+                                    pendingPdfBytes!!.inputStream()
+                                } else {
+                                    context.contentResolver.openInputStream(uri)
+                                }
+
                                 if (stream != null) {
-                                    val parsed = viewModel.parseStatementStream(
-                                        stream,
-                                        fileName,
-                                        password = password
-                                    )
+                                    val parsed = stream.use {
+                                        viewModel.parseStatementStream(
+                                            it,
+                                            fileName,
+                                            password = password
+                                        )
+                                    }
                                     showPasswordDialog = false
                                     passwordInput = ""
                                     passwordError = null
                                     pendingPdfUri = null
+                                    pendingPdfBytes = null
                                     parseResultToPreview = parsed
+                                } else {
+                                    showPasswordDialog = false
+                                    pendingPdfBytes = null
+                                    genericError = "Statement file data unavailable. Please re-select the file."
                                 }
                             } catch (e: com.wnoicew.expensetracker.data.engine.StatementParsingException) {
                                 if (e.isPasswordProtected) {
                                     passwordError = if (e.isIncorrectPassword) "Incorrect password. Please try again." else e.detail
                                 } else {
                                     showPasswordDialog = false
+                                    pendingPdfBytes = null
                                     parsingError = e
                                 }
                             } catch (e: Exception) {
                                 showPasswordDialog = false
+                                pendingPdfBytes = null
                                 genericError = e.message ?: "Failed to unlock PDF."
                             } finally {
-                                stream?.close()
                                 isUnlockingPdf = false
                             }
                         }
@@ -753,6 +780,7 @@ fun UploadScreen(
                         passwordInput = ""
                         passwordError = null
                         pendingPdfUri = null
+                        pendingPdfBytes = null
                     },
                     enabled = !isUnlockingPdf
                 ) {

@@ -11,6 +11,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.*
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
@@ -18,6 +19,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
@@ -36,7 +38,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import kotlin.math.roundToInt
+import com.wnoicew.expensetracker.data.engine.CurrencyEngine
 import com.wnoicew.expensetracker.data.model.AccountEntity
 import com.wnoicew.expensetracker.data.model.CategoryBreakdownItem
 import com.wnoicew.expensetracker.data.model.TransactionEntity
@@ -60,6 +62,7 @@ import java.text.NumberFormat
 import java.time.LocalDate
 import java.text.SimpleDateFormat
 import java.util.*
+import kotlin.math.roundToInt
 
 val CategoryChartColors = listOf(
     Color(0xFFF59E0B), // Amber (Food & Dining)
@@ -101,19 +104,22 @@ fun DashboardScreen(
     var pieChartRangeIndex by rememberSaveable { mutableIntStateOf(1) } // 0: 7D, 1: 30D, 2: 3M, 3: 6M, 4: 1Y, 5: ALL
     var kpiRangeIndex by rememberSaveable { mutableIntStateOf(KpiRange.D30.ordinal) }
 
+    val primaryCurrency = activeProfile?.currency ?: CurrencyEngine.DEFAULT_CURRENCY
     val today by produceState(LocalDate.now()) { DayClock.today().collect { value = it } }
     val kpiRange = KpiRange.values()[kpiRangeIndex]
-    val kpiTotals = remember(transactions, kpiRange, today) { KpiMath.totals(transactions, kpiRange, today) }
+    val kpiTotals = remember(transactions, kpiRange, today, primaryCurrency) {
+        KpiMath.totals(transactions, kpiRange, today, targetCurrency = primaryCurrency)
+    }
     val inflow = kpiTotals.inflow
     val outflow = kpiTotals.outflow
     val savingsRate = kpiTotals.savingsRatePercent
     val chartRange = KpiRange.values()[chartRangeIndex]
-    val chartTotals = remember(transactions, chartRange, today) { KpiMath.totals(transactions, chartRange, today) }
+    val chartTotals = remember(transactions, chartRange, today, primaryCurrency) {
+        KpiMath.totals(transactions, chartRange, today, targetCurrency = primaryCurrency)
+    }
 
-    val currencyFormat = remember {
-        NumberFormat.getCurrencyInstance(Locale("en", "IN")).apply {
-            maximumFractionDigits = 0
-        }
+    val currencyFormat = remember(primaryCurrency) {
+        CurrencyEngine.getFormat(primaryCurrency)
     }
 
     LazyColumn(
@@ -235,7 +241,7 @@ fun DashboardScreen(
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(
-                                    imageVector = Icons.Default.HelpOutline,
+                                    imageVector = Icons.AutoMirrored.Filled.HelpOutline,
                                     contentDescription = null,
                                     tint = WarningAmber,
                                     modifier = Modifier.size(20.dp)
@@ -273,12 +279,30 @@ fun DashboardScreen(
         // 2b. Apple HIG Backup Reminder Banner (Appears when local data has not been backed up recently)
         if (shouldShowBackupReminder) {
             item {
-                Surface(
-                    shape = RoundedCornerShape(16.dp),
-                    color = WarningAmber.copy(alpha = 0.12f),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, WarningAmber.copy(alpha = 0.35f)),
-                    modifier = Modifier.fillMaxWidth()
+                Box(
+                    modifier = Modifier.fillMaxWidth(),
+                    contentAlignment = Alignment.Center
                 ) {
+                    // Ambient amber backlight halo
+                    Box(
+                        modifier = Modifier
+                            .matchParentSize()
+                            .padding(4.dp)
+                            .alpha(0.22f)
+                            .background(
+                                brush = Brush.radialGradient(
+                                    colors = listOf(WarningAmber, Color.Transparent)
+                                ),
+                                shape = RoundedCornerShape(16.dp)
+                            )
+                    )
+
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = WarningAmber.copy(alpha = 0.12f),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, WarningAmber.copy(alpha = 0.35f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -362,11 +386,13 @@ fun DashboardScreen(
                 }
             }
         }
+    }
 
         // 3. Bento Hero Net Worth Card
         item {
             HigGlassCard(
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth(),
+                backlightColor = PrimaryBlue.copy(alpha = 0.35f)
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -502,7 +528,7 @@ fun DashboardScreen(
                     subtitle = "Of Cashflow Saved",
                     value = "${savingsRate.toInt()}%",
                     color = AccentCyan,
-                    icon = Icons.Default.TrendingUp,
+                    icon = Icons.AutoMirrored.Filled.TrendingUp,
                     modifier = Modifier.weight(1f)
                 )
             }
@@ -520,7 +546,7 @@ fun DashboardScreen(
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         Icon(
-                            imageVector = Icons.Default.ShowChart,
+                            imageVector = Icons.AutoMirrored.Filled.ShowChart,
                             contentDescription = null,
                             tint = PrimaryBlue,
                             modifier = Modifier.size(18.dp)
@@ -582,6 +608,7 @@ fun DashboardScreen(
                     daysRange = daysRange,
                     isCumulative = chartModeIndex == 0,
                     currencyFormat = currencyFormat,
+                    primaryCurrency = primaryCurrency,
                     modifier = Modifier.fillMaxWidth()
                 )
             }
@@ -945,71 +972,107 @@ private fun KpiStatTile(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     modifier: Modifier = Modifier
 ) {
-    Surface(
-        modifier = modifier
-            .shadow(2.dp, RoundedCornerShape(14.dp))
-            .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(14.dp)),
-        shape = RoundedCornerShape(14.dp),
-        color = MaterialTheme.colorScheme.surface
-    ) {
-        Column(
-            modifier = Modifier.padding(10.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = title,
-                    fontSize = 9.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    letterSpacing = 0.3.sp,
-                    maxLines = 1,
-                    modifier = Modifier.weight(1f)
+    Box(modifier = modifier) {
+        // Subtle ambient neon backlight halo behind the stat tile
+        Box(
+            modifier = Modifier
+                .matchParentSize()
+                .offset(y = 2.dp)
+                .background(
+                    brush = Brush.radialGradient(
+                        colors = listOf(color.copy(alpha = 0.28f), Color.Transparent)
+                    ),
+                    shape = RoundedCornerShape(14.dp)
                 )
-                Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    tint = color,
-                    modifier = Modifier.size(14.dp)
+        )
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .shadow(2.dp, RoundedCornerShape(14.dp))
+                .border(1.dp, color.copy(alpha = 0.25f), RoundedCornerShape(14.dp)),
+            shape = RoundedCornerShape(14.dp),
+            color = MaterialTheme.colorScheme.surface
+        ) {
+            Column(
+                modifier = Modifier.padding(10.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = title,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        letterSpacing = 0.3.sp,
+                        maxLines = 1,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        tint = color,
+                        modifier = Modifier.size(14.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(4.dp))
+
+                Text(
+                    text = value,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = color,
+                    maxLines = 1
+                )
+
+                Text(
+                    text = subtitle,
+                    fontSize = 9.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1
                 )
             }
-
-            Spacer(modifier = Modifier.height(4.dp))
-
-            Text(
-                text = value,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Bold,
-                color = color,
-                maxLines = 1
-            )
-
-            Text(
-                text = subtitle,
-                fontSize = 9.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1
-            )
         }
     }
+}
+
+private val rowDateFormat = ThreadLocal.withInitial {
+    SimpleDateFormat("MMM dd", Locale.getDefault())
 }
 
 @Composable
 fun TransactionRowItem(
     transaction: TransactionEntity,
     currencyFormat: NumberFormat,
-    showDivider: Boolean = true
+    showDivider: Boolean = true,
+    primaryCurrency: String = CurrencyEngine.DEFAULT_CURRENCY
 ) {
     val isIncome = transaction.type == TransactionType.INCOME
+    val isRefund = transaction.type == TransactionType.REFUND
     val isTransfer = transaction.type == TransactionType.TRANSFER
-    val amountColor = if (isIncome) IncomeGreen else if (isTransfer) TransferViolet else ExpenseRose
-    val prefix = if (isIncome) "+" else if (isTransfer) "" else "-"
+    val amountColor = if (isRefund) Color(0xFF06B6D4) else if (isIncome) IncomeGreen else if (isTransfer) TransferViolet else ExpenseRose
+    val prefix = if (isIncome || isRefund) "+" else if (isTransfer) "" else "-"
 
-    val dateFormat = remember { SimpleDateFormat("MMM dd", Locale.getDefault()) }
-    val directionLabel = if (isIncome) "Income" else if (isTransfer) "Transfer" else "Expense"
+    val directionLabel = if (isRefund) "Refund" else if (isIncome) "Income" else if (isTransfer) "Transfer" else "Expense"
+    val txnCurrency = transaction.currency.ifBlank { CurrencyEngine.DEFAULT_CURRENCY }
+    val isForeign = !txnCurrency.equals(primaryCurrency, ignoreCase = true)
+
+    val formattedDate = remember(transaction.date) {
+        val sdf = rowDateFormat.get() ?: SimpleDateFormat("MMM dd", Locale.getDefault())
+        sdf.format(Date(transaction.date))
+    }
+    val formattedAmount = remember(transaction.amount, txnCurrency) {
+        CurrencyEngine.format(transaction.amount, txnCurrency)
+    }
+    val convertedAmount = if (isForeign) {
+        remember(transaction.amount, txnCurrency, primaryCurrency) {
+            val converted = CurrencyEngine.convert(transaction.amount, txnCurrency, primaryCurrency)
+            CurrencyEngine.format(converted, primaryCurrency)
+        }
+    } else null
 
     Column(
         modifier = Modifier
@@ -1035,7 +1098,7 @@ fun TransactionRowItem(
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
-                        imageVector = if (isIncome) Icons.Default.ArrowDownward else if (isTransfer) Icons.Default.SyncAlt else Icons.Default.ArrowUpward,
+                        imageVector = if (isRefund) Icons.Default.Refresh else if (isIncome) Icons.Default.ArrowDownward else if (isTransfer) Icons.Default.SyncAlt else Icons.Default.ArrowUpward,
                         contentDescription = directionLabel,
                         tint = amountColor,
                         modifier = Modifier.size(18.dp)
@@ -1069,7 +1132,7 @@ fun TransactionRowItem(
                         }
                     }
                     Text(
-                        text = "${dateFormat.format(Date(transaction.date))} · ${transaction.category} · ${transaction.paymentMode}",
+                        text = "$formattedDate · ${transaction.category} · ${transaction.paymentMode}",
                         fontSize = 11.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
@@ -1078,12 +1141,21 @@ fun TransactionRowItem(
                 }
             }
 
-            Text(
-                text = "$prefix${currencyFormat.format(transaction.amount)}",
-                fontWeight = FontWeight.Bold,
-                fontSize = 15.sp,
-                color = amountColor
-            )
+            Column(horizontalAlignment = Alignment.End) {
+                Text(
+                    text = "$prefix$formattedAmount",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 15.sp,
+                    color = amountColor
+                )
+                if (convertedAmount != null) {
+                    Text(
+                        text = "≈ $convertedAmount",
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
         }
 
         if (showDivider) {
@@ -1110,12 +1182,13 @@ private fun InteractiveCashflowGraph(
     daysRange: Int,
     isCumulative: Boolean,
     currencyFormat: NumberFormat,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    primaryCurrency: String = CurrencyEngine.DEFAULT_CURRENCY
 ) {
     var selectedIndex by remember { mutableStateOf<Int?>(null) }
 
     // 1. Group transactions into last N days (7D, 30D, 3M, 6M, 1Y, ALL)
-    val points = remember(transactions, daysRange) {
+    val points = remember(transactions, daysRange, primaryCurrency) {
         val sdfDate = SimpleDateFormat("yyyy-MM-dd", Locale.ENGLISH)
         val sdfDisplay = SimpleDateFormat("d MMM", Locale.ENGLISH)
         val validTxns = transactions.filter { it.duplicateStatus != "merged" }
@@ -1149,10 +1222,11 @@ private fun InteractiveCashflowGraph(
             val dStr = sdfDate.format(Date(t.date))
             if (dateMap.containsKey(dStr)) {
                 val current = dateMap[dStr] ?: Pair(0.0, 0.0)
+                val converted = CurrencyEngine.convert(t.amount, t.currency, primaryCurrency)
                 if (t.type == TransactionType.INCOME) {
-                    dateMap[dStr] = Pair(current.first + t.amount, current.second)
+                    dateMap[dStr] = Pair(current.first + converted, current.second)
                 } else if (t.type == TransactionType.EXPENSE) {
-                    dateMap[dStr] = Pair(current.first, current.second + t.amount)
+                    dateMap[dStr] = Pair(current.first, current.second + converted)
                 }
             }
         }

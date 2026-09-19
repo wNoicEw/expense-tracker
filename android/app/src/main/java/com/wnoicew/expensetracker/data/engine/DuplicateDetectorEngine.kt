@@ -22,12 +22,13 @@ object DuplicateDetectorEngine {
         val detectedPairs = mutableListOf<DuplicatePair>()
         val matchedIds = mutableSetOf<String>()
 
-        // Group by amount (in paise / cents) for fast O(1) candidate lookup
-        val amountMap = mutableMapOf<Long, MutableList<TransactionEntity>>()
+        // Group by currency + amount (in paise / cents) for fast O(1) candidate lookup
+        val amountMap = mutableMapOf<String, MutableList<TransactionEntity>>()
 
         for (t in transactions) {
             if (t.duplicateStatus == "merged" || t.duplicateStatus == "dismissed") continue
-            val amtKey = (abs(t.amount) * 100).toLong()
+            val curr = t.currency.ifBlank { "INR" }.uppercase()
+            val amtKey = "${curr}_${kotlin.math.round(abs(t.amount) * 100).toLong()}"
             amountMap.getOrPut(amtKey) { mutableListOf() }.add(t)
         }
 
@@ -81,6 +82,18 @@ object DuplicateDetectorEngine {
     fun compareTransactions(t1: TransactionEntity, t2: TransactionEntity): MatchResult {
         if (t1.id == t2.id) return MatchResult(false, 0, "")
 
+        // Type Check: Transactions MUST have the same type (an Expense and a Refund or Income must NEVER be treated as duplicates!)
+        if (t1.type != t2.type) {
+            return MatchResult(false, 0, "")
+        }
+
+        // Currency Check: Transactions MUST have the exact same currency
+        val curr1 = t1.currency.ifBlank { "INR" }.uppercase()
+        val curr2 = t2.currency.ifBlank { "INR" }.uppercase()
+        if (curr1 != curr2) {
+            return MatchResult(false, 0, "")
+        }
+
         // 1. Date Check: MUST be on the exact same calendar day
         if (!isSameDay(t1.date, t2.date)) {
             return MatchResult(false, 0, "")
@@ -121,7 +134,7 @@ object DuplicateDetectorEngine {
             return MatchResult(
                 true,
                 95,
-                "Exact match: Same Date, Amount (₹${t1.amount}), and Merchant: ${t1.description}"
+                "Exact match: Same Date, Amount ($curr1 ${t1.amount}), and Merchant: ${t1.description}"
             )
         }
 

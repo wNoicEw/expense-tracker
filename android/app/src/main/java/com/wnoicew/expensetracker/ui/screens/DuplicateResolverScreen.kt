@@ -19,6 +19,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.wnoicew.expensetracker.data.engine.CurrencyEngine
 import com.wnoicew.expensetracker.data.model.DuplicatePair
 import com.wnoicew.expensetracker.ui.MainViewModel
 import com.wnoicew.expensetracker.ui.components.HigGlassCard
@@ -34,18 +35,13 @@ fun DuplicateResolverScreen(
     viewModel: MainViewModel
 ) {
     val duplicatePairs = viewModel.duplicatePairs
-
-    val currencyFormat = remember {
-        NumberFormat.getCurrencyInstance(Locale("en", "IN")).apply {
-            maximumFractionDigits = 0
-        }
-    }
+    val primaryCurrency = viewModel.activeProfile.value?.currency ?: CurrencyEngine.DEFAULT_CURRENCY
 
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background),
-        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 16.dp),
+        contentPadding = PaddingValues(start = 16.dp, top = 4.dp, end = 16.dp, bottom = 16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         item {
@@ -124,7 +120,7 @@ fun DuplicateResolverScreen(
             items(duplicatePairs) { pair ->
                 DuplicateCandidateCard(
                     pair = pair,
-                    currencyFormat = currencyFormat,
+                    primaryCurrency = primaryCurrency,
                     onMerge = { viewModel.mergeDuplicatePair(pair) },
                     onDismiss = { viewModel.markDuplicateAsSeparate(pair) }
                 )
@@ -136,7 +132,7 @@ fun DuplicateResolverScreen(
 @Composable
 private fun DuplicateCandidateCard(
     pair: DuplicatePair,
-    currencyFormat: NumberFormat,
+    primaryCurrency: String,
     onMerge: () -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -172,7 +168,7 @@ private fun DuplicateCandidateCard(
                 }
 
                 Text(
-                    text = currencyFormat.format(pair.primaryTxn.amount),
+                    text = CurrencyEngine.format(pair.primaryTxn.amount, pair.primaryTxn.currency.ifBlank { primaryCurrency }),
                     fontSize = 17.sp,
                     fontWeight = FontWeight.ExtraBold,
                     color = ExpenseRose

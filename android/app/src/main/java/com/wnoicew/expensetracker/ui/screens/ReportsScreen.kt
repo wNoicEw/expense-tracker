@@ -17,6 +17,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.wnoicew.expensetracker.data.engine.CurrencyEngine
 import com.wnoicew.expensetracker.ui.MainViewModel
 import com.wnoicew.expensetracker.ui.rememberExportLaunchers
 import com.wnoicew.expensetracker.ui.components.HigGlassCard
@@ -30,13 +31,13 @@ import java.util.*
 fun ReportsScreen(
     viewModel: MainViewModel
 ) {
+    val primaryCurrency = viewModel.activeProfile.value?.currency ?: CurrencyEngine.DEFAULT_CURRENCY
+
     val inflow by viewModel.totalInflow30D.collectAsState()
     val outflow by viewModel.totalOutflow30D.collectAsState()
 
-    val currencyFormat = remember {
-        NumberFormat.getCurrencyInstance(Locale("en", "IN")).apply {
-            maximumFractionDigits = 0
-        }
+    val currencyFormat = remember(primaryCurrency) {
+        CurrencyEngine.getFormat(primaryCurrency)
     }
 
     val launchers = rememberExportLaunchers(viewModel)
@@ -45,7 +46,7 @@ fun ReportsScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background),
-        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 16.dp),
+        contentPadding = PaddingValues(start = 16.dp, top = 4.dp, end = 16.dp, bottom = 16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         item {

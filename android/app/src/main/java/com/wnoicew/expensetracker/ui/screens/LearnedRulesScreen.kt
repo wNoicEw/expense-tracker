@@ -39,7 +39,7 @@ fun LearnedRulesScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background),
-        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 16.dp),
+        contentPadding = PaddingValues(start = 16.dp, top = 4.dp, end = 16.dp, bottom = 16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         item {
@@ -158,8 +158,9 @@ fun LearnedRulesScreen(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 8.dp)
-                    .safeDrawingPadding(),
+                    .padding(start = 20.dp, end = 20.dp, top = 2.dp, bottom = 20.dp)
+                    .imePadding()
+                    .navigationBarsPadding(),
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
                 Text(

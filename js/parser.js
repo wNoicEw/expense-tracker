@@ -465,6 +465,7 @@ class StatementParser {
 
       const amount = amtM.value;
 
+      const isRefund = /refund|reversal|cashback/i.test(line);
       const isCredit = this.upiIsIncome(line, /credit|received|\bcr\b|refund|cashback|added/i);
 
       let narration = line.replace(dateM[0], '').replace(amtM.text, '').replace(/\s+/g, ' ').trim();
@@ -484,7 +485,7 @@ class StatementParser {
         date: this.normalizeDate(dateM[0]),
         narration: narration || 'Paytm Transaction',
         amount,
-        explicitType: isCredit ? 'income' : 'expense',
+        explicitType: isRefund ? 'refund' : (isCredit ? 'income' : 'expense'),
         referenceNo: this.extractRefNo(line),
         accountInfo,
         paymentMode: 'UPI'
@@ -693,11 +694,15 @@ class StatementParser {
       .replace(/\bCR\b/gi, '')
       .replace(/\bDR\b/gi, '')
       .trim();
+    let explicitType = txn.explicitType;
+    if (explicitType === 'income' && /refund|reversal|cashback/i.test(narration)) {
+      explicitType = 'refund';
+    }
     return {
       date: txn.date,
       narration: narration || 'Credit Card Transaction',
       amount: txn.amount,
-      explicitType: txn.explicitType,
+      explicitType,
       referenceNo: txn.referenceNo || null,
       paymentMode: 'Credit Card'
     };
@@ -733,10 +738,11 @@ class StatementParser {
       const anchor = anchorOf(row);
       if (!anchor || isNaN(anchor.amount) || anchor.amount <= 0) continue;
 
-      // Any "Paid to / Paid for / Bill payment of / Recharge of …" row is an expense unless it is a receipt
+      // Any "Paid to / Paid for / Bill payment of / Recharge of …" row is an expense unless it is a receipt or refund
       let details = join(row.words.filter(w => inCol(w, 100, 350)));
       if (!details) continue;
-      const isIncome = /^(received|refund)/i.test(details);
+      const isRefund = /^refund/i.test(details);
+      const isIncome = /^received/i.test(details);
 
       let account = join(row.words.filter(w => inCol(w, 350, 500)));
       let txnId = '';
@@ -768,7 +774,7 @@ class StatementParser {
         date: this.normalizeDate(anchor.rawDate),
         narration,
         amount: anchor.amount,
-        explicitType: isIncome ? 'income' : 'expense',
+        explicitType: isRefund ? 'refund' : (isIncome ? 'income' : 'expense'),
         referenceNo: txnId || null,
         accountInfo: account,
         paymentMode: /credit\s*card/i.test(account) ? 'UPI (RuPay Credit Card)' : 'UPI'
@@ -1005,15 +1011,21 @@ class StatementParser {
         }
         if (txnAmount === 0 && creditW) {
           const v = parseFloat(creditW.text.replace(/[₹,\s]/g, ''));
-          if (!isNaN(v) && v > 0) { txnAmount = v; explicitType = 'income'; }
+          if (!isNaN(v) && v > 0) {
+            txnAmount = v;
+            const isRefund = /refund|reversal|cashback/i.test(narrWords.join(' '));
+            explicitType = isRefund ? 'refund' : 'income';
+          }
         }
         if (txnAmount === 0 && amountW) {
           const v = parseFloat(amountW.text.replace(/[₹,\s]/g, ''));
           if (!isNaN(v) && v > 0) {
             txnAmount = v;
             const narrText = narrWords.join(' ');
+            const isRefund = /refund|reversal|cashback/i.test(narrText);
             const incomeRe = /credit|deposit|salary|refund|received|cashback/i;
-            explicitType = (opts.accountCol ? this.upiIsIncome(narrText, incomeRe) : incomeRe.test(narrText)) ? 'income' : 'expense';
+            const isIncome = (opts.accountCol ? this.upiIsIncome(narrText, incomeRe) : incomeRe.test(narrText));
+            explicitType = isRefund ? 'refund' : (isIncome ? 'income' : 'expense');
           }
         }
 
@@ -1139,6 +1151,7 @@ class StatementParser {
       if (dateM && amtM) {
         const amount = amtM.value;
         {
+          const isRefund = /refund|reversal|cashback/i.test(line);
           const isIncome = this.upiIsIncome(line, /credit|received|refund|cashback|\bcr\b/i);
 
           // Collect next 1-2 lines as narration supplement; the payer account line and txn ID (up to 4 rows down) are kept apart
@@ -1162,7 +1175,7 @@ class StatementParser {
             date: this.normalizeDate(dateM[0]),
             narration: narration || 'UPI Transaction',
             amount: amount,
-            explicitType: isIncome ? 'income' : 'expense',
+            explicitType: isRefund ? 'refund' : (isIncome ? 'income' : 'expense'),
             referenceNo: txnId || this.extractRefNo(line),
             accountInfo,
             paymentMode: 'UPI'
@@ -1219,6 +1232,7 @@ class StatementParser {
           }
 
           const rawDateStr = dateMatch[0];
+          const isRefund = /refund|reversal|cashback/i.test(line);
           const isCredit = /credit|cr\b|deposit|received|refund|cashback|reversal|salary/i.test(line);
           const isDebit = /debit|dr\b|withdrawal|paid|purchase|pos|spent/i.test(line);
           const narration = line.replace(rawDateStr, '').trim();
@@ -1227,7 +1241,7 @@ class StatementParser {
             date: this.normalizeDate(rawDateStr),
             narrationParts: [narration],
             amount: amounts[0],
-            explicitType: isCredit ? 'income' : (isDebit ? 'expense' : (narration.toLowerCase().includes('salary') ? 'income' : 'expense')),
+            explicitType: isRefund ? 'refund' : (isCredit ? 'income' : (isDebit ? 'expense' : (narration.toLowerCase().includes('salary') ? 'income' : 'expense'))),
             referenceNo: this.extractRefNo(line)
           };
         }
@@ -1735,18 +1749,20 @@ class StatementParser {
    * instead of forcing every such row to 'expense' (which turned salary into spending).
    */
   resolveAmountCells(debitCell, creditCell, amountCell, narration) {
+    const isRefund = /\b(refund|reversal)\b/i.test(narration || '');
     const debit = this.parseAmountCell(debitCell).value;
     if (debit > 0) return { amount: debit, explicitType: 'expense' };
 
     const credit = this.parseAmountCell(creditCell).value;
-    if (credit > 0) return { amount: credit, explicitType: 'income' };
+    if (credit > 0) return { amount: credit, explicitType: isRefund ? 'refund' : 'income' };
 
     if (amountCell !== null && amountCell !== undefined && amountCell !== '') {
       const { value, suffix } = this.parseAmountCell(amountCell);
       if (!isNaN(value) && value !== 0) {
         let explicitType = null;
         if (value < 0 || suffix === 'dr') explicitType = 'expense';
-        else if (suffix === 'cr' || /\b(credit|deposit|salary|refund)\b/i.test(narration || '')) explicitType = 'income';
+        else if (isRefund) explicitType = 'refund';
+        else if (suffix === 'cr' || /\b(credit|deposit|salary)\b/i.test(narration || '')) explicitType = 'income';
         return { amount: Math.abs(value), explicitType };
       }
     }

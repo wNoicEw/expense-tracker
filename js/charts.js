@@ -21,6 +21,10 @@ class ChartsEngine {
    * Helper to format currency for chart tooltips & labels
    */
   formatCurrency(value) {
+    const primaryCurrency = (window.profileManager?.getActiveProfile()?.currency) || 'INR';
+    if (window.CurrencyEngine) {
+      return window.CurrencyEngine.format(value, primaryCurrency, { maximumFractionDigits: 0 });
+    }
     const isNeg = Number(value) < 0;
     const absVal = Math.abs(Number(value) || 0);
     const formatted = '₹' + absVal.toLocaleString('en-IN', {
@@ -75,11 +79,15 @@ class ChartsEngine {
       };
     }
 
+    const primaryCurrency = (window.profileManager?.getActiveProfile()?.currency) || 'INR';
     validTxns.forEach(t => {
       const dateKey = t.date ? t.date.split('T')[0].split(' ')[0] : '';
       if (dateMap[dateKey]) {
-        const amt = Math.abs(parseFloat(t.amount) || 0);
-        if (t.type === 'income') dateMap[dateKey].income += amt;
+        const rawAmt = Math.abs(parseFloat(t.amount) || 0);
+        const amt = window.CurrencyEngine
+          ? window.CurrencyEngine.convert(rawAmt, t.currency || primaryCurrency, primaryCurrency)
+          : rawAmt;
+        if (t.type === 'income' || t.type === 'refund') dateMap[dateKey].income += amt;
         else if (t.type === 'expense') dateMap[dateKey].expense += amt;
       }
     });
@@ -113,7 +121,7 @@ class ChartsEngine {
       datasets = [
         {
           type: 'line',
-          label: 'Cumulative Flow (₹)',
+          label: `Cumulative Flow (${window.CurrencyEngine ? window.CurrencyEngine.getSymbol(primaryCurrency) : '₹'})`,
           data: cumulativeData,
           borderColor: (c) => {
             const val = c.raw;
@@ -297,11 +305,14 @@ class ChartsEngine {
       });
     }
 
-    const categoryTotals = {};
-
+    const primaryCurrency = (window.profileManager?.getActiveProfile()?.currency) || 'INR';
     validTxns.forEach(t => {
       const cat = t.category || 'Miscellaneous';
-      categoryTotals[cat] = (categoryTotals[cat] || 0) + (parseFloat(t.amount) || 0);
+      const rawAmt = parseFloat(t.amount) || 0;
+      const amt = window.CurrencyEngine
+        ? window.CurrencyEngine.convert(rawAmt, t.currency || primaryCurrency, primaryCurrency)
+        : rawAmt;
+      categoryTotals[cat] = (categoryTotals[cat] || 0) + amt;
     });
 
     const sortedCats = Object.entries(categoryTotals).sort((a, b) => b[1] - a[1]);

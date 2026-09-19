@@ -18,7 +18,8 @@ data class UserProfile(
     val name: String,
     val initial: String,
     val gradientColors: List<Long>,
-    val createdAt: Long = System.currentTimeMillis()
+    val createdAt: Long = System.currentTimeMillis(),
+    val currency: String = "INR"
 ) {
     fun toBrush(): Brush {
         val colors = if (gradientColors.size >= 2) {
@@ -72,7 +73,8 @@ class ProfileManager(private val context: Context) {
                         gradColors.addAll(PRESET_GRADIENTS[i % PRESET_GRADIENTS.size])
                     }
                     val createdAt = obj.optLong("createdAt", System.currentTimeMillis())
-                    profiles.add(UserProfile(id, name, initial, gradColors, createdAt))
+                    val currency = obj.optString("currency", "INR")
+                    profiles.add(UserProfile(id, name, initial, gradColors, createdAt, currency))
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
@@ -94,12 +96,13 @@ class ProfileManager(private val context: Context) {
             p.gradientColors.forEach { gradArray.put(it) }
             obj.put("gradient", gradArray)
             obj.put("createdAt", p.createdAt)
+            obj.put("currency", p.currency)
             array.put(obj)
         }
         prefs.edit().putString("profiles_json", array.toString()).apply()
     }
 
-    fun createProfile(name: String): UserProfile {
+    fun createProfile(name: String, currency: String = "INR"): UserProfile {
         val trimmed = name.trim()
         require(trimmed.isNotEmpty()) { "Profile name cannot be empty" }
         require(profiles.none { it.name.equals(trimmed, ignoreCase = true) }) { "A profile named '$trimmed' already exists" }
@@ -109,7 +112,8 @@ class ProfileManager(private val context: Context) {
             id = UUID.randomUUID().toString(),
             name = trimmed,
             initial = trimmed.first().uppercase(),
-            gradientColors = PRESET_GRADIENTS[gradientIndex]
+            gradientColors = PRESET_GRADIENTS[gradientIndex],
+            currency = currency
         )
         profiles.add(newProfile)
         saveProfiles()
@@ -126,6 +130,19 @@ class ProfileManager(private val context: Context) {
         if (index != -1) {
             val old = profiles[index]
             val updated = old.copy(name = trimmed, initial = trimmed.first().uppercase())
+            profiles[index] = updated
+            if (activeProfile.value?.id == id) {
+                activeProfile.value = updated
+            }
+            saveProfiles()
+        }
+    }
+
+    fun updateProfileCurrency(id: String, newCurrency: String) {
+        val index = profiles.indexOfFirst { it.id == id }
+        if (index != -1) {
+            val old = profiles[index]
+            val updated = old.copy(currency = newCurrency)
             profiles[index] = updated
             if (activeProfile.value?.id == id) {
                 activeProfile.value = updated

@@ -47,7 +47,10 @@ class ProfileManager {
    * @returns {{ id: string, name: string, color: string, initial: string, createdAt: string, lastUsedAt: string }[]}
    */
   getProfiles() {
-    return this._load();
+    return this._load().map(p => ({
+      ...p,
+      currency: p.currency || 'INR'
+    }));
   }
 
   /**
@@ -56,7 +59,12 @@ class ProfileManager {
   getActiveProfile() {
     const id = localStorage.getItem(ACTIVE_PROFILE_KEY);
     if (!id) return null;
-    return this._load().find(p => p.id === id) || null;
+    const p = this._load().find(item => item.id === id);
+    if (!p) return null;
+    return {
+      ...p,
+      currency: p.currency || 'INR'
+    };
   }
 
   /**
@@ -69,8 +77,9 @@ class ProfileManager {
   /**
    * Creates a new profile, sets it as active, and reloads the page.
    * @param {string} name - Display name for the profile.
+   * @param {string} [currency='INR'] - Primary currency code.
    */
-  createProfile(name) {
+  createProfile(name, currency = null) {
     name = (name || '').trim();
     if (!name) throw new Error('Profile name cannot be empty.');
     if (name.length > 32) throw new Error('Profile name must be 32 characters or fewer.');
@@ -85,12 +94,15 @@ class ProfileManager {
     const id = 'user_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
     const initial = name.trim()[0].toUpperCase();
     const color = AVATAR_COLORS[profiles.length % AVATAR_COLORS.length];
+    const active = this.getActiveProfile();
+    const validCurrency = (currency || active?.currency || 'INR').toUpperCase();
 
     const profile = {
       id,
       name,
       initial,
       color,
+      currency: validCurrency,
       createdAt: new Date().toISOString(),
       lastUsedAt: new Date().toISOString()
     };
@@ -102,6 +114,22 @@ class ProfileManager {
     // Activate and reload
     this._setActive(id);
     location.reload();
+    return profile;
+  }
+
+  /**
+   * Updates primary currency for a given profile.
+   * @param {string} id
+   * @param {string} currency
+   */
+  updateProfileCurrency(id, currency) {
+    const profiles = this._load();
+    const profile = profiles.find(p => p.id === id);
+    if (!profile) throw new Error('Profile not found.');
+    profile.currency = (currency || 'INR').toUpperCase();
+    this._profiles = profiles;
+    this._save();
+    return profile;
   }
 
   /**
@@ -132,6 +160,14 @@ class ProfileManager {
     const profile = profiles.find(p => p.id === id);
     if (!profile) return;
 
+    // Close open connection if deleting the active profile's database
+    const activeId = localStorage.getItem(ACTIVE_PROFILE_KEY);
+    if (activeId === id && window.db && typeof window.db.close === 'function') {
+      try {
+        window.db.close();
+      } catch (_) {}
+    }
+
     // Delete the IndexedDB for this profile
     const dbName = `ExpenseTrackerDB_${id}`;
     await new Promise((resolve) => {
@@ -145,7 +181,6 @@ class ProfileManager {
     this._profiles = profiles.filter(p => p.id !== id);
     this._save();
 
-    const activeId = localStorage.getItem(ACTIVE_PROFILE_KEY);
     if (activeId === id) {
       // Switch to the first remaining profile or clear active
       if (this._profiles.length > 0) {

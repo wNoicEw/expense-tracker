@@ -5,6 +5,7 @@ import com.wnoicew.expensetracker.data.UserProfile
 import com.wnoicew.expensetracker.data.engine.BackupFormatException
 import com.wnoicew.expensetracker.data.engine.BackupReminderPolicy
 import com.wnoicew.expensetracker.data.engine.CategorizerEngine
+import com.wnoicew.expensetracker.data.engine.CurrencyEngine
 import com.wnoicew.expensetracker.data.engine.DuplicateDetectorEngine
 import com.wnoicew.expensetracker.data.engine.ExportEngine
 import com.wnoicew.expensetracker.data.engine.StatementParserEngine
@@ -209,6 +210,19 @@ class LogicTests {
     fun testDuplicateDetectorNonMatchingAmountsIgnored() {
         val t1 = TransactionEntity(id = "t1", date = System.currentTimeMillis(), description = "Uber", amount = 250.0)
         val t2 = TransactionEntity(id = "t2", date = System.currentTimeMillis(), description = "Uber", amount = 450.0)
+
+        val duplicates = DuplicateDetectorEngine.scanDuplicates(listOf(t1, t2))
+        assertTrue(duplicates.isEmpty())
+    }
+
+    @Test
+    fun testDuplicateDetectorCrossCurrencyNeverMatches() {
+        val now = System.currentTimeMillis()
+        val t1 = TransactionEntity(id = "t1", date = now, description = "Coffee", amount = 10.0, currency = "USD")
+        val t2 = TransactionEntity(id = "t2", date = now, description = "Coffee", amount = 10.0, currency = "INR")
+
+        val match = DuplicateDetectorEngine.compareTransactions(t1, t2)
+        assertFalse(match.isMatch)
 
         val duplicates = DuplicateDetectorEngine.scanDuplicates(listOf(t1, t2))
         assertTrue(duplicates.isEmpty())
@@ -992,5 +1006,394 @@ class LogicTests {
         assertNull(res.rowAccounts[2])
         assertEquals(500.0, res.totalInflow, 0.001)
         assertEquals(1333.5, res.totalOutflow, 0.001)
+    }
+
+    // ==========================================
+    // 16. MULTI-CURRENCY ENGINE & CROSS-RATES TESTS
+    // ==========================================
+
+    @Test
+    fun testCurrencyEngineSupportedCurrenciesAndSymbols() {
+        val supported = CurrencyEngine.getSupportedCurrencies()
+        assertEquals(6, supported.size)
+        val codes = supported.map { it.code }
+        assertTrue(codes.containsAll(listOf("INR", "USD", "EUR", "GBP", "CHF", "JPY")))
+
+        assertEquals("₹", CurrencyEngine.getSymbol("INR"))
+        assertEquals("$", CurrencyEngine.getSymbol("USD"))
+        assertEquals("€", CurrencyEngine.getSymbol("EUR"))
+        assertEquals("£", CurrencyEngine.getSymbol("GBP"))
+        assertEquals("₣", CurrencyEngine.getSymbol("CHF"))
+        assertEquals("¥", CurrencyEngine.getSymbol("JPY"))
+
+        // Default fallback for unknown currency code
+        assertEquals("₹", CurrencyEngine.getSymbol("XYZ"))
+    }
+
+    @Test
+    fun testCurrencyEngineConversionBaselineCrossRates() {
+        CurrencyEngine.resetRatesForTesting()
+
+        // Same currency
+        assertEquals(100.0, CurrencyEngine.convert(100.0, "USD", "USD"), 0.001)
+        assertEquals(2500.0, CurrencyEngine.convert(2500.0, "INR", "INR"), 0.001)
+
+        // Case insensitivity
+        assertEquals(8350.0, CurrencyEngine.convert(100.0, "usd", "inr"), 0.01)
+
+        // USD to Foreign (1 USD = 83.50 INR, 0.92 EUR, 0.78 GBP, 0.89 CHF, 155 JPY)
+        assertEquals(8350.0, CurrencyEngine.convert(100.0, "USD", "INR"), 0.01)
+        assertEquals(92.0, CurrencyEngine.convert(100.0, "USD", "EUR"), 0.01)
+        assertEquals(78.0, CurrencyEngine.convert(100.0, "USD", "GBP"), 0.01)
+        assertEquals(89.0, CurrencyEngine.convert(100.0, "USD", "CHF"), 0.01)
+        assertEquals(15500.0, CurrencyEngine.convert(100.0, "USD", "JPY"), 0.01)
+
+        // Foreign to USD
+        assertEquals(100.0, CurrencyEngine.convert(8350.0, "INR", "USD"), 0.01)
+        assertEquals(100.0, CurrencyEngine.convert(92.0, "EUR", "USD"), 0.01)
+        assertEquals(100.0, CurrencyEngine.convert(78.0, "GBP", "USD"), 0.01)
+        assertEquals(100.0, CurrencyEngine.convert(89.0, "CHF", "USD"), 0.01)
+        assertEquals(100.0, CurrencyEngine.convert(15500.0, "JPY", "USD"), 0.01)
+
+        // Cross-currency conversion (EUR to INR via USD)
+        // 92 EUR = 100 USD = 8350 INR
+        assertEquals(8350.0, CurrencyEngine.convert(92.0, "EUR", "INR"), 0.05)
+    }
+
+    @Test
+    fun testCurrencyEngineCustomRatesOverrideAndReset() {
+        try {
+            CurrencyEngine.setRateForTesting("EUR", 0.90)
+            assertEquals(90.0, CurrencyEngine.convert(100.0, "USD", "EUR"), 0.01)
+
+            CurrencyEngine.setRateForTesting("INR", 85.00)
+            assertEquals(8500.0, CurrencyEngine.convert(100.0, "USD", "INR"), 0.01)
+        } finally {
+            CurrencyEngine.resetRatesForTesting()
+        }
+        assertEquals(92.0, CurrencyEngine.convert(100.0, "USD", "EUR"), 0.01)
+        assertEquals(8350.0, CurrencyEngine.convert(100.0, "USD", "INR"), 0.01)
+    }
+
+    @Test
+    fun testCurrencyEngineOnceADayFetchDecisionLogic() {
+        // When never fetched before (null), should fetch
+        assertTrue(CurrencyEngine.shouldFetchRatesOnDate(null, "2026-09-19"))
+
+        // When last fetched yesterday, should fetch today
+        assertTrue(CurrencyEngine.shouldFetchRatesOnDate("2026-09-18", "2026-09-19"))
+
+        // When already fetched today, should NOT fetch again
+        assertFalse(CurrencyEngine.shouldFetchRatesOnDate("2026-09-19", "2026-09-19"))
+    }
+
+    @Test
+    fun testCurrencyEngineParseApiResponseJson() {
+        val sampleApiPayload = """
+            {
+                "date": "2026-09-19",
+                "usd": {
+                    "usd": 1.0,
+                    "inr": 84.12,
+                    "eur": 0.91,
+                    "gbp": 0.77,
+                    "chf": 0.88,
+                    "jpy": 154.50,
+                    "cny": 7.22,
+                    "aud": 1.51
+                }
+            }
+        """.trimIndent()
+
+        val parsed = CurrencyEngine.parseRatesJson(sampleApiPayload)
+        assertEquals(6, parsed.size)
+        assertEquals(1.0, parsed["USD"] ?: 0.0, 0.001)
+        assertEquals(84.12, parsed["INR"] ?: 0.0, 0.001)
+        assertEquals(0.91, parsed["EUR"] ?: 0.0, 0.001)
+        assertEquals(0.77, parsed["GBP"] ?: 0.0, 0.001)
+        assertEquals(0.88, parsed["CHF"] ?: 0.0, 0.001)
+        assertEquals(154.50, parsed["JPY"] ?: 0.0, 0.001)
+        assertFalse(parsed.containsKey("CNY"))
+        assertFalse(parsed.containsKey("AUD"))
+    }
+
+    @Test
+    fun testMultiCurrencyKpiMathTotalsConversion() {
+        CurrencyEngine.resetRatesForTesting()
+
+        val mixedTxns = listOf(
+            TransactionEntity(
+                id = "1",
+                date = System.currentTimeMillis(),
+                description = "Domestic Expense",
+                amount = 835.0,
+                type = TransactionType.EXPENSE,
+                category = "Food",
+                currency = "INR"
+            ),
+            TransactionEntity(
+                id = "2",
+                date = System.currentTimeMillis(),
+                description = "Foreign Software Sub",
+                amount = 100.0,
+                type = TransactionType.EXPENSE,
+                category = "Software",
+                currency = "USD" // 100 USD = 8350 INR
+            ),
+            TransactionEntity(
+                id = "3",
+                date = System.currentTimeMillis(),
+                description = "Foreign Salary / Freelance",
+                amount = 200.0,
+                type = TransactionType.INCOME,
+                category = "Freelance",
+                currency = "USD" // 200 USD = 16700 INR
+            )
+        )
+
+        // Converted to target primary currency INR
+        val totalsInInr = KpiMath.totals(mixedTxns, range = KpiRange.ALL, today = LocalDate.now(), targetCurrency = "INR")
+        // Total expense: 835 INR + 8350 INR = 9185 INR
+        assertEquals(9185.0, totalsInInr.outflow, 0.1)
+        // Total income: 16700 INR
+        assertEquals(16700.0, totalsInInr.inflow, 0.1)
+
+        // Converted to target primary currency USD
+        val totalsInUsd = KpiMath.totals(mixedTxns, range = KpiRange.ALL, today = LocalDate.now(), targetCurrency = "USD")
+        // 835 INR = 10 USD; + 100 USD = 110 USD
+        assertEquals(110.0, totalsInUsd.outflow, 0.1)
+        assertEquals(200.0, totalsInUsd.inflow, 0.1)
+    }
+
+    @Test
+    fun testExportEngineWithMultiCurrency() {
+        val txns = listOf(
+            TransactionEntity(
+                id = "t1",
+                date = 1712000000000L,
+                description = "Coffee in Tokyo",
+                amount = 500.0,
+                type = TransactionType.EXPENSE,
+                category = "Food",
+                currency = "JPY"
+            )
+        )
+        val accs = listOf(
+            AccountEntity(
+                id = "a1",
+                name = "US Bank",
+                type = "Checking",
+                balance = 1200.0,
+                currency = "USD"
+            )
+        )
+
+        // Test CSV contains Currency
+        val csv = ExportEngine.generateCsv(txns, accs)
+        assertTrue(csv.contains("Currency"))
+        assertTrue(csv.contains("\"JPY\""))
+
+        // Test JSON backup preserves currency
+        val json = ExportEngine.generateJsonBackup("TestProfile", txns, accs, emptyList())
+        assertTrue(json.contains("\"currency\": \"JPY\""))
+        assertTrue(json.contains("\"currency\": \"USD\""))
+
+        val parsed = ExportEngine.parseJsonBackup(json)
+        assertEquals(1, parsed.transactions.size)
+        assertEquals("JPY", parsed.transactions[0].currency)
+        assertEquals(1, parsed.accounts.size)
+        assertEquals("USD", parsed.accounts[0].currency)
+    }
+
+    @Test
+    fun testRefundDeduplicationIsolation() {
+        val expense = TransactionEntity(
+            id = "txn_exp_1",
+            date = 1710000000000L,
+            description = "Amazon Purchase Electronics",
+            amount = 1499.0,
+            type = TransactionType.EXPENSE,
+            category = "Shopping"
+        )
+        val refund = TransactionEntity(
+            id = "txn_ref_1",
+            date = 1710000000000L,
+            description = "Amazon Purchase Electronics Refund",
+            amount = 1499.0,
+            type = TransactionType.REFUND,
+            category = "Shopping"
+        )
+
+        // Expense and Refund must NEVER match as duplicate
+        val comparison = DuplicateDetectorEngine.compareTransactions(expense, refund)
+        assertFalse(comparison.isMatch)
+
+        val duplicates = DuplicateDetectorEngine.scanDuplicates(listOf(expense, refund))
+        assertTrue("Expense and refund of same amount/merchant must not be flagged as duplicates", duplicates.isEmpty())
+    }
+
+    @Test
+    fun testWebBackupImportInAndroid() {
+        val webJson = """
+        {
+            "app": "money-tracker",
+            "schemaVersion": 1,
+            "exportedAt": "2026-03-15T12:00:00.000Z",
+            "profileName": "Sahak",
+            "stores": {
+                "transactions": [
+                    {
+                        "id": "w_txn_1",
+                        "description": "Zomato Order Reversal",
+                        "amount": 340.50,
+                        "type": "refund",
+                        "category": "Food & Dining",
+                        "account": "HDFC Salary",
+                        "date": "2026-03-15",
+                        "paymentMode": "UPI",
+                        "currency": "INR"
+                    }
+                ],
+                "accounts": [
+                    {
+                        "id": "w_acc_1",
+                        "name": "HDFC Salary",
+                        "type": "Savings",
+                        "balance": 52000.0,
+                        "currency": "INR"
+                    }
+                ],
+                "rules": []
+            }
+        }
+        """.trimIndent()
+
+        val parsed = ExportEngine.parseJsonBackup(webJson)
+        assertEquals(1, parsed.transactions.size)
+        val txn = parsed.transactions[0]
+        assertEquals("w_txn_1", txn.id)
+        assertEquals("Zomato Order Reversal", txn.description)
+        assertEquals(340.50, txn.amount, 0.001)
+        assertEquals(TransactionType.REFUND, txn.type)
+        assertEquals("Food & Dining", txn.category)
+        assertEquals("HDFC Salary", txn.accountName)
+        assertEquals("INR", txn.currency)
+        assertTrue(txn.date > 0L)
+
+        assertEquals(1, parsed.accounts.size)
+        assertEquals("HDFC Salary", parsed.accounts[0].name)
+    }
+
+    @Test
+    fun testKpiTotalsIncludesRefundAsInflow() {
+        val txns = listOf(
+            TransactionEntity(
+                id = "t1",
+                date = System.currentTimeMillis(),
+                description = "Freelance Gig",
+                amount = 1000.0,
+                type = TransactionType.INCOME,
+                category = "Income",
+                currency = "INR"
+            ),
+            TransactionEntity(
+                id = "t2",
+                date = System.currentTimeMillis(),
+                description = "Book Purchase",
+                amount = 250.0,
+                type = TransactionType.EXPENSE,
+                category = "Education",
+                currency = "INR"
+            ),
+            TransactionEntity(
+                id = "t3",
+                date = System.currentTimeMillis(),
+                description = "Book Return Refund",
+                amount = 250.0,
+                type = TransactionType.REFUND,
+                category = "Education",
+                currency = "INR"
+            )
+        )
+
+        val totals = KpiMath.totals(txns, range = KpiRange.ALL, today = LocalDate.now(), targetCurrency = "INR")
+        // Inflow: 1000 + 250 = 1250
+        assertEquals(1250.0, totals.inflow, 0.001)
+        // Outflow: 250
+        assertEquals(250.0, totals.outflow, 0.001)
+    }
+
+    @Test
+    fun testCurrencyEngineManualOverridesAndReset() {
+        CurrencyEngine.resetRatesForTesting()
+
+        // 1. Initial state
+        assertFalse(CurrencyEngine.isManualOverride("EUR"))
+        assertFalse(CurrencyEngine.hasAnyManualOverride())
+        assertEquals(0.92, CurrencyEngine.getApiRate("EUR"), 0.001)
+
+        // 2. Set manual rate for testing
+        CurrencyEngine.setRateForTesting("EUR", 0.80)
+        CurrencyEngine.setManualOverrideForTesting("EUR", true)
+
+        assertTrue(CurrencyEngine.isManualOverride("EUR"))
+        assertTrue(CurrencyEngine.hasAnyManualOverride())
+
+        // 3. Conversion with overridden rate: 80 EUR to USD = (80 / 0.80) * 1.0 = 100 USD
+        val usd = CurrencyEngine.convert(80.0, "EUR", "USD")
+        assertEquals(100.0, usd, 0.001)
+
+        // 4. Reset single override
+        CurrencyEngine.setManualOverrideForTesting("EUR", false)
+        CurrencyEngine.setRateForTesting("EUR", CurrencyEngine.getApiRate("EUR"))
+        assertFalse(CurrencyEngine.isManualOverride("EUR"))
+        assertEquals(0.92, CurrencyEngine.convert(1.0, "USD", "EUR"), 0.001)
+
+        // 5. Reset all
+        CurrencyEngine.setRateForTesting("INR", 90.0)
+        CurrencyEngine.setManualOverrideForTesting("INR", true)
+        assertTrue(CurrencyEngine.hasAnyManualOverride())
+
+        CurrencyEngine.resetRatesForTesting()
+        assertFalse(CurrencyEngine.hasAnyManualOverride())
+        assertFalse(CurrencyEngine.isManualOverride("INR"))
+        assertEquals(83.50, CurrencyEngine.convert(1.0, "USD", "INR"), 0.001)
+    }
+
+    @Test
+    fun testCurrencyEngineDynamicBaseRatesAndRelativeOverrides() {
+        CurrencyEngine.resetRatesForTesting()
+
+        // 1. When EUR is base currency:
+        // Baseline: 1 USD = 0.92 EUR, 1 USD = 83.5 INR
+        // 1 EUR = (83.5 / 0.92) INR = ~90.7608 INR
+        val apiInrPerEur = CurrencyEngine.getApiRateAgainstBase("INR", "EUR")
+        assertEquals(83.5 / 0.92, apiInrPerEur, 0.001)
+
+        val initialRate = CurrencyEngine.getRateAgainstBase("INR", "EUR")
+        assertEquals(83.5 / 0.92, initialRate, 0.001)
+
+        // 2. Base currency against itself is 1.0 (and filtered out from UI lists)
+        assertEquals(1.0, CurrencyEngine.getRateAgainstBase("EUR", "EUR"), 0.0001)
+        val supported = CurrencyEngine.getSupportedCurrencies()
+        val filteredForEur = supported.filter { !it.code.equals("EUR", ignoreCase = true) }
+        assertEquals(supported.size - 1, filteredForEur.size)
+        assertFalse(filteredForEur.any { it.code.equals("EUR", ignoreCase = true) })
+
+        // 3. User overrides rate against base: e.g. 1 EUR = 100.0 INR
+        CurrencyEngine.setRateAgainstBaseForTesting("INR", "EUR", 100.0)
+        assertTrue(CurrencyEngine.isManualOverride("INR"))
+
+        val newRate = CurrencyEngine.getRateAgainstBase("INR", "EUR")
+        assertEquals(100.0, newRate, 0.0001)
+
+        // 4. Conversions reflect 1 EUR = 100 INR
+        assertEquals(1000.0, CurrencyEngine.convert(10.0, "EUR", "INR"), 0.001)
+        assertEquals(10.0, CurrencyEngine.convert(1000.0, "INR", "EUR"), 0.001)
+
+        // 5. Reset rates
+        CurrencyEngine.resetRatesForTesting()
+        assertFalse(CurrencyEngine.isManualOverride("INR"))
+        assertEquals(83.5 / 0.92, CurrencyEngine.getRateAgainstBase("INR", "EUR"), 0.001)
     }
 }

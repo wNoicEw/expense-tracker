@@ -14,6 +14,7 @@ import com.wnoicew.expensetracker.data.db.ExpenseTrackerDatabase
 import com.wnoicew.expensetracker.data.engine.BackupFormatException
 import com.wnoicew.expensetracker.data.engine.BackupReminderPolicy
 import com.wnoicew.expensetracker.data.engine.CategorizerEngine
+import com.wnoicew.expensetracker.data.engine.CurrencyEngine
 import com.wnoicew.expensetracker.data.engine.DuplicateDetectorEngine
 import com.wnoicew.expensetracker.data.engine.ExportEngine
 import com.wnoicew.expensetracker.data.engine.StatementParserEngine
@@ -144,9 +145,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             var transfersOut = 0.0
 
             accTxns.forEach { t ->
-                val amt = kotlin.math.abs(t.amount)
+                val convertedAmt = if (t.currency.isNotBlank() && !t.currency.equals(acc.currency, ignoreCase = true)) {
+                    CurrencyEngine.convert(t.amount, t.currency, acc.currency)
+                } else {
+                    t.amount
+                }
+                val amt = kotlin.math.abs(convertedAmt)
                 when (t.type) {
                     TransactionType.INCOME -> income += amt
+                    TransactionType.REFUND -> income += amt
                     TransactionType.EXPENSE -> expense += amt
                     TransactionType.TRANSFER -> {
                         val isIncoming = t.rawNarration.contains(Regex("""\b(cr|credit|received|deposit)\b""", RegexOption.IGNORE_CASE))
@@ -201,13 +208,31 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val needsReviewCount: StateFlow<Int> = needsReviewTransactions.map { it.size }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
 
+    // Currency State Version to trigger UI recomposition when rates change
+    val currencyStateVersion = mutableStateOf(0)
+    val isSyncingCurrency = mutableStateOf(false)
+
     // Financial KPI calculations
-    val totalNetWorth = accountsWithMetrics.map { list ->
-        list.sumOf { if (it.account.type.equals("Credit Card", ignoreCase = true)) -it.outstandingDues else it.computedBalance }
+    val totalNetWorth = combine(
+        accountsWithMetrics,
+        snapshotFlow { profileManager.activeProfile.value },
+        snapshotFlow { currencyStateVersion.value }
+    ) { list, profile, _ ->
+        val targetCur = profile?.currency ?: "INR"
+        list.sumOf {
+            val net = if (it.account.type.equals("Credit Card", ignoreCase = true)) -it.outstandingDues else it.computedBalance
+            CurrencyEngine.convert(net, it.account.currency, targetCur)
+        }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0.0)
 
-    private val totals30D: Flow<KpiTotals> = combine(transactions, DayClock.today()) { list, today ->
-        KpiMath.totals(list, KpiRange.D30, today, ZoneId.systemDefault())
+    private val totals30D: Flow<KpiTotals> = combine(
+        transactions,
+        DayClock.today(),
+        snapshotFlow { profileManager.activeProfile.value },
+        snapshotFlow { currencyStateVersion.value }
+    ) { list, today, profile, _ ->
+        val targetCur = profile?.currency ?: "INR"
+        KpiMath.totals(list, KpiRange.D30, today, ZoneId.systemDefault(), targetCur)
     }
 
     val totalInflow30D = totals30D.map { it.inflow }
@@ -217,13 +242,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0.0)
 
     // Expense by Category Breakdown (matching web app donut breakdown)
-    val categoryBreakdown: StateFlow<List<CategoryBreakdownItem>> = transactions.map { txns ->
+    val categoryBreakdown: StateFlow<List<CategoryBreakdownItem>> = combine(
+        transactions,
+        snapshotFlow { profileManager.activeProfile.value },
+        snapshotFlow { currencyStateVersion.value }
+    ) { txns, profile, _ ->
+        val targetCur = profile?.currency ?: "INR"
         val expenseTxns = txns.filter { it.type == TransactionType.EXPENSE && it.duplicateStatus != "merged" }
-        val totalExpense = expenseTxns.sumOf { it.amount }.coerceAtLeast(1.0)
+        val totalExpense = expenseTxns.sumOf { CurrencyEngine.convert(it.amount, it.currency, targetCur) }.coerceAtLeast(1.0)
 
         expenseTxns.groupBy { it.category }
             .map { (cat, list) ->
-                val amount = list.sumOf { it.amount }
+                val amount = list.sumOf { CurrencyEngine.convert(it.amount, it.currency, targetCur) }
                 val pct = ((amount / totalExpense) * 100).toInt()
                 CategoryBreakdownItem(
                     categoryName = cat,
@@ -238,6 +268,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val duplicatePairs = mutableStateListOf<DuplicatePair>()
 
     init {
+        CurrencyEngine.init(application)
+        viewModelScope.launch(Dispatchers.IO) {
+            val updated = CurrencyEngine.checkAndFetchDailyRates(application)
+            if (updated) {
+                withContext(Dispatchers.Main) {
+                    currencyStateVersion.value++
+                }
+            }
+        }
+
         viewModelScope.launch {
             transactions
                 .map { DuplicateDetectorEngine.scanDuplicates(it) }
@@ -247,6 +287,50 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     duplicatePairs.addAll(detected)
                 }
         }
+    }
+
+    fun forceSyncCurrencyRates(onComplete: (Boolean, String) -> Unit = { _, _ -> }) {
+        if (isSyncingCurrency.value) return
+        isSyncingCurrency.value = true
+        viewModelScope.launch(Dispatchers.IO) {
+            val success = CurrencyEngine.forceFetchRates(getApplication())
+            withContext(Dispatchers.Main) {
+                isSyncingCurrency.value = false
+                if (success) {
+                    currencyStateVersion.value++
+                    onComplete(true, "Exchange rates updated successfully from API!")
+                } else {
+                    onComplete(false, "Failed to connect to exchange rate API. Check internet connection.")
+                }
+            }
+        }
+    }
+
+    fun updateManualCurrencyRate(
+        code: String,
+        rateAgainstBase: Double,
+        baseCurrency: String = activeProfile.value?.currency ?: CurrencyEngine.DEFAULT_CURRENCY
+    ) {
+        CurrencyEngine.updateManualRateAgainstBase(getApplication(), code, baseCurrency, rateAgainstBase)
+        currencyStateVersion.value++
+    }
+
+    fun resetCurrencyRateToApi(
+        code: String,
+        baseCurrency: String = activeProfile.value?.currency ?: CurrencyEngine.DEFAULT_CURRENCY
+    ) {
+        CurrencyEngine.resetRateToApiAgainstBase(getApplication(), code, baseCurrency)
+        currencyStateVersion.value++
+    }
+
+    fun resetAllCurrencyRatesToApi() {
+        CurrencyEngine.resetAllRatesToApi(getApplication())
+        currencyStateVersion.value++
+    }
+
+    fun getLastCurrencyFetchTimestamp(): String {
+        val dummy = currencyStateVersion.value
+        return CurrencyEngine.getLastFetchTimestamp(getApplication())
     }
 
     fun rescanDuplicates() {
@@ -270,7 +354,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         accountName: String = "",
         paymentMode: String = "Online",
         notes: String = "",
-        date: Long = System.currentTimeMillis()
+        date: Long = System.currentTimeMillis(),
+        currency: String = activeProfile.value?.currency ?: "INR"
     ) {
         val profile = activeProfile.value ?: return
         viewModelScope.launch {
@@ -295,7 +380,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     paymentMode = paymentMode,
                     note = notes,
                     rawNarration = description,
-                    needsReview = finalCat == "Uncategorized"
+                    needsReview = finalCat == "Uncategorized",
+                    currency = currency
                 )
             )
         }
@@ -318,7 +404,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     // Accounts
-    fun addAccount(name: String, type: String, balance: Double, limit: Double, gradientIndex: Int, lastFour: String, bankName: String = "") {
+    fun addAccount(
+        name: String,
+        type: String,
+        balance: Double,
+        limit: Double,
+        gradientIndex: Int,
+        lastFour: String,
+        bankName: String = "",
+        currency: String = activeProfile.value?.currency ?: "INR"
+    ) {
         val profile = activeProfile.value ?: return
         viewModelScope.launch {
             val db = ExpenseTrackerDatabase.getDatabase(getApplication(), profile.id)
@@ -330,7 +425,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     creditLimit = limit,
                     gradientIndex = gradientIndex,
                     lastFour = lastFour.trim(),
-                    bankName = bankName.trim()
+                    bankName = bankName.trim(),
+                    currency = currency
                 )
             )
         }
@@ -340,7 +436,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val profile = activeProfile.value ?: return
         viewModelScope.launch {
             val db = ExpenseTrackerDatabase.getDatabase(getApplication(), profile.id)
-            db.accountDao().deleteAccount(account)
+            db.withTransaction {
+                db.transactionDao().unassignAccountFromTransactions(account.id)
+                db.accountDao().deleteAccount(account)
+            }
         }
     }
 
@@ -393,9 +492,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             val db = ExpenseTrackerDatabase.getDatabase(getApplication(), profile.id)
             val (p, _) = DuplicateDetectorEngine.mergeTransactions(pair.primaryTxn, pair.candidateTxn)
-            db.transactionDao().updateTransaction(p)
-            // Completely delete candidate duplicate from the database
-            db.transactionDao().deleteTransaction(pair.candidateTxn)
+            db.withTransaction {
+                db.transactionDao().updateTransaction(p)
+                // Completely delete candidate duplicate from the database
+                db.transactionDao().deleteTransaction(pair.candidateTxn)
+            }
             duplicatePairs.remove(pair)
         }
     }
@@ -405,8 +506,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             val db = ExpenseTrackerDatabase.getDatabase(getApplication(), profile.id)
             val (t1, t2) = DuplicateDetectorEngine.markSeparate(pair.primaryTxn, pair.candidateTxn)
-            db.transactionDao().updateTransaction(t1)
-            db.transactionDao().updateTransaction(t2)
+            db.withTransaction {
+                db.transactionDao().updateTransaction(t1)
+                db.transactionDao().updateTransaction(t2)
+            }
             duplicatePairs.remove(pair)
         }
     }

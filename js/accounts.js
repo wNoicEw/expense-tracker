@@ -30,9 +30,16 @@ class AccountsManager {
       let totalTransfersOut = 0;
       let totalTransfersIn = 0;
 
+      const active = window.profileManager?.getActiveProfile();
+      const primaryCurrency = (active && active.currency) || 'INR';
+      const accCurrency = acc.currency || primaryCurrency;
+
       accTxns.forEach(t => {
-        const amt = Math.abs(parseFloat(t.amount) || 0);
-        if (t.type === 'income') totalIncome += amt;
+        const rawAmt = Math.abs(parseFloat(t.amount) || 0);
+        const amt = window.CurrencyEngine
+          ? window.CurrencyEngine.convert(rawAmt, t.currency || accCurrency, accCurrency)
+          : rawAmt;
+        if (t.type === 'income' || t.type === 'refund') totalIncome += amt;
         else if (t.type === 'expense') totalExpense += amt;
         else if (t.type === 'transfer') {
           if (t.explicitType === 'income' || (t.rawNarration && /\b(cr|credit|received|payment received|deposit)\b/i.test(t.rawNarration))) {

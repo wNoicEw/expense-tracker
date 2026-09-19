@@ -236,6 +236,16 @@ class Database {
     });
     await this.seedDefaultCategories();
   }
+
+  close() {
+    if (this.db) {
+      try {
+        this.db.close();
+      } catch (_) {}
+      this.db = null;
+      this.isReady = false;
+    }
+  }
 }
 
 // Global instance

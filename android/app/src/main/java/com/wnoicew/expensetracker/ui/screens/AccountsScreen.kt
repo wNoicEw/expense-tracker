@@ -5,6 +5,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -28,9 +30,11 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.wnoicew.expensetracker.data.engine.CurrencyEngine
 import com.wnoicew.expensetracker.data.model.AccountEntity
 import com.wnoicew.expensetracker.data.model.AccountWithMetrics
 import com.wnoicew.expensetracker.ui.MainViewModel
+import com.wnoicew.expensetracker.ui.components.BacklitCurrencySelector
 import com.wnoicew.expensetracker.ui.components.HigGlassCard
 import com.wnoicew.expensetracker.ui.components.HigInsetGroup
 import com.wnoicew.expensetracker.ui.theme.IncomeGreen
@@ -52,6 +56,8 @@ val CARD_GRADIENTS = listOf(
 fun AccountsScreen(
     viewModel: MainViewModel
 ) {
+    val primaryCurrency = viewModel.activeProfile.value?.currency ?: CurrencyEngine.DEFAULT_CURRENCY
+
     val accountsWithMetrics by viewModel.accountsWithMetrics.collectAsState()
     var showAddAccountSheet by remember { mutableStateOf(false) }
 
@@ -59,19 +65,19 @@ fun AccountsScreen(
         showAddAccountSheet = false
     }
 
-    val currencyFormat = remember {
-        NumberFormat.getCurrencyInstance(Locale("en", "IN")).apply {
-            maximumFractionDigits = 0
-        }
+    val currencyFormat = remember(primaryCurrency) {
+        CurrencyEngine.getFormat(primaryCurrency)
     }
 
     Scaffold(
+        contentWindowInsets = WindowInsets(0.dp),
         floatingActionButton = {
             FloatingActionButton(
                 onClick = { showAddAccountSheet = true },
                 containerColor = PrimaryBlue,
                 contentColor = Color.White,
-                shape = RoundedCornerShape(18.dp)
+                shape = RoundedCornerShape(18.dp),
+                elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 6.dp, pressedElevation = 10.dp)
             ) {
                 Icon(Icons.Default.AddCard, contentDescription = "Add Account")
             }
@@ -82,7 +88,7 @@ fun AccountsScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding),
-            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 16.dp),
+            contentPadding = PaddingValues(start = 16.dp, top = 4.dp, end = 16.dp, bottom = 80.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             item {
@@ -174,9 +180,19 @@ fun AccountsScreen(
 
         if (showAddAccountSheet) {
             AddAccountBottomSheet(
+                defaultCurrency = primaryCurrency,
                 onDismiss = { showAddAccountSheet = false },
-                onAdd = { name, type, balance, limit, gradIdx, lastFour, bankName ->
-                    viewModel.addAccount(name, type, balance, limit, gradIdx, lastFour, bankName)
+                onAdd = { name, type, balance, limit, gradIdx, lastFour, bankName, cur ->
+                    viewModel.addAccount(
+                        name = name,
+                        type = type,
+                        balance = balance,
+                        limit = limit,
+                        gradientIndex = gradIdx,
+                        lastFour = lastFour,
+                        bankName = bankName,
+                        currency = cur
+                    )
                     showAddAccountSheet = false
                 }
             )
@@ -441,10 +457,12 @@ private fun AccountRowItem(
 @Composable
 fun AddAccountBottomSheet(
     onDismiss: () -> Unit,
-    onAdd: (String, String, Double, Double, Int, String, String) -> Unit
+    onAdd: (String, String, Double, Double, Int, String, String, String) -> Unit,
+    defaultCurrency: String = CurrencyEngine.DEFAULT_CURRENCY
 ) {
     var name by remember { mutableStateOf("") }
     var type by remember { mutableStateOf("Bank Account") }
+    var selectedCurrency by remember { mutableStateOf(defaultCurrency) }
     var balanceText by remember { mutableStateOf("") }
     var limitText by remember { mutableStateOf("") }
     var lastFour by remember { mutableStateOf("") }
@@ -460,17 +478,27 @@ fun AddAccountBottomSheet(
         containerColor = MaterialTheme.colorScheme.surface,
         shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
     ) {
+        val scrollState = rememberScrollState()
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 8.dp)
-                .safeDrawingPadding(),
+                .verticalScroll(scrollState)
+                .padding(start = 20.dp, end = 20.dp, top = 2.dp, bottom = 20.dp)
+                .imePadding()
+                .navigationBarsPadding(),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Text(
                 text = "Add Account or Card",
                 style = MaterialTheme.typography.titleLarge,
                 color = MaterialTheme.colorScheme.onSurface
+            )
+
+            // Backlit Currency Selector
+            BacklitCurrencySelector(
+                selectedCurrency = selectedCurrency,
+                onCurrencySelected = { selectedCurrency = it },
+                label = "ACCOUNT CURRENCY"
             )
 
             OutlinedTextField(
@@ -521,7 +549,7 @@ fun AddAccountBottomSheet(
                 OutlinedTextField(
                     value = balanceText,
                     onValueChange = { balanceText = it },
-                    label = { Text("Balance (₹)") },
+                    label = { Text("Balance (${CurrencyEngine.getSymbol(selectedCurrency)})") },
                     placeholder = { Text("0.00") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     singleLine = true,
@@ -582,7 +610,7 @@ fun AddAccountBottomSheet(
                     }
                     val balance = balanceText.toDoubleOrNull() ?: 0.0
                     val limit = limitText.toDoubleOrNull() ?: 0.0
-                    onAdd(name.trim(), type, balance, limit, selectedGradIndex, lastFour.trim(), bankName.trim())
+                    onAdd(name.trim(), type, balance, limit, selectedGradIndex, lastFour.trim(), bankName.trim(), selectedCurrency)
                 },
                 shape = RoundedCornerShape(14.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = PrimaryBlue),

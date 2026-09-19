@@ -31,9 +31,15 @@ class BudgetsManager {
     let totalIncome = 0;
     let totalExpense = 0;
 
+    const active = window.profileManager?.getActiveProfile();
+    const primaryCurrency = (active && active.currency) || 'INR';
+
     monthTxns.forEach(t => {
-      const amt = Math.abs(parseFloat(t.amount) || 0);
-      if (t.type === 'income') {
+      const rawAmt = Math.abs(parseFloat(t.amount) || 0);
+      const amt = window.CurrencyEngine
+        ? window.CurrencyEngine.convert(rawAmt, t.currency || primaryCurrency, primaryCurrency)
+        : rawAmt;
+      if (t.type === 'income' || t.type === 'refund') {
         totalIncome += amt;
       } else if (t.type === 'expense') {
         totalExpense += amt;
