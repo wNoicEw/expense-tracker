@@ -1,18 +1,24 @@
 # 💎 Money Tracker — Offline AI Expense Tracker & Financial Intelligence
 
-[![Version](https://img.shields.io/badge/version-1.6.1-10b981.svg?style=flat-square)](https://github.com/wNoicew/expense-tracker/releases/tag/v1.6.1)
-[![Android](https://img.shields.io/badge/android-v1.6.1%20(SDK%2035)-3DDC84.svg?style=flat-square&logo=android&logoColor=white)](#-native-android-application-v161)
-[![Privacy](https://img.shields.io/badge/privacy-100%25%20On--Device-6366f1.svg?style=flat-square)](#-privacy--security-guarantee)
+[![Version](https://img.shields.io/badge/version-1.7.0-10b981.svg?style=flat-square)](https://github.com/wNoicew/expense-tracker/releases/tag/v1.7.0)
+[![Android](https://img.shields.io/badge/android-v1.7.0%20(SDK%2035)-3DDC84.svg?style=flat-square&logo=android&logoColor=white)](#-native-android-application-v170)
+[![Privacy](https://img.shields.io/badge/privacy-100%25%20On--Device-6366f1.svg?style=flat-square)](https://github.com/wNoicew/expense-tracker/releases)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg?style=flat-square)](LICENSE)
 
 An executive-grade, **local-first financial intelligence suite** and offline expense tracker available as both a **zero-dependency Web Application** and a **Native Android Application** (Jetpack Compose, Apple HIG design language, Android 15 SDK 35). Operates **100% client-side on-device** with zero cloud dependencies, complete database isolation per user profile, cross-statement duplicate reconciliation, smart rule auto-categorization, category budgeting, and multi-currency intelligence.
 
 ---
 
-## 📱 Native Android Application (v1.6.1)
+## 📱 Native Android Application (v1.7.0)
 
 The native Android app brings 100% feature parity with the browser application into a modern mobile experience:
 
+- **Groww-Inspired Multi-Category Filter Architecture (`LedgerFilterSheet`)**: Clean single-line toolbar with a dedicated Filter button and active badge count, opening a split two-pane bottom sheet with category tabs (`Type`, `Category`, `Account`, `Currency`, `Status`), multi-select checkboxes, "Clear all", and a live "View X Transactions" sticky CTA.
+- **Dedicated Sorting Bottom Sheet (`LedgerSortSheet`)**: Instant sort selection pill button with options for *Newest to Oldest*, *Oldest to Newest*, *Highest Amount*, and *Lowest Amount*.
+- **Active Filter Dismiss Pills (`LedgerFilterSortBar`)**: Removable filter pills with 1-tap dismiss (`✕`) alongside a quick-action "Review (N)" chip for rapid access to unreviewed transactions.
+- **Long-Press Multi-Selection & Bulk Deletion**: Long-press any transaction in the ledger to enter multi-select mode with haptic feedback, featuring an animated Contextual Action Bar (`✕`, `X selected`, "Select All" / "Deselect All", Delete button), left check indicators, and safe Room DAO bulk deletion.
+- **Precision Statement Transaction Time Engine (Android & Web)**: Automatic time detection and extraction across Google Pay, Navi, PhonePe, Paytm, and generic statements, preserving actual transaction times (e.g. `12:04 PM`, `11:11 AM`, `10:01 AM`) instead of defaulting to midnight (`12:00 AM`).
+- **Cash Flow Dual-Zone Curve & Baseline Gradient (Android & Web)**: Real-time positive/negative baseline splitting in Cumulative Flow mode, dynamically coloring positive balance segments in luminous Emerald Green and negative deficit segments in Rose Red with fading zero-baseline gradients.
 - **UPI Statement Engine (Google Pay & Navi) & Exact Account Attribution**: Automatic offline parsing for multi-page Google Pay and Navi statements, resolving glued bank accounts (e.g. `HDFC Bank - 1234`), internal self-transfers, 2-digit masked RuPay credit cards (`XX99`), incoming transfer receipts (`Paid to <Bank>`), and clean title categorization without boilerplate watermarks.
 - **Refund Auto-Detection & Dedicated Ledger Filtering**: Auto-detects refunds and reversal credits across bank and card statements (Navi, Paytm, generic CSV/PDF), categorizing them as dedicated `refund` transactions (inflow) with 1-tap segment filtering in the Android ledger.
 - **Form Keyboard Insets & Accessible Navigation**: Full soft-keyboard inset handling (`imePadding`) and scrollability across all modal bottom sheets, plus WCAG 2.1 AA accessible focus trapping across Web dialogs.
@@ -29,7 +35,7 @@ The native Android app brings 100% feature parity with the browser application i
 - **Category Budgets & Health Scoring**: Visual progress allowances and real-time Financial Health Score (0–100).
 - **Direct APK Distribution**:
   - **Main Root (Always Latest)**: [**`ExpenseTracker.apk`**](ExpenseTracker.apk)
-  - **Version Archive**: [**`apks/`**](apks/) (Emergency fallback versions: `v1.4.2`, `v1.5.0`, `v1.5.1`, `v1.6.0`, `v1.6.1`)
+  - **Version Archive**: [**`apks/`**](apks/) (Emergency fallback versions: `v1.5.1`, `v1.6.0`, `v1.6.1`, `v1.6.2`, `v1.7.0`)
 
 ---
 

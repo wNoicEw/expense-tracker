@@ -2,9 +2,12 @@ package com.wnoicew.expensetracker.ui.screens
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -16,6 +19,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -43,6 +47,11 @@ import com.wnoicew.expensetracker.ui.components.DeleteTransactionDialog
 import com.wnoicew.expensetracker.ui.components.HigGlassCard
 import com.wnoicew.expensetracker.ui.components.HigInsetGroup
 import com.wnoicew.expensetracker.ui.components.HigSegmentedControl
+import com.wnoicew.expensetracker.ui.components.LedgerFilterSheet
+import com.wnoicew.expensetracker.ui.components.LedgerFilterSortBar
+import com.wnoicew.expensetracker.ui.components.LedgerFilterState
+import com.wnoicew.expensetracker.ui.components.LedgerSortOption
+import com.wnoicew.expensetracker.ui.components.LedgerSortSheet
 import com.wnoicew.expensetracker.ui.theme.IncomeGreen
 import com.wnoicew.expensetracker.ui.theme.ExpenseRose
 import com.wnoicew.expensetracker.ui.theme.PrimaryBlue
@@ -50,7 +59,7 @@ import java.text.NumberFormat
 import java.text.SimpleDateFormat
 import java.util.*
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun TransactionsScreen(
     viewModel: MainViewModel
@@ -69,10 +78,15 @@ fun TransactionsScreen(
         kotlinx.coroutines.delay(200)
         debouncedSearchQuery = searchQuery
     }
-    var filterTypeIndex by rememberSaveable { mutableIntStateOf(0) } // 0: All, 1: Expenses, 2: Income, 3: Refunds, 4: Transfers, 5: Review
-    var selectedCategoryFilter by rememberSaveable { mutableStateOf<String?>(null) }
-    var selectedAccountFilter by rememberSaveable { mutableStateOf<String?>(null) }
-    var selectedCurrencyFilter by rememberSaveable { mutableStateOf<String?>(null) }
+    var filterState by remember { mutableStateOf(LedgerFilterState()) }
+    var sortOption by rememberSaveable { mutableStateOf(LedgerSortOption.DATE_DESC) }
+    var showFilterSheet by rememberSaveable { mutableStateOf(false) }
+    var showSortSheet by rememberSaveable { mutableStateOf(false) }
+
+    var isSelectionMode by rememberSaveable { mutableStateOf(false) }
+    var selectedTxnIds by remember { mutableStateOf(setOf<String>()) }
+    var showBulkDeleteDialog by remember { mutableStateOf(false) }
+
     var viewModeIndex by rememberSaveable { mutableIntStateOf(0) } // 0: List, 1: Calendar
     var prefillDateMillis by rememberSaveable { mutableStateOf<Long?>(null) }
     val haptic = LocalHapticFeedback.current
@@ -88,12 +102,20 @@ fun TransactionsScreen(
         selectedTxnId = txn.id
     }
 
-    BackHandler(enabled = showAddSheet || selectedTxnForDetail != null) {
-        if (showAddSheet) {
+    BackHandler(enabled = isSelectionMode || showAddSheet || selectedTxnForDetail != null || showFilterSheet || showSortSheet) {
+        if (isSelectionMode) {
+            isSelectionMode = false
+            selectedTxnIds = emptySet()
+        } else if (showFilterSheet) {
+            showFilterSheet = false
+        } else if (showSortSheet) {
+            showSortSheet = false
+        } else if (showAddSheet) {
             showAddSheet = false
             prefillDateMillis = null
+        } else if (selectedTxnForDetail != null) {
+            selectedTxnId = null
         }
-        if (selectedTxnForDetail != null) selectedTxnId = null
     }
 
     val currencyFormat = remember(primaryCurrency) {
@@ -121,44 +143,57 @@ fun TransactionsScreen(
         )
     }
 
-    val filteredList = remember(transactions, debouncedSearchQuery, filterTypeIndex, selectedCategoryFilter, selectedAccountFilter, selectedCurrencyFilter) {
-        transactions.filter { txn ->
-            val matchesSearch = txn.description.contains(debouncedSearchQuery, ignoreCase = true) ||
-                    txn.category.contains(debouncedSearchQuery, ignoreCase = true) ||
-                    txn.accountName.contains(debouncedSearchQuery, ignoreCase = true) ||
-                    txn.referenceNo.contains(debouncedSearchQuery, ignoreCase = true)
-            val matchesType = when (filterTypeIndex) {
-                1 -> txn.type == TransactionType.EXPENSE
-                2 -> txn.type == TransactionType.INCOME
-                3 -> txn.type == TransactionType.REFUND
-                4 -> txn.type == TransactionType.TRANSFER
-                5 -> txn.needsReview || txn.category == "Uncategorized" || txn.duplicateStatus == "pending_review"
-                else -> true
+    val filteredList = remember(transactions, debouncedSearchQuery, filterState, sortOption) {
+        val list = transactions.filter { txn ->
+            val matchesSearch = if (debouncedSearchQuery.isBlank()) true else {
+                txn.description.contains(debouncedSearchQuery, ignoreCase = true) ||
+                        txn.category.contains(debouncedSearchQuery, ignoreCase = true) ||
+                        txn.accountName.contains(debouncedSearchQuery, ignoreCase = true) ||
+                        txn.referenceNo.contains(debouncedSearchQuery, ignoreCase = true)
             }
-            val matchesCat = if (selectedCategoryFilter != null) txn.category == selectedCategoryFilter else true
-            val matchesAcc = if (selectedAccountFilter != null) txn.accountName == selectedAccountFilter || txn.accountId == selectedAccountFilter else true
-            val matchesCur = if (selectedCurrencyFilter != null) {
+            val matchesType = if (filterState.selectedTypes.isEmpty()) true else {
+                txn.type in filterState.selectedTypes
+            }
+            val matchesCat = if (filterState.selectedCategories.isEmpty()) true else {
+                txn.category in filterState.selectedCategories
+            }
+            val matchesAcc = if (filterState.selectedAccounts.isEmpty()) true else {
+                txn.accountName in filterState.selectedAccounts || txn.accountId in filterState.selectedAccounts
+            }
+            val matchesCur = if (filterState.selectedCurrencies.isEmpty()) true else {
                 val c = txn.currency.ifBlank { primaryCurrency }.uppercase()
-                c == selectedCurrencyFilter?.uppercase()
-            } else true
-            matchesSearch && matchesType && matchesCat && matchesAcc && matchesCur
+                c in filterState.selectedCurrencies.map { it.uppercase() }
+            }
+            val matchesReview = if (!filterState.onlyNeedsReview) true else {
+                txn.needsReview || txn.category == "Uncategorized" || txn.duplicateStatus == "pending_review"
+            }
+            matchesSearch && matchesType && matchesCat && matchesAcc && matchesCur && matchesReview
+        }
+
+        when (sortOption) {
+            LedgerSortOption.DATE_DESC -> list.sortedByDescending { it.date }
+            LedgerSortOption.DATE_ASC -> list.sortedBy { it.date }
+            LedgerSortOption.AMOUNT_DESC -> list.sortedByDescending { it.amount }
+            LedgerSortOption.AMOUNT_ASC -> list.sortedBy { it.amount }
         }
     }
 
     Scaffold(
         contentWindowInsets = WindowInsets(0.dp),
         floatingActionButton = {
-            FloatingActionButton(
-                onClick = {
-                    prefillDateMillis = null
-                    showAddSheet = true
-                },
-                containerColor = PrimaryBlue,
-                contentColor = Color.White,
-                shape = RoundedCornerShape(18.dp),
-                elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 6.dp, pressedElevation = 10.dp)
-            ) {
-                Icon(Icons.Default.Add, contentDescription = "Add Transaction")
+            if (!isSelectionMode) {
+                FloatingActionButton(
+                    onClick = {
+                        prefillDateMillis = null
+                        showAddSheet = true
+                    },
+                    containerColor = PrimaryBlue,
+                    contentColor = Color.White,
+                    shape = RoundedCornerShape(18.dp),
+                    elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 6.dp, pressedElevation = 10.dp)
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = "Add Transaction")
+                }
             }
         },
         containerColor = MaterialTheme.colorScheme.background
@@ -171,27 +206,96 @@ fun TransactionsScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             item {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column {
-                        Text(
-                            text = "Financial Ledger",
-                            style = MaterialTheme.typography.headlineMedium,
-                            color = MaterialTheme.colorScheme.onBackground
-                        )
-                        Text(
-                            text = "Complete record of categorized transactions (${filteredList.size})",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
+                if (isSelectionMode) {
+                    // Contextual Action Bar for Multi-Selection
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(16.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f),
+                        border = BorderStroke(1.dp, PrimaryBlue.copy(alpha = 0.35f))
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 8.dp, vertical = 6.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                IconButton(
+                                    onClick = {
+                                        isSelectionMode = false
+                                        selectedTxnIds = emptySet()
+                                    }
+                                ) {
+                                    Icon(Icons.Default.Close, contentDescription = "Cancel Selection")
+                                }
+                                Text(
+                                    text = "${selectedTxnIds.size} selected",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 16.sp,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
 
-                    // Export CSV Button (Matching Web App)
-                    IconButton(onClick = launchers.exportCsv) {
-                        Icon(Icons.Default.FileDownload, contentDescription = "Export CSV", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                val allSelected = filteredList.isNotEmpty() && selectedTxnIds.size == filteredList.size
+                                TextButton(
+                                    onClick = {
+                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        selectedTxnIds = if (allSelected) emptySet() else filteredList.map { it.id }.toSet()
+                                    }
+                                ) {
+                                    Text(
+                                        text = if (allSelected) "Deselect All" else "Select All",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 13.sp,
+                                        color = PrimaryBlue
+                                    )
+                                }
+
+                                IconButton(
+                                    onClick = { showBulkDeleteDialog = true },
+                                    enabled = selectedTxnIds.isNotEmpty()
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Delete,
+                                        contentDescription = "Delete Selected",
+                                        tint = if (selectedTxnIds.isNotEmpty()) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text(
+                                text = "Financial Ledger",
+                                style = MaterialTheme.typography.headlineMedium,
+                                color = MaterialTheme.colorScheme.onBackground
+                            )
+                            Text(
+                                text = "Complete record of categorized transactions (${filteredList.size})",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+
+                        // Export CSV Button (Matching Web App)
+                        IconButton(onClick = launchers.exportCsv) {
+                            Icon(Icons.Default.FileDownload, contentDescription = "Export CSV", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
                     }
                 }
             }
@@ -244,125 +348,37 @@ fun TransactionsScreen(
                     )
                 }
 
-                // Type Filter Scrollable Chips Row (All, Expenses, Income, Refunds, Transfers, Review)
+                // Modern compact Filter & Sort Toolbar (Groww-inspired)
                 item {
-                    val typeItems = listOf(
-                        "All",
-                        "Expenses",
-                        "Income",
-                        "Refunds",
-                        "Transfers",
-                        "Review ($needsReviewCount)"
+                    LedgerFilterSortBar(
+                        filterCount = filterState.activeCount,
+                        sortOption = sortOption,
+                        onOpenFilter = { showFilterSheet = true },
+                        onOpenSort = { showSortSheet = true },
+                        filterState = filterState,
+                        onRemoveType = { type ->
+                            filterState = filterState.copy(selectedTypes = filterState.selectedTypes - type)
+                        },
+                        onRemoveCategory = { cat ->
+                            filterState = filterState.copy(selectedCategories = filterState.selectedCategories - cat)
+                        },
+                        onRemoveAccount = { acc ->
+                            filterState = filterState.copy(selectedAccounts = filterState.selectedAccounts - acc)
+                        },
+                        onRemoveCurrency = { cur ->
+                            filterState = filterState.copy(selectedCurrencies = filterState.selectedCurrencies - cur)
+                        },
+                        onClearReview = {
+                            filterState = filterState.copy(onlyNeedsReview = false)
+                        },
+                        onClearAll = {
+                            filterState = LedgerFilterState()
+                        },
+                        needsReviewCount = needsReviewCount,
+                        onToggleReview = {
+                            filterState = filterState.copy(onlyNeedsReview = !filterState.onlyNeedsReview)
+                        }
                     )
-                    LazyRow(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        contentPadding = PaddingValues(vertical = 2.dp)
-                    ) {
-                        itemsIndexed(typeItems) { index, label ->
-                            FilterChip(
-                                selected = filterTypeIndex == index,
-                                onClick = {
-                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                    filterTypeIndex = index
-                                },
-                                label = {
-                                    Text(
-                                        text = label,
-                                        fontWeight = if (filterTypeIndex == index) FontWeight.Bold else FontWeight.Normal
-                                    )
-                                },
-                                leadingIcon = if (index == 5 && needsReviewCount > 0) {
-                                    {
-                                        Icon(
-                                            imageVector = Icons.Default.Warning,
-                                            contentDescription = null,
-                                            tint = com.wnoicew.expensetracker.ui.theme.WarningAmber,
-                                            modifier = Modifier.size(14.dp)
-                                        )
-                                    }
-                                } else null
-                            )
-                        }
-                    }
-                }
-
-                // Currency Filter Scrollable Chips Row
-                item {
-                    val supportedCurrencies = listOf("INR", "USD", "EUR", "GBP", "CHF", "JPY")
-                    LazyRow(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        contentPadding = PaddingValues(vertical = 2.dp)
-                    ) {
-                        item {
-                            FilterChip(
-                                selected = selectedCurrencyFilter == null,
-                                onClick = {
-                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                    selectedCurrencyFilter = null
-                                },
-                                label = { Text("All Currencies") }
-                            )
-                        }
-                        items(supportedCurrencies) { code ->
-                            val symbol = CurrencyEngine.getSymbol(code)
-                            FilterChip(
-                                selected = selectedCurrencyFilter == code,
-                                onClick = {
-                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                    selectedCurrencyFilter = if (selectedCurrencyFilter == code) null else code
-                                },
-                                label = { Text("$symbol $code") }
-                            )
-                        }
-                    }
-                }
-
-                // Category Chips Row
-                item {
-                    LazyRow(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        contentPadding = PaddingValues(vertical = 2.dp)
-                    ) {
-                        item {
-                            FilterChip(
-                                selected = selectedCategoryFilter == null,
-                                onClick = { selectedCategoryFilter = null },
-                                label = { Text("All Categories") }
-                            )
-                        }
-                        items(ALL_CATEGORIES) { cat ->
-                            FilterChip(
-                                selected = selectedCategoryFilter == cat,
-                                onClick = { selectedCategoryFilter = if (selectedCategoryFilter == cat) null else cat },
-                                label = { Text(cat) }
-                            )
-                        }
-                    }
-                }
-
-                // Account Filter Chips (if accounts exist)
-                if (accounts.isNotEmpty()) {
-                    item {
-                        LazyRow(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            contentPadding = PaddingValues(vertical = 2.dp)
-                        ) {
-                            item {
-                                FilterChip(
-                                    selected = selectedAccountFilter == null,
-                                    onClick = { selectedAccountFilter = null },
-                                    label = { Text("All Accounts") }
-                                )
-                            }
-                            items(accounts) { acc ->
-                                FilterChip(
-                                    selected = selectedAccountFilter == acc.name,
-                                    onClick = { selectedAccountFilter = if (selectedAccountFilter == acc.name) null else acc.name },
-                                    label = { Text(acc.name) }
-                                )
-                            }
-                        }
-                    }
                 }
 
                 if (filteredList.isEmpty()) {
@@ -407,18 +423,72 @@ fun TransactionsScreen(
                             index == filteredList.lastIndex -> RoundedCornerShape(bottomStart = 16.dp, bottomEnd = 16.dp)
                             else -> RoundedCornerShape(0.dp)
                         }
+                        val isSelected = txn.id in selectedTxnIds
+                        val cardBg = if (isSelected) {
+                            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
+                        } else {
+                            MaterialTheme.colorScheme.surface
+                        }
+                        val cardBorder = if (isSelected) {
+                            BorderStroke(1.5.dp, PrimaryBlue.copy(alpha = 0.6f))
+                        } else null
+
                         Surface(
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .combinedClickable(
+                                    onClick = {
+                                        if (isSelectionMode) {
+                                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                            selectedTxnIds = if (isSelected) {
+                                                selectedTxnIds - txn.id
+                                            } else {
+                                                selectedTxnIds + txn.id
+                                            }
+                                        } else {
+                                            openDetail(txn, editing = false)
+                                        }
+                                    },
+                                    onLongClick = {
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        if (!isSelectionMode) {
+                                            isSelectionMode = true
+                                            selectedTxnIds = setOf(txn.id)
+                                        } else {
+                                            selectedTxnIds = if (isSelected) selectedTxnIds - txn.id else selectedTxnIds + txn.id
+                                        }
+                                    }
+                                ),
                             shape = shape,
-                            color = MaterialTheme.colorScheme.surface
+                            color = cardBg,
+                            border = cardBorder
                         ) {
-                            Box(modifier = Modifier.clickable { openDetail(txn, editing = false) }) {
-                                TransactionRowItem(
-                                    transaction = txn,
-                                    currencyFormat = currencyFormat,
-                                    showDivider = index < filteredList.size - 1,
-                                    primaryCurrency = primaryCurrency
-                                )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                if (isSelectionMode) {
+                                    Checkbox(
+                                        checked = isSelected,
+                                        onCheckedChange = { checked ->
+                                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                            selectedTxnIds = if (checked) selectedTxnIds + txn.id else selectedTxnIds - txn.id
+                                        },
+                                        modifier = Modifier.padding(start = 12.dp),
+                                        colors = CheckboxDefaults.colors(
+                                            checkedColor = PrimaryBlue,
+                                            checkmarkColor = Color.White
+                                        )
+                                    )
+                                }
+                                Box(modifier = Modifier.weight(1f)) {
+                                    TransactionRowItem(
+                                        transaction = txn,
+                                        currencyFormat = currencyFormat,
+                                        showDivider = index < filteredList.size - 1,
+                                        primaryCurrency = primaryCurrency
+                                    )
+                                }
                             }
                         }
                     }
@@ -476,6 +546,75 @@ fun TransactionsScreen(
                     selectedTxnId = null
                 },
                 onDelete = { pendingDelete = txn }
+            )
+        }
+
+        // Filter Modal Sheet (Groww-inspired multi-category split sheet)
+        if (showFilterSheet) {
+            LedgerFilterSheet(
+                initialState = filterState,
+                accounts = accounts,
+                matchingCount = filteredList.size,
+                onApply = { newState ->
+                    filterState = newState
+                    showFilterSheet = false
+                },
+                onDismiss = { showFilterSheet = false }
+            )
+        }
+
+        // Sort Modal Sheet (Groww-inspired sort bottom sheet)
+        if (showSortSheet) {
+            LedgerSortSheet(
+                currentSort = sortOption,
+                onSortSelected = { newOption ->
+                    sortOption = newOption
+                    showSortSheet = false
+                },
+                onDismiss = { showSortSheet = false }
+            )
+        }
+
+        // Bulk Delete Confirmation Dialog
+        if (showBulkDeleteDialog && selectedTxnIds.isNotEmpty()) {
+            AlertDialog(
+                onDismissRequest = { showBulkDeleteDialog = false },
+                icon = {
+                    Icon(
+                        imageVector = Icons.Default.DeleteForever,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.size(28.dp)
+                    )
+                },
+                title = {
+                    Text(
+                        text = "Delete ${selectedTxnIds.size} Transactions?",
+                        fontWeight = FontWeight.Bold
+                    )
+                },
+                text = {
+                    Text("Are you sure you want to permanently delete the selected ${selectedTxnIds.size} transaction(s)? This action cannot be undone.")
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            viewModel.deleteTransactionsByIds(selectedTxnIds.toList())
+                            selectedTxnIds = emptySet()
+                            isSelectionMode = false
+                            showBulkDeleteDialog = false
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                    ) {
+                        Text("Delete", color = Color.White, fontWeight = FontWeight.Bold)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showBulkDeleteDialog = false }) {
+                        Text("Cancel")
+                    }
+                }
             )
         }
     }

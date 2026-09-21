@@ -20,6 +20,7 @@ import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.ZoneId
 import java.util.Calendar
+import java.util.Date
 import java.util.Locale
 import java.util.UUID
 
@@ -964,6 +965,8 @@ class LogicTests {
         assertEquals(1, res.transactions.size)
         assertEquals("John Doe", res.transactions[0].description)
         assertEquals(70.0, res.transactions[0].amount, 0.001)
+        val timeFmt = SimpleDateFormat("hh:mm a", Locale.ENGLISH)
+        assertEquals("12:00 AM", timeFmt.format(Date(res.transactions[0].date)))
         assertEquals("HDFC Bank", res.rowAccounts[0]?.bankName)
         assertEquals("1234", res.rowAccounts[0]?.lastFour)
         assertEquals("Bank Account", res.rowAccounts[0]?.type)
@@ -1077,6 +1080,12 @@ class LogicTests {
         assertEquals(TransactionType.INCOME, res.transactions[1].type)
         assertEquals(TransactionType.TRANSFER, res.transactions[2].type)
 
+        // Exact transaction times detected from Google Pay statement
+        val timeFmt = SimpleDateFormat("hh:mm a", Locale.ENGLISH)
+        assertEquals("12:04 PM", timeFmt.format(Date(res.transactions[0].date)))
+        assertEquals("11:11 AM", timeFmt.format(Date(res.transactions[1].date)))
+        assertEquals("10:01 AM", timeFmt.format(Date(res.transactions[2].date)))
+
         // RuPay 2-digit masked card
         assertEquals("99", res.rowAccounts[0]?.lastFour)
         assertTrue(res.rowAccounts[0]?.isRuPay == true)
@@ -1093,6 +1102,49 @@ class LogicTests {
         // Transfers excluded from outflow
         assertEquals(982.0, res.totalInflow, 0.001)
         assertEquals(400.0, res.totalOutflow, 0.001)
+    }
+
+    @Test
+    fun testNaviEveningTimeDetection() {
+        val lines = listOf(
+            "Date Transaction details Account Amount",
+            "27 Aug 2026 Paid to SOME MERCHANT HDFC Bank - 5678 150.00",
+            "06:24 PM UPI txn ID: 100000000002",
+            "Note: Dinner payment"
+        )
+        val res = StatementParserEngine.parseNaviPdf(lines, "Navi_Statement.pdf", "", "", emptyList())
+        assertEquals(1, res.transactions.size)
+        val timeFmt = SimpleDateFormat("hh:mm a", Locale.ENGLISH)
+        assertEquals("06:24 PM", timeFmt.format(Date(res.transactions[0].date)))
+    }
+
+    @Test
+    fun testPhonePeTimeDetection() {
+        val lines = listOf(
+            "Date Transaction Details Type Amount",
+            "Apr 02, 2025 Paid to Merchant Name DEBIT ₹185",
+            "06:57 PM Transaction ID: T100000000001 UTR No. 100000000001",
+            "Paid by XXXXXXXX3863"
+        )
+        val res = StatementParserEngine.parsePhonePePdf(lines, "PhonePe_Statement.pdf", "", "", emptyList())
+        assertEquals(1, res.transactions.size)
+        val timeFmt = SimpleDateFormat("hh:mm a", Locale.ENGLISH)
+        assertEquals("06:57 PM", timeFmt.format(Date(res.transactions[0].date)))
+        assertEquals("3863", res.rowAccounts[0]?.lastFour)
+    }
+
+    @Test
+    fun testCsvTimeColumnDetection() {
+        val lines = listOf(
+            "Date,Time,Narration,Withdrawal,Deposit",
+            "01/03/2026,12:04 PM,Coffee Shop,250.00,",
+            "02/03/2026,06:30 PM,Salary,,50000.00"
+        )
+        val res = StatementParserEngine.parseCsvLines(lines, "bank.csv", "", "", emptyList())
+        assertEquals(2, res.transactions.size)
+        val timeFmt = SimpleDateFormat("hh:mm a", Locale.ENGLISH)
+        assertEquals("12:04 PM", timeFmt.format(Date(res.transactions[0].date)))
+        assertEquals("06:30 PM", timeFmt.format(Date(res.transactions[1].date)))
     }
 
     @Test

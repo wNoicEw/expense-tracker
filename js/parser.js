@@ -162,6 +162,7 @@ class StatementParser {
       const txn = {
         id: 'txn_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
         date: row.date || this.localISODate(new Date()),
+        time: row.time || '',
         amount: amount,
         type: txnType,
         category: txnCategory,
@@ -407,9 +408,14 @@ class StatementParser {
       let txnId = '';
       let utr = '';
       let accountInfo = '';
+      let time = this.extractTime(line);
       for (let j = i + 1; j <= Math.min(i + 5, lines.length - 1); j++) {
         const nxt = lines[j];
         if (nxt.match(dateRe) && nxt.match(amountRe)) break; // next transaction
+        if (!time) {
+          const t = this.extractTime(nxt);
+          if (t) time = t;
+        }
         const tid = nxt.match(txnIdRe);
         if (tid) txnId = tid[1];
         const u = nxt.match(utrRe);
@@ -424,6 +430,7 @@ class StatementParser {
 
       records.push({
         date: this.normalizeDate(dateM[0]),
+        time: time || '',
         narration: narration || 'PhonePe Transaction',
         amount,
         explicitType,
@@ -472,17 +479,23 @@ class StatementParser {
 
       // Collect continuation line; a "Paid from <bank> 1234" line within the block is the paying account
       let accountInfo = '';
+      let time = this.extractTime(line);
       for (let j = i + 1; j <= Math.min(i + 3, lines.length - 1) && !lines[j].match(dateRe); j++) {
+        if (!time) {
+          const t = this.extractTime(lines[j]);
+          if (t) time = t;
+        }
         const inst = this.upiInstrumentLine(lines[j]);
         if (inst !== null) accountInfo = inst;
       }
       if (i + 1 < lines.length && !lines[i + 1].match(dateRe)) {
         const nxt = lines[i + 1];
-        if (nxt.length > 3 && nxt.length < 100 && this.upiInstrumentLine(nxt) === null) narration += ' ' + nxt;
+        if (nxt.length > 3 && nxt.length < 100 && this.upiInstrumentLine(nxt) === null && !this.extractTime(nxt)) narration += ' ' + nxt;
       }
 
       records.push({
         date: this.normalizeDate(dateM[0]),
+        time: time || '',
         narration: narration || 'Paytm Transaction',
         amount,
         explicitType: isRefund ? 'refund' : (isCredit ? 'income' : 'expense'),
@@ -641,6 +654,7 @@ class StatementParser {
 
         currentTxn = {
           date: this.normalizeDate(dateWord.text),
+          time: this.extractTime(rowText) || '',
           narrationParts: narrWords,
           amount: txnAmount,
           explicitType,
@@ -700,6 +714,7 @@ class StatementParser {
     }
     return {
       date: txn.date,
+      time: txn.time || '',
       narration: narration || 'Credit Card Transaction',
       amount: txn.amount,
       explicitType,
@@ -747,15 +762,21 @@ class StatementParser {
       let account = join(row.words.filter(w => inCol(w, 350, 500)));
       let txnId = '';
       let noteText = '';
+      let time = this.extractTime(join(row.words.filter(w => inCol(w, 0, 100))));
 
       // Following rows: "6:24 PM | UPI txn ID: … | Credit Card - XX99" and "Note: …".
       // Anything else (page header, user name, phone number) is ignored rather than glued into the narration.
       for (let j = i + 1; j <= Math.min(i + 5, spatialRows.length - 1); j++) {
         const next = spatialRows[j];
         if (anchorOf(next)) break;
+        const nextDateCol = join(next.words.filter(w => inCol(w, 0, 100)));
         const nextDetails = join(next.words.filter(w => inCol(w, 100, 350)));
         const nextAccount = join(next.words.filter(w => inCol(w, 350, 500)));
-        const isTimeRow = /^\d{1,2}:\d{2}\s*[AP]M$/i.test(join(next.words.filter(w => inCol(w, 0, 100))));
+        const isTimeRow = /^\d{1,2}:\d{2}\s*[AP]M$/i.test(nextDateCol);
+        if (!time) {
+          const t = this.extractTime(nextDateCol) || this.extractTime(nextDetails);
+          if (t) time = t;
+        }
         const idMatch = nextDetails.match(/UPI\s+txn\s+ID[:\s]*(\d+)/i);
         if (idMatch) {
           txnId = idMatch[1];
@@ -781,6 +802,7 @@ class StatementParser {
 
       records.push({
         date: this.normalizeDate(anchor.rawDate),
+        time: time || '',
         narration,
         amount: anchor.amount,
         explicitType: isRefund ? 'refund' : (isIncome ? 'income' : 'expense'),
@@ -873,6 +895,7 @@ class StatementParser {
 
         currentTxn = {
           date: this.normalizeDate(dateStr),
+          time: this.extractTime(dateStr) || this.extractTime(words.map(w => w.text).join(' ')) || '',
           narrationParts: fullNarrationWords,
           amount: txnAmount,
           explicitType: explicitType,
@@ -883,6 +906,7 @@ class StatementParser {
 
       } else if (currentTxn && !hasDate && !hasAmount) {
         // Continuation row — add to narration
+        if (!currentTxn.time) currentTxn.time = this.extractTime(words.map(w => w.text).join(' '));
         const continuationWords = words.filter(w => w.x >= 100 && w.x < 320 && w.text !== '-').map(w => w.text);
         if (continuationWords.length > 0) {
           currentTxn.narrationParts.push(...continuationWords);
@@ -903,6 +927,7 @@ class StatementParser {
 
       records.push({
         date: txn.date,
+        time: txn.time || '',
         narration: narration || 'SBI Bank Transaction',
         amount: txn.amount,
         explicitType: txn.explicitType,
@@ -928,6 +953,7 @@ class StatementParser {
     // Column header synonym maps (covers HDFC, ICICI, Axis, Kotak, PNB, YES Bank, IndusInd, RBL etc.)
     const colPatterns = {
       date:      /^(txn\.?\s*date|transaction\s*date|date|value\s*dt|value\s*date|trans\.?\s*date|posting\s*date|trade\s*date|effective\s*date|processed\s*date)$/i,
+      time:      /^(time|txn\.?\s*time|transaction\s*time|trans\.?\s*time)$/i,
       narration: /^(narration|description|particulars|details|remark|payee|paid\s*to|transaction\s*details|trans\.?\s*details|remarks|merchant|narrative|account\s*details|chq\.?\s*no\.?\s*narration)$/i,
       debit:     /^(debit|withdrawal|withdrawal\s*amt\.?|dr|dr\.?\s*amount|paid\s*out|amount\s*debited|wdl|wdl\.?\s*amt|debit\s*amount|withdrawals)$/i,
       credit:    /^(credit|deposit|deposit\s*amt\.?|cr|cr\.?\s*amount|paid\s*in|amount\s*credited|dep|credit\s*amount|deposits|receipts)$/i,
@@ -994,6 +1020,7 @@ class StatementParser {
         if (currentTxn && currentTxn.amount > 0) {
           records.push({
             date: currentTxn.date,
+            time: currentTxn.time || '',
             narration: currentTxn.narrationParts.join(' ').replace(/\s+/g, ' ').trim() || 'Bank Transaction',
             amount: currentTxn.amount,
             explicitType: currentTxn.explicitType,
@@ -1005,6 +1032,7 @@ class StatementParser {
         const narrWords = words.filter(w => getCol(w, 'narration')).map(w => w.text);
         const refWords = words.filter(w => getCol(w, 'ref')).map(w => w.text);
         const accountParts = words.filter(w => getCol(w, 'account')).map(w => w.text);
+        const timeWord = words.find(w => getCol(w, 'time'));
 
         // Debit
         let txnAmount = 0;
@@ -1040,9 +1068,11 @@ class StatementParser {
 
         const rowText = words.map(w => w.text).join(' ');
         const refNo = refWords.join(' ').trim() || this.extractRefNo(rowText);
+        const extractedTime = (timeWord ? this.extractTime(timeWord.text) : '') || this.extractTime(dateWord.text) || this.extractTime(rowText);
 
         currentTxn = {
           date: this.normalizeDate(dateWord.text),
+          time: extractedTime || '',
           narrationParts: narrWords,
           amount: txnAmount,
           explicitType: explicitType,
@@ -1055,6 +1085,7 @@ class StatementParser {
         const rowText = words.map(w => w.text).join(' ');
         // Skip rows that look like totals or page footers
         if (/^(total|subtotal|page|opening|closing|grand|statement)/i.test(rowText.trim()) || this.isColumnHeaderRow(rowText)) continue;
+        if (!currentTxn.time) currentTxn.time = this.extractTime(rowText);
         if (colBands.account) currentTxn.accountParts.push(...words.filter(w => getCol(w, 'account')).map(w => w.text));
         const narrContinuation = words.filter(w => {
           if (colBands.account && getCol(w, 'account')) return false; // wrapped account text ("- 1234") is not narration
@@ -1090,6 +1121,7 @@ class StatementParser {
     if (currentTxn && currentTxn.amount > 0) {
       records.push({
         date: currentTxn.date,
+        time: currentTxn.time || '',
         narration: currentTxn.narrationParts.join(' ').replace(/\s+/g, ' ').trim() || 'Bank Transaction',
         amount: currentTxn.amount,
         explicitType: currentTxn.explicitType,
@@ -1170,10 +1202,15 @@ class StatementParser {
           let narration = line.replace(dateM[0], '').replace(amtM.text, '').replace(/\s+/g, ' ').trim();
           let accountInfo = '';
           let txnId = '';
+          let time = this.extractTime(line);
           for (let j = i + 1; j <= Math.min(i + 4, lines.length - 1); j++) {
             const nextLine = lines[j];
             const nextDate = nextLine.match(anchorRe);
             if (nextDate && this.extractAmount(nextLine, nextDate[0])) break;
+            if (!time) {
+              const t = this.extractTime(nextLine);
+              if (t) time = t;
+            }
             const inst = this.upiInstrumentLine(nextLine);
             if (inst !== null) accountInfo = inst;
             const tid = nextLine.match(/(?:UPI\s*)?Transaction\s*ID[:\s]*([A-Za-z0-9]{8,30})/i);
@@ -1185,6 +1222,7 @@ class StatementParser {
 
           records.push({
             date: this.normalizeDate(dateM[0]),
+            time: time || '',
             narration: narration || 'UPI Transaction',
             amount: amount,
             explicitType: isRefund ? 'refund' : (isTransfer ? 'transfer' : (isIncome ? 'income' : 'expense')),
@@ -1251,6 +1289,7 @@ class StatementParser {
 
           currentTxn = {
             date: this.normalizeDate(rawDateStr),
+            time: this.extractTime(rawDateStr) || this.extractTime(line) || '',
             narrationParts: [narration],
             amount: amounts[0],
             explicitType: isRefund ? 'refund' : (isCredit ? 'income' : (isDebit ? 'expense' : (narration.toLowerCase().includes('salary') ? 'income' : 'expense'))),
@@ -1259,6 +1298,7 @@ class StatementParser {
         }
       } else if (currentTxn && line.length > 3 && line.length < 150) {
         // Potential narration continuation — only if line has no big amounts
+        if (!currentTxn.time) currentTxn.time = this.extractTime(line);
         const bigAmounts = [];
         let bm;
         const bre = /([0-9]{1,3}(?:,[0-9]{2,3})+(?:\.[0-9]{1,2})?)/g;
@@ -1276,6 +1316,7 @@ class StatementParser {
     if (currentTxn && currentTxn.amount > 0) {
       records.push({
         date: currentTxn.date,
+        time: currentTxn.time || '',
         narration: currentTxn.narrationParts.join(' ').replace(/\s+/g, ' ').trim() || 'Bank Transaction',
         amount: currentTxn.amount,
         explicitType: currentTxn.explicitType,
@@ -1306,6 +1347,7 @@ class StatementParser {
     const headers = Object.keys(rows[0] || {});
 
     const dateCol = headers.find(h => /date|txn.?date|time/i.test(h));
+    const timeCol = headers.find(h => /^time$/i.test(h) || /txn.?time|trans.?time|time.?of.?txn/i.test(h));
     const descCol = headers.find(h => /narration|desc|particular|remark|details|payee|paid to|party/i.test(h));
     const debitCol = headers.find(h => this.isDebitHeader(h));
     const creditCol = headers.find(h => this.isCreditHeader(h));
@@ -1318,9 +1360,11 @@ class StatementParser {
     for (let i = 0; i < rows.length; i++) {
       const r = rows[i];
       const rawDate = dateCol ? r[dateCol] : null;
+      const rawTime = timeCol ? r[timeCol] : null;
       const narration = descCol ? r[descCol] : Object.values(r).join(' ');
       const refNo = refCol ? r[refCol] : null;
       const accountInfo = instrumentCol ? r[instrumentCol] : null;
+      const time = (rawTime ? this.extractTime(rawTime) : '') || this.extractTime(rawDate);
 
       const { amount, explicitType } = this.resolveAmountCells(
         debitCol ? r[debitCol] : null,
@@ -1332,6 +1376,7 @@ class StatementParser {
       if (amount > 0 && rawDate) {
         records.push({
           date: this.normalizeDate(rawDate),
+          time: time || '',
           narration: narration || 'CSV Record',
           amount: amount,
           explicitType: explicitType,
@@ -1354,10 +1399,12 @@ class StatementParser {
       const line = row.join(' ');
       const dateMatch = line.match(/(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4})/);
       const amt = dateMatch ? this.extractAmount(line, dateMatch[0]) : null;
+      const time = this.extractTime(line);
 
       if (dateMatch && amt) {
         records.push({
           date: this.normalizeDate(dateMatch[0]),
+          time: time || '',
           narration: line,
           amount: amt.value,
           explicitType: /\bdr\b/i.test(line) ? 'expense' : (/\b(cr|credit|deposit)\b/i.test(line) ? 'income' : null)
@@ -1393,6 +1440,7 @@ class StatementParser {
 
     const headers = (jsonData[headerIdx] || []).map(h => String(h).trim());
     const dateIdx = headers.findIndex(h => /date|txn.?date|time/i.test(h));
+    const timeIdx = headers.findIndex(h => /^time$/i.test(h) || /txn.?time|trans.?time/i.test(h));
     const descIdx = headers.findIndex(h => /narration|desc|particular|remark|details|payee|paid to/i.test(h));
     const debitIdx = headers.findIndex(h => this.isDebitHeader(h));
     const creditIdx = headers.findIndex(h => this.isCreditHeader(h));
@@ -1407,9 +1455,11 @@ class StatementParser {
       if (!Array.isArray(row) || row.length === 0) continue;
 
       const rawDate = dateIdx >= 0 ? row[dateIdx] : row[0];
+      const rawTime = timeIdx >= 0 ? row[timeIdx] : null;
       const narration = descIdx >= 0 ? row[descIdx] : row.join(' ');
       const refNo = refIdx >= 0 ? row[refIdx] : null;
       const accountInfo = instIdx >= 0 ? row[instIdx] : null;
+      const time = (rawTime ? this.extractTime(rawTime) : '') || this.extractTime(rawDate);
 
       const { amount, explicitType } = this.resolveAmountCells(
         debitIdx >= 0 ? row[debitIdx] : null,
@@ -1421,6 +1471,7 @@ class StatementParser {
       if (amount > 0 && rawDate) {
         records.push({
           date: this.normalizeDate(rawDate),
+          time: time || '',
           narration: narration || 'Excel Record',
           amount: amount,
           explicitType: explicitType,
@@ -1741,6 +1792,24 @@ class StatementParser {
     }
     if (isNaN(value) || value <= 0) return null;
     return { value, text };
+  }
+
+  /**
+   * Extract time-of-day string from a statement line or token.
+   * Recognizes 12-hour AM/PM ("12:04 PM", "12:04pm") and 24-hour ("14:30:00", "09:15").
+   */
+  extractTime(text) {
+    if (!text) return '';
+    const s = String(text).trim();
+    const amPmMatch = s.match(/\b((?:0?[1-9]|1[0-2]):[0-5]\d(?::[0-5]\d)?\s*[AP]M)\b/i);
+    if (amPmMatch) {
+      return amPmMatch[1].replace(/(\d)(am|pm)/i, '$1 $2').trim().toUpperCase();
+    }
+    const h24Match = s.match(/\b([01]?\d|2[0-3]):[0-5]\d(?::[0-5]\d)?\b/);
+    if (h24Match) {
+      return h24Match[0].trim();
+    }
+    return '';
   }
 
   /**

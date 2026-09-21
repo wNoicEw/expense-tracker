@@ -403,6 +403,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun deleteTransactions(transactions: List<TransactionEntity>) {
+        val profile = activeProfile.value ?: return
+        if (transactions.isEmpty()) return
+        viewModelScope.launch {
+            val db = ExpenseTrackerDatabase.getDatabase(getApplication(), profile.id)
+            db.transactionDao().deleteTransactions(transactions)
+        }
+    }
+
+    fun deleteTransactionsByIds(ids: List<String>) {
+        val profile = activeProfile.value ?: return
+        if (ids.isEmpty()) return
+        viewModelScope.launch {
+            val db = ExpenseTrackerDatabase.getDatabase(getApplication(), profile.id)
+            db.transactionDao().deleteTransactionsByIds(ids)
+        }
+    }
+
     // Accounts
     fun addAccount(
         name: String,

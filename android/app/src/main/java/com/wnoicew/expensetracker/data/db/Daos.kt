@@ -30,6 +30,12 @@ interface TransactionDao {
     @Delete
     suspend fun deleteTransaction(transaction: TransactionEntity)
 
+    @Delete
+    suspend fun deleteTransactions(transactions: List<TransactionEntity>)
+
+    @Query("DELETE FROM transactions WHERE id IN (:ids)")
+    suspend fun deleteTransactionsByIds(ids: List<String>)
+
     @Query("UPDATE transactions SET accountId = '', accountName = 'Cash / Unassigned' WHERE accountId = :accountId")
     suspend fun unassignAccountFromTransactions(accountId: String)
 }

@@ -28,6 +28,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.input.pointer.pointerInput
@@ -1416,15 +1417,6 @@ private fun InteractiveCashflowGraph(
 
                     val zeroY = (height * (maxVal / range)).toFloat().coerceIn(10f, height - 10f)
 
-                    // Draw Zero Baseline
-                    drawLine(
-                        color = Color.Gray.copy(alpha = 0.35f),
-                        start = Offset(0f, zeroY),
-                        end = Offset(width, zeroY),
-                        strokeWidth = 1.dp.toPx(),
-                        pathEffect = PathEffect.dashPathEffect(floatArrayOf(8f, 8f), 0f)
-                    )
-
                     val coords = points.mapIndexed { index, p ->
                         val x = if (points.size > 1) (index.toFloat() / (points.size - 1)) * width else width / 2
                         val y = (height * ((maxVal - p.cumulative) / range)).toFloat().coerceIn(4f, height - 4f)
@@ -1449,17 +1441,53 @@ private fun InteractiveCashflowGraph(
                             close()
                         }
 
-                        val isSurplus = totalNet >= 0
-                        val curveColor = if (isSurplus) incomeLineColor else expenseLineColor
-                        val gradFill = Brush.verticalGradient(
-                            listOf(curveColor.copy(alpha = 0.35f), curveColor.copy(alpha = 0.05f), Color.Transparent),
-                            startY = if (isSurplus) 0f else zeroY,
-                            endY = if (isSurplus) zeroY else height
-                        )
+                        // 1. Positive Zone (Balance >= 0, above zero baseline): Luminous Emerald Green Area & Curve
+                        clipRect(left = 0f, top = 0f, right = width, bottom = zeroY + 1f) {
+                            val surplusGrad = Brush.verticalGradient(
+                                colors = listOf(
+                                    incomeLineColor.copy(alpha = 0.35f),
+                                    incomeLineColor.copy(alpha = 0.08f),
+                                    Color.Transparent
+                                ),
+                                startY = 0f,
+                                endY = zeroY
+                            )
+                            drawPath(fillPath, brush = surplusGrad)
+                            drawPath(
+                                path = path,
+                                color = incomeLineColor,
+                                style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round)
+                            )
+                        }
 
-                        drawPath(fillPath, brush = gradFill)
-                        drawPath(path, color = curveColor, style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round))
+                        // 2. Negative Zone (Balance < 0, below zero baseline): Luminous Rose Red Area & Curve
+                        clipRect(left = 0f, top = zeroY, right = width, bottom = height) {
+                            val deficitGrad = Brush.verticalGradient(
+                                colors = listOf(
+                                    Color.Transparent,
+                                    expenseLineColor.copy(alpha = 0.08f),
+                                    expenseLineColor.copy(alpha = 0.35f)
+                                ),
+                                startY = zeroY,
+                                endY = height
+                            )
+                            drawPath(fillPath, brush = deficitGrad)
+                            drawPath(
+                                path = path,
+                                color = expenseLineColor,
+                                style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round)
+                            )
+                        }
                     }
+
+                    // 3. Draw Zero Baseline on top of fills for crisp visibility
+                    drawLine(
+                        color = Color.Gray.copy(alpha = 0.40f),
+                        start = Offset(0f, zeroY),
+                        end = Offset(width, zeroY),
+                        strokeWidth = 1.dp.toPx(),
+                        pathEffect = PathEffect.dashPathEffect(floatArrayOf(8f, 8f), 0f)
+                    )
 
                     // Draw Active Cursor & Dot
                     selectedIndex?.let { idx ->

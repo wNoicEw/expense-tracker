@@ -29,8 +29,43 @@ object StatementParserEngine {
     // Two-digit-year patterns precede four-digit ones and every parse must consume the whole string;
     // otherwise "05/01/25" would be read as year 0025 by the yyyy pattern.
     private val supportedDateFormats = listOf(
+        // Datetime with seconds & AM/PM
+        "yyyy-MM-dd hh:mm:ss a",
         "yyyy-MM-dd HH:mm:ss",
+        "dd/MM/yyyy hh:mm:ss a",
         "dd/MM/yyyy HH:mm:ss",
+        "dd-MM-yyyy hh:mm:ss a",
+        "dd-MM-yyyy HH:mm:ss",
+        "dd.MM.yyyy hh:mm:ss a",
+        "dd.MM.yyyy HH:mm:ss",
+        "dd-MMM-yyyy hh:mm:ss a",
+        "dd MMM yyyy hh:mm:ss a",
+        "dd MMM, yyyy hh:mm:ss a",
+        "MMM dd, yyyy hh:mm:ss a",
+        "dd MMMM yyyy hh:mm:ss a",
+        "dd MMMM, yyyy hh:mm:ss a",
+
+        // Datetime without seconds (hh:mm a or HH:mm)
+        "yyyy-MM-dd hh:mm a",
+        "yyyy-MM-dd HH:mm",
+        "yyyy/MM/dd HH:mm",
+        "dd/MM/yyyy hh:mm a",
+        "dd/MM/yyyy HH:mm",
+        "dd-MM-yyyy hh:mm a",
+        "dd-MM-yyyy HH:mm",
+        "dd.MM.yyyy hh:mm a",
+        "dd.MM.yyyy HH:mm",
+        "dd-MMM-yyyy hh:mm a",
+        "dd MMM yyyy hh:mm a",
+        "dd MMM, yyyy hh:mm a",
+        "MMM dd, yyyy hh:mm a",
+        "dd MMMM yyyy hh:mm a",
+        "dd MMMM, yyyy hh:mm a",
+        "dd MMM yy hh:mm a",
+        "dd/MM/yy hh:mm a",
+        "dd-MM-yy hh:mm a",
+
+        // Pure dates
         "yyyy-MM-dd",
         "yyyy/MM/dd",
         "dd/MM/yy",
@@ -53,8 +88,34 @@ object StatementParserEngine {
 
     // Month-first fallbacks, tried only when the day-first parse failed AND the first number can't be a day
     // ("01/15/2025"). "05/06/2025" stays day-first: that is the Indian convention and guessing would misdate it.
-    private val monthFirstFormats = listOf("MM/dd/yyyy", "MM-dd-yyyy", "MM/dd/yy", "MM-dd-yy")
-    private val monthFirstShape = Regex("""^(\d{1,2})[/\-](\d{1,2})[/\-](\d{2}|\d{4})$""")
+    private val monthFirstFormats = listOf(
+        "MM/dd/yyyy hh:mm:ss a",
+        "MM/dd/yyyy hh:mm a",
+        "MM/dd/yyyy HH:mm:ss",
+        "MM/dd/yyyy HH:mm",
+        "MM-dd-yyyy hh:mm:ss a",
+        "MM-dd-yyyy hh:mm a",
+        "MM-dd-yyyy HH:mm:ss",
+        "MM-dd-yyyy HH:mm",
+        "MM/dd/yyyy",
+        "MM-dd-yyyy",
+        "MM/dd/yy",
+        "MM-dd-yy"
+    )
+    private val monthFirstShape = Regex("""^(\d{1,2})[/\-](\d{1,2})[/\-](\d{2}|\d{4})(?:\s|$)""")
+
+    fun extractTime(text: String): String? {
+        if (text.isBlank()) return null
+        val amPmMatch = Regex("""\b((?:0?[1-9]|1[0-2]):[0-5]\d(?::[0-5]\d)?\s*[AP]M)\b""", RegexOption.IGNORE_CASE).find(text)
+        if (amPmMatch != null) {
+            return amPmMatch.groupValues[1].replace(Regex("""(?i)(\d)(am|pm)"""), "$1 $2").trim().uppercase()
+        }
+        val h24Match = Regex("""\b([01]?\d|2[0-3]):[0-5]\d(?::[0-5]\d)?\b""").find(text)
+        if (h24Match != null) {
+            return h24Match.value.trim()
+        }
+        return null
+    }
 
     // Regex patterns for date, amount, type
     private val dateRegex = Regex("""(\d{1,2}[/\-.]\d{1,2}[/\-.]\d{2,4})|(\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*,?\s+\d{2,4})|((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2},?\s+\d{4})""", RegexOption.IGNORE_CASE)
@@ -393,7 +454,8 @@ object StatementParserEngine {
             // Paying a credit-card bill is not spending: the purchases are already on the card itself
             val isCcBillPayment = ccBillRe.containsMatchIn(prefix + payee) && !isCard && !bankInstrument.contains("Credit Card", ignoreCase = true)
             val cat = CategorizerEngine.categorize(narration, amt, customRules)
-            val parsedDate = parseDate(rawDate)
+            val timeStr = follow.firstNotNullOfOrNull { extractTime(it) } ?: extractTime(lines[i])
+            val parsedDate = parseDate(rawDate, timeStr)
 
             list.add(
                 TransactionEntity(
@@ -455,10 +517,14 @@ object StatementParserEngine {
             var narration = line.replace(dateM.value, "").replace(amtM.value, "").replace(typeRe, "").trim()
             var refNo = ""
             var hint: AccountMetadata? = null
+            var timeStr = extractTime(line)
 
             for (j in (i + 1)..minOf(i + 3, lines.lastIndex)) {
                 val next = lines[j]
                 if (dateRegex.containsMatchIn(next) && (upiAmountRe.containsMatchIn(next) || amountRegex.containsMatchIn(next))) break
+                if (timeStr == null) {
+                    timeStr = extractTime(next)
+                }
                 // "Paid by XXXXXXXX3863" names the paying account; a missing or unreadable line just leaves the file-level account
                 if (hint == null && paidByRe.containsMatchIn(next)) {
                     hint = accountHintFromInstrument(next)
@@ -473,7 +539,7 @@ object StatementParserEngine {
             }
 
             val cat = CategorizerEngine.categorize(narration, amt, customRules)
-            val date = parseDate(dateM.value) ?: continue
+            val date = parseDate(dateM.value, timeStr) ?: continue
 
             list.add(
                 TransactionEntity(
@@ -533,7 +599,8 @@ object StatementParserEngine {
             val startM = startRe.find(block[0])!!
             val year = startM.groupValues[2].ifBlank { block.drop(1).firstNotNullOfOrNull { yearOnlyRe.find(it)?.groupValues?.get(1) }.orEmpty() }
             val rawDate = (startM.groupValues[1] + " " + year).trim()
-            val parsedDate = parseDate(rawDate)
+            val timeStr = block.firstNotNullOfOrNull { extractTime(it) }
+            val parsedDate = parseDate(rawDate, timeStr)
 
             val dirStr = details.groupValues[1].lowercase()
             val isIncome = dirStr.startsWith("received")
@@ -703,7 +770,8 @@ object StatementParserEngine {
                     val cleanNarration = rawNarration.replace(Regex("""AT\s+\d+.*""", RegexOption.IGNORE_CASE), "").replace(Regex("""\s+"""), " ").trim()
                     val ref = Regex("""(?:UPI|UTR|IMPS|NEFT|REF)[/\s:-]*([0-9A-Za-z]{8,18})""", RegexOption.IGNORE_CASE).find(rawNarration)?.groupValues?.getOrNull(1) ?: ""
                     val cat = CategorizerEngine.categorize(cleanNarration.ifBlank { "SBI Transaction" }, txnAmount, customRules)
-                    val parsedDate = parseDate(rawDate)
+                    val timeStr = extractTime(line) ?: chunk.firstNotNullOfOrNull { extractTime(it) }
+                    val parsedDate = parseDate(rawDate, timeStr)
 
                     list.add(
                         TransactionEntity(
@@ -771,7 +839,8 @@ object StatementParserEngine {
 
                 val narration = line.replace(dateM.value, "").replace(amtM.value, "").replace(" CR", "", ignoreCase = true).trim()
                 val cat = CategorizerEngine.categorize(narration, amt, customRules)
-                val date = parseDate(dateM.value) ?: continue
+                val timeStr = extractTime(line)
+                val date = parseDate(dateM.value, timeStr) ?: continue
 
                 list.add(
                     TransactionEntity(
@@ -849,7 +918,8 @@ object StatementParserEngine {
                 }
 
                 val cat = CategorizerEngine.categorize(narration, amt, customRules)
-                val date = parseDate(dateM.value) ?: continue
+                val timeStr = extractTime(line) ?: (if (i + 1 < lines.size) extractTime(lines[i + 1]) else null)
+                val date = parseDate(dateM.value, timeStr) ?: continue
 
                 list.add(
                     TransactionEntity(
@@ -932,6 +1002,7 @@ object StatementParserEngine {
         val creditIdx = headerCols.indexOfFirst { it.contains("credit") || it.contains("deposit") || it.contains("cr") }
         val refIdx = headerCols.indexOfFirst { it.contains("ref") || it.contains("utr") || it.contains("chq") || it.contains("reference") }
         val typeIdx = headerCols.indexOfFirst { it == "type" || it.contains("txn type") || it.contains("cr/dr") }
+        val timeIdx = headerCols.indexOfFirst { it == "time" || it.contains("txn time") || it.contains("trans time") || it.contains("time of txn") }
 
         val fullText = lines.joinToString(" ")
         val accountMetadata = extractAccountMetadata(fullText, fileName)
@@ -951,8 +1022,9 @@ object StatementParserEngine {
             val rawDate = if (dateIdx >= 0 && dateIdx < cols.size) cols[dateIdx] else ""
             val rawDesc = if (descIdx >= 0 && descIdx < cols.size) cols[descIdx] else "Transaction"
             val rawRef = if (refIdx >= 0 && refIdx < cols.size) cols[refIdx] else ""
+            val rawTime = if (timeIdx >= 0 && timeIdx < cols.size) cols[timeIdx] else extractTime(rawDate)
 
-            val parsedDate = parseDate(rawDate)
+            val parsedDate = parseDate(rawDate, rawTime)
 
             var amount = 0.0
             var explicitType: TransactionType? = null
@@ -1258,34 +1330,50 @@ object StatementParserEngine {
         return cleaned.toDoubleOrNull() ?: 0.0
     }
 
-    fun parseDate(dateStr: String, nowMs: Long = System.currentTimeMillis()): Long? {
-        val clean = dateStr.trim().replace(Regex("""\s+"""), " ")
-        if (clean.isBlank()) return null
+    fun parseDate(dateStr: String, timeStr: String? = null, nowMs: Long = System.currentTimeMillis()): Long? {
+        val cleanDate = dateStr.trim().replace(Regex("""\s+"""), " ")
+        if (cleanDate.isBlank()) return null
+
+        val cleanTime = timeStr?.trim()?.replace(Regex("""\s+"""), " ")?.replace(Regex("""(?i)(\d)(am|pm)"""), "$1 $2")?.uppercase()
+        if (!cleanTime.isNullOrBlank()) {
+            val combined = "$cleanDate $cleanTime"
+            val maxYear = Calendar.getInstance().apply { timeInMillis = nowMs }.get(Calendar.YEAR) + 1
+            for (pattern in supportedDateFormats) {
+                val sdf = SimpleDateFormat(pattern, Locale.ENGLISH).apply { isLenient = false }
+                val pos = ParsePosition(0)
+                val d = sdf.parse(combined, pos) ?: continue
+                if (pos.index != combined.length) continue
+                val year = Calendar.getInstance().apply { time = d }.get(Calendar.YEAR)
+                if (year in MIN_VALID_YEAR..maxYear) return d.time
+            }
+        }
 
         val maxYear = Calendar.getInstance().apply { timeInMillis = nowMs }.get(Calendar.YEAR) + 1
         for (pattern in supportedDateFormats) {
             val sdf = SimpleDateFormat(pattern, Locale.ENGLISH).apply { isLenient = false }
             val pos = ParsePosition(0)
-            val d = sdf.parse(clean, pos) ?: continue
-            if (pos.index != clean.length) continue
+            val d = sdf.parse(cleanDate, pos) ?: continue
+            if (pos.index != cleanDate.length) continue
             val year = Calendar.getInstance().apply { time = d }.get(Calendar.YEAR)
             if (year in MIN_VALID_YEAR..maxYear) return d.time
         }
 
-        val shape = monthFirstShape.find(clean) ?: return null
+        val shape = monthFirstShape.find(cleanDate) ?: return null
         val first = shape.groupValues[1].toInt()
         val second = shape.groupValues[2].toInt()
         if (second !in 13..31 || first !in 1..12) return null // ambiguous or not a date: leave it flagged
         for (pattern in monthFirstFormats) {
             val sdf = SimpleDateFormat(pattern, Locale.ENGLISH).apply { isLenient = false }
             val pos = ParsePosition(0)
-            val d = sdf.parse(clean, pos) ?: continue
-            if (pos.index != clean.length) continue
+            val d = sdf.parse(cleanDate, pos) ?: continue
+            if (pos.index != cleanDate.length) continue
             val year = Calendar.getInstance().apply { time = d }.get(Calendar.YEAR)
             if (year in MIN_VALID_YEAR..maxYear) return d.time
         }
         return null
     }
+
+    fun parseDate(dateStr: String, nowMs: Long): Long? = parseDate(dateStr, null, nowMs)
 
     private fun undatedNote(raw: String) = "Date \"$raw\" not recognised; set to import date, please correct."
 

@@ -192,6 +192,7 @@ t('Navi: glued bank account "Paid to JOHN DOE HDFC Bank - 1234" splits payee and
   const { records } = p.parseNaviBlocks(rows, '', {});
   assert.strictEqual(records.length, 1);
   assert.strictEqual(records[0].amount, 70);
+  assert.strictEqual(records[0].time, '12:00 AM');
   assert.strictEqual(records[0].narration, 'Paid to JOHN DOE — Paid via Navi UPI');
   assert.strictEqual(records[0].accountInfo, 'HDFC Bank - 1234');
 });
@@ -224,6 +225,7 @@ t('PhonePe: "Paid by XXXXXXXX1234" becomes accountInfo, not narration; wallet / 
   ];
   const { records } = p.parsePhonePePDF(rows, '', {});
   assert.deepStrictEqual(records.map(r => r.accountInfo), ['XXXXXXXX1234', '', 'XXXXXXXX1234', '']);
+  assert.deepStrictEqual(records.map(r => r.time), ['01:00 PM', '02:00 PM', '03:00 PM', '']);
   assert.strictEqual(records[0].narration, 'Paid to SOME SHOP');
   assert.strictEqual(records[0].referenceNo, '100000000001');
   assert.strictEqual(records[2].explicitType, 'income');
@@ -245,6 +247,7 @@ t('Google Pay: year wrapped onto the 2nd row is re-joined; "Paid by <bank> <last
   ];
   const { records } = p.parseUPIAppPDF(rows, '', { bankName: 'Google Pay' });
   assert.deepStrictEqual(records.map(r => r.date), ['2026-08-10', '2026-08-09', '2026-08-08', '2026-08-07']);
+  assert.deepStrictEqual(records.map(r => r.time), ['01:00 PM', '02:00 PM', '03:00 PM', '']);
   assert.deepStrictEqual(records.map(r => r.amount), [1100, 500, 130, 90]);
   assert.deepStrictEqual(records.map(r => r.accountInfo),
     ['HDFC Bank 1234', 'Punjab National Bank 4321', 'HDFC Bank Credit Card 4455 on UPI', '']);
@@ -271,6 +274,7 @@ t('Google Pay: skips statement period range header, recognizes Self transfer as 
   const { records } = p.parseUPIAppPDF(rows, '', { bankName: 'Google Pay' });
   assert.strictEqual(records.length, 3);
   assert.deepStrictEqual(records.map(r => r.date), ['2026-03-01', '2026-03-03', '2026-04-06']);
+  assert.deepStrictEqual(records.map(r => r.time), ['12:04 PM', '11:11 AM', '10:01 AM']);
   assert.deepStrictEqual(records.map(r => r.amount), [400, 982, 30000]);
   assert.deepStrictEqual(records.map(r => r.explicitType), ['expense', 'income', 'transfer']);
   assert.strictEqual(records[0].accountInfo, 'HDFC Bank XX99 | RuPay credit card on UPI');
@@ -620,6 +624,16 @@ paytmRows.unshift(row(['Date', 28], ['Transaction Details', 110], ['Your Account
     assert.ok(Math.abs(restoredRate - (83.5 / 0.92)) < 0.001);
 
     CurrencyEngine.resetAllRatesToApi();
+  });
+
+  t('raw table rows: captures time and sets time on records', () => {
+    const { records } = p.parseRawTableRows([
+      ['15/01/2024 12:04 PM', 'UPI-SWIGGY', '1,250.00', 'Dr'],
+      ['16/01/2024 06:30 PM', 'SALARY', '85,000.00', 'Cr']
+    ]);
+    assert.strictEqual(records.length, 2);
+    assert.strictEqual(records[0].time, '12:04 PM');
+    assert.strictEqual(records[1].time, '06:30 PM');
   });
 
   console.log(`\nALL ${n} WEB REGRESSION TESTS PASSED`);

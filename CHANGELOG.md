@@ -4,6 +4,61 @@ All notable changes to **Money Tracker (Offline AI Expense Tracker & Financial I
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.0] - 2026-09-22
+
+### Added - Groww-Style Ledger Filter Hub, Multi-Sort Sheet & Long-Press Multi-Select Deletion
+- **Executive Ledger Filter Architecture (`LedgerFilterSheet`)**:
+  - Replaced the bulky 4-row stacked horizontal filter chips in the Financial Ledger with a compact single-line toolbar inspired by modern financial apps like Groww.
+  - Dedicated "Filter" button with an active filter badge counter that launches an executive split-pane modal bottom sheet:
+    - **Category Navigation Rail**: Left sidebar (`Type`, `Category`, `Account`, `Currency`, `Status`) with dynamic badges indicating active selections per category.
+    - **Multi-Select Attribute Pane**: Right pane with high-touch checkbox items for multi-category filtering across transaction types, 12+ categories, linked accounts, supported currencies, and review flags.
+    - **Header & Footer CTAs**: "Clear all" action in the header to reset filters at once, paired with a sticky bottom CTA button showing live matching transactions (`View X Transactions`).
+- **Dedicated Sorting Bottom Sheet (`LedgerSortSheet`)**:
+  - Added a Groww-style "Sort by ▾" pill button opening a focused bottom sheet with clear options:
+    - *Newest to Oldest* (Default chronological)
+    - *Oldest to Newest*
+    - *Highest Amount to Lowest*
+    - *Lowest to Highest Amount*
+  - Instant selection dismiss with checkmark indicator and real-time ledger list re-sorting.
+- **Active Filter Dismiss Pills (`LedgerFilterSortBar`)**:
+  - Dynamically displays removable filter chips (`Expenses ✕`, `Food & Dining ✕`, `INR ✕`, `Needs Review ✕`) next to the sort button for immediate visibility and 1-tap dismiss.
+  - Includes a quick-access "Review (N)" chip when unreviewed transactions are detected.
+- **Long-Press Multi-Selection & Bulk Deletion**:
+  - Long-pressing any transaction in the ledger initiates multi-selection mode with tactile haptic feedback.
+  - **Contextual Action Bar (CAB)**: Replaces top header during selection with cancel (`✕`), live selected count (`X selected`), a 1-tap "Select All" / "Deselect All" button, and bulk delete action.
+  - **Visual Selection Feedback**: Inline animated Checkbox on the left of each row and illuminated primary tint with active border stroke for selected rows.
+  - **Safe Bulk Deletion**: Added Room DAO query `deleteTransactionsByIds` with an irreversible deletion confirmation dialog.
+  - Back handler support automatically exits selection mode when the user taps Android system back.
+- **APK Distribution**:
+  - Pruned oldest fallback version `ExpenseTracker-v1.5.0.apk` per 5-version retention policy.
+  - Archived `ExpenseTracker-v1.7.0.apk` in `apks/` and updated main `ExpenseTracker.apk`.
+
+## [1.6.2] - 2026-09-22
+
+### Fixed - Universal Statement Transaction Time Extraction & Precision Timestamp Engine
+- **Transaction Time Detection & Precision Timestamp Parsing (Android & Web)**:
+  - Fixed an issue where statements containing explicit transaction times (e.g., Google Pay statements specifying `12:04 PM`, `11:11 AM`, `10:01 AM`) defaulted all transaction times to `12:00 AM`.
+  - Upgraded the statement parsing engines on both Android (`StatementParserEngine.kt`) and Web (`js/parser.js`) with robust time-extraction and datetime-matching capabilities.
+- **Android Precision Epoch Timestamp Parsing (`StatementParserEngine.kt`)**:
+  - Expanded `supportedDateFormats` and `monthFirstFormats` with 12-hour AM/PM and 24-hour timestamp patterns (`dd MMM yyyy hh:mm:ss a`, `dd MMM yyyy hh:mm a`, `dd MMM, yyyy hh:mm a`, `MMM dd, yyyy hh:mm a`, `dd/MM/yyyy hh:mm a`, `yyyy-MM-dd HH:mm:ss`, `yyyy-MM-dd HH:mm`, etc.).
+  - Implemented `extractTime(text: String): String?` with regex normalization for 12-hour AM/PM (e.g. `12:04pm` -> `12:04 PM`) and 24-hour formats.
+  - Overloaded `parseDate` to combine date string with extracted time string before parsing, setting the exact epoch millisecond so Android UI formatters (`hh:mm a`) display the true transaction time rather than default midnight (`12:00 AM`).
+  - Integrated time extraction across all statement parsers: Google Pay, Navi, PhonePe, SBI, Credit Card statements, Generic fallback lines, and CSV/Excel tables.
+- **Web Transaction Time Preservation (`js/parser.js`)**:
+  - Implemented `extractTime(text)` in `js/parser.js` supporting 12-hour AM/PM and 24-hour formats.
+  - Fixed transaction normalization in `parseFile` by assigning `time: row.time || ''`, preserving transaction times across all web views, ledger filters, and backup exports.
+  - Integrated time parsing across `parseUPIAppPDF` (Google Pay), `parseNaviBlocks`, `parsePhonePePDF`, `parsePaytmPDF`, `parseGenericTablePDF`, `parseCreditCardPDF`, `parseCSVText`, and `parseExcelBuffer`.
+- **Cash Flow Dual-Zone Curve & Gradient Fill (Android & Web)**:
+  - Fixed an issue in Cumulative Flow mode where the curve line and gradient fill were rendered entirely red whenever the net period ended in a deficit (`totalNet < 0`), even for historical segments where the balance was positive above the zero baseline.
+  - Upgraded Android's `DashboardScreen.kt` Canvas rendering using dual-zone `clipRect` scissoring:
+    - **Positive Territory (`balance >= 0`, above zero line)**: Curve renders in vibrant Emerald Green (`#10B981`) paired with a luminous emerald gradient fill fading toward the zero baseline.
+    - **Negative Territory (`balance < 0`, below zero line)**: Curve renders in Rose Red (`#F43F5E`) paired with a rich crimson gradient fill fading toward the baseline.
+    - Zero baseline dashed divider is drawn crisply on top of the fills for optimal visual hierarchy.
+  - Updated Web's `js/charts.js` with a dynamic dual-stop linear gradient centered around the calculated zero-baseline ratio, ensuring seamless cross-platform parity between Web and Android.
+- **Comprehensive Regression & Unit Test Coverage**:
+  - Added unit test cases in `LogicTests.kt` verifying exact time extraction and parsing for Google Pay (`12:04 PM`, `11:11 AM`, `10:01 AM`), Navi (`12:00 AM`, `06:24 PM`), PhonePe (`06:57 PM`), and CSV statements.
+  - Added web regression tests in `test_web_regressions.js` verifying time preservation across Google Pay, Navi, PhonePe, and generic table rows.
+
 ## [1.6.1] - 2026-09-21
 
 ### Fixed - UPI Statement Intelligence: Google Pay, Navi Bank Account Detection & Clean Formatting

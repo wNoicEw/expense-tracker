@@ -113,10 +113,17 @@ class ChartsEngine {
     let datasets = [];
 
     if (viewMode === 'cumulative') {
-      // Cumulative Net Position over time (Surplus vs Deficit)
-      const gradSurplus = chartCtx.createLinearGradient(0, 0, 0, 300);
-      gradSurplus.addColorStop(0, 'rgba(16, 185, 129, 0.4)');
-      gradSurplus.addColorStop(1, 'rgba(16, 185, 129, 0.05)');
+      // Cumulative Net Position over time (Dual Gradient: Surplus Green above zero, Deficit Red below zero)
+      const maxCum = Math.max(...cumulativeData, 0);
+      const minCum = Math.min(...cumulativeData, 0);
+      const cumRange = Math.max(maxCum - minCum, 100);
+      const zeroRatio = Math.max(0.02, Math.min(0.98, maxCum / cumRange));
+
+      const gradDual = chartCtx.createLinearGradient(0, 0, 0, 280);
+      gradDual.addColorStop(0, 'rgba(16, 185, 129, 0.35)');
+      gradDual.addColorStop(Math.max(0, zeroRatio - 0.02), 'rgba(16, 185, 129, 0.02)');
+      gradDual.addColorStop(Math.min(1, zeroRatio + 0.02), 'rgba(244, 63, 94, 0.02)');
+      gradDual.addColorStop(1, 'rgba(244, 63, 94, 0.35)');
 
       datasets = [
         {
@@ -131,7 +138,7 @@ class ChartsEngine {
             borderColor: (ctx) => (ctx.p1.parsed.y >= 0 ? '#10b981' : '#f43f5e'),
             backgroundColor: (ctx) => (ctx.p1.parsed.y >= 0 ? 'rgba(16, 185, 129, 0.15)' : 'rgba(244, 63, 94, 0.15)')
           },
-          backgroundColor: gradSurplus,
+          backgroundColor: gradDual,
           fill: { target: 'origin' },
           borderWidth: 3,
           tension: 0.35,
