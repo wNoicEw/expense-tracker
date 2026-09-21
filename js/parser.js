@@ -82,16 +82,16 @@ class StatementParser {
     };
     // Multi-account UPI histories name the paying account on every row: Navi "State Bank of India - 2105",
     // and for PhonePe / Google Pay / Paytm "HDFC Bank 1234", "HDFC Bank XXXX1234" or just "XXXXXXXX3863"
-    const upiApp = /phonepe|paytm|google pay|gpay/i.test(detectedProfile);
+    const upiApp = /navi|phonepe|paytm|google pay|gpay/i.test(detectedProfile);
     const rowAccountCache = new Map();
     const accountFromRow = async (info) => {
       const s = String(info || '').trim();
       if (targetAccountId || !window.accountsManager || !s || /credit\s*card/i.test(s)) return null;
       // Masked number without a bank name: no bank to key on, so the last 4 digits alone separate the accounts
-      const masked = upiApp && s.match(/^[Xx*•\s]+(\d{4})$/);
+      const masked = upiApp && s.match(/^[Xx*•\s]+(\d{2,4})$/);
       const m = masked
-        || s.match(/^(.*?[A-Za-z].*?)\s*-\s*([A-Za-z0-9]{4})$/)
-        || (upiApp && s.match(/^(.*?[A-Za-z].*?)\s+(?:(?:a\/c|acct?|account)\s*(?:no\.?)?\s*)?[Xx*•]*(\d{4})$/i));
+        || s.match(/^(.*?[A-Za-z].*?)\s*(?:-|–|—)\s*([A-Za-z0-9]{2,4})$/)
+        || (upiApp && s.match(/^(.*?[A-Za-z].*?)\s+(?:(?:a\/c|acct?|account|ending(?:\s+in)?)\s*(?:no\.?)?\s*)?[Xx*•]*(\d{2,4})$/i));
       if (!m) return null;
       const last4 = masked ? masked[1] : m[2];
       // bankName is also a match key in getOrCreateAccountFromStatement, so it carries the digits here
@@ -265,26 +265,26 @@ class StatementParser {
 
     const ft = fullText.toLowerCase();
     const fname = file.name.toLowerCase();
+    const header = fullText.slice(0, 1500).toLowerCase();
     let result;
 
-    // --- 1. UPI App block-format statements ---
-    if (ft.includes('paid via navi') || (ft.includes('upi txn id') && (ft.includes('navi') || /navi/i.test(fname)))) {
+    // --- 1. UPI App block-format statements (Priority over underlying banks mentioned in txns) ---
+    if (bankKey.includes('navi') || ft.includes('paid via navi') || (ft.includes('upi txn id') && (ft.includes('navi') || /navi/i.test(fname)))) {
       result = this.parseNaviBlocks(spatialRows, fullText, accountMetadata);
+
+    } else if (bankKey === 'google pay' || header.includes('google pay') || /gpay/i.test(fname) || ft.includes('google pay') || ft.includes('gpay') || ft.includes('tez ')) {
+      result = this.parseUPIAppPDF(spatialRows, fullText, accountMetadata);
+
+    } else if (bankKey === 'phonepe' || header.includes('phonepe') || ft.includes('phonepe') || /phonepe/i.test(fname)) {
+      result = this.parsePhonePePDF(spatialRows, fullText, accountMetadata);
+
+    } else if (bankKey === 'paytm' || ((ft.includes('paytm') && (ft.includes('wallet') || ft.includes('passbook') || ft.includes('transaction history') || ft.includes('upi statement'))) || /paytm/i.test(fname))) {
+      result = this.parsePaytmPDF(spatialRows, fullText, accountMetadata);
 
     // --- 2. SBI Bank Account (Priority over generic keyword matching) ---
     // Word-boundary match: a bare substring test also fires on IFSC codes (SBIN0001234) and VPAs (@oksbi)
     } else if (ft.includes('state bank') || /\bsbi\b/.test(ft) || /sbi/i.test(fname) || ft.includes('wdl tfr') || ft.includes('dep tfr') || bankKey.includes('sbi') || bankKey.includes('state bank')) {
       result = this.parseSBICoordinates(spatialRows, fullText, accountMetadata);
-
-    // --- 3. PhonePe & Paytm ---
-    } else if (ft.includes('phonepe') || /phonepe/i.test(fname)) {
-      result = this.parsePhonePePDF(spatialRows, fullText, accountMetadata);
-
-    } else if ((ft.includes('paytm') && (ft.includes('wallet') || ft.includes('passbook') || ft.includes('transaction history') || ft.includes('upi statement'))) || /paytm/i.test(fname)) {
-      result = this.parsePaytmPDF(spatialRows, fullText, accountMetadata);
-
-    } else if (ft.includes('gpay') || ft.includes('google pay') || ft.includes('tez ') || /gpay/i.test(fname)) {
-      result = this.parseUPIAppPDF(spatialRows, fullText, accountMetadata);
 
     // --- 4. Credit Card Statements (Strict verification to avoid false positives on bank statements) ---
     } else if (
@@ -768,6 +768,15 @@ class StatementParser {
         if (nextAccount && (idMatch || isTimeRow)) account = `${account} ${nextAccount}`.trim();
       }
 
+      // Check if account column was merged into details: e.g. "Paid to SAMPLE BENEFICIARY HDFC Bank - 1234"
+      const bankSuffixMatch = details.match(/^(.*?)\s+(State\s+Bank\s+[Oo]f\s+India|Kotak\s+Mahindra\s+Bank|Punjab\s+National\s+Bank|Bank\s+[Oo]f\s+[A-Za-z]+|Union\s+Bank\s+[Oo]f\s+India|Central\s+Bank\s+[Oo]f\s+India|IDFC\s+FIRST\s+Bank|Standard\s+Chartered\s+Bank|Airtel\s+Payments\s+Bank|Paytm\s+Payments\s+Bank|[A-Za-z&.]+\s+Bank|SBI|HDFC|ICICI|Axis|Kotak|PNB|BOB)\s*(?:-|–|—|a\/c|acct?\.?|account|ending(?:\s+in)?|no\.?)?\s*[xX*•]*(\d{2,4})\s*$/i);
+      if (bankSuffixMatch) {
+        details = bankSuffixMatch[1].trim();
+        if (!account) {
+          account = `${bankSuffixMatch[2].trim()} - ${bankSuffixMatch[3].trim()}`;
+        }
+      }
+
       const narration = details + (noteText ? ` — ${noteText}` : '');
 
       records.push({
@@ -1142,17 +1151,20 @@ class StatementParser {
     }
 
     const anchorRe = /(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4}|\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\w*,?\s+\d{2,4})/i;
+    const periodRe = /\b\d{1,2}\s+[A-Za-z]+\s+\d{4}\s*-\s*\d{1,2}\s+[A-Za-z]+\s+\d{4}\b/i;
     let i = 0;
     while (i < lines.length) {
       const line = lines[i];
       const dateM = line.match(anchorRe);
       const amtM = dateM ? this.extractAmount(line, dateM[0]) : null;
 
-      if (dateM && amtM) {
+      // Skip statement period summary headers e.g. "01 March 2026 - 31 August 2026 ₹1,14,905.49 ₹41,318.66"
+      if (dateM && amtM && !periodRe.test(line) && !/statement\s*period/i.test(line)) {
         const amount = amtM.value;
         {
           const isRefund = /refund|reversal|cashback/i.test(line);
-          const isIncome = this.upiIsIncome(line, /credit|received|refund|cashback|\bcr\b/i);
+          const isTransfer = /self\s*transfer/i.test(line);
+          const isIncome = !isTransfer && this.upiIsIncome(line, /credit|received|refund|cashback|\bcr\b/i);
 
           // Collect next 1-2 lines as narration supplement; the payer account line and txn ID (up to 4 rows down) are kept apart
           let narration = line.replace(dateM[0], '').replace(amtM.text, '').replace(/\s+/g, ' ').trim();
@@ -1175,7 +1187,7 @@ class StatementParser {
             date: this.normalizeDate(dateM[0]),
             narration: narration || 'UPI Transaction',
             amount: amount,
-            explicitType: isRefund ? 'refund' : (isIncome ? 'income' : 'expense'),
+            explicitType: isRefund ? 'refund' : (isTransfer ? 'transfer' : (isIncome ? 'income' : 'expense')),
             referenceNo: txnId || this.extractRefNo(line),
             accountInfo,
             paymentMode: 'UPI'
@@ -1437,16 +1449,25 @@ class StatementParser {
     if (fn.includes('navi') || header.includes('paid via navi') || header.includes('navi technologies')) {
       bankName = 'Navi UPI';
       color = '#2563eb';
+    } else if (fn.includes('gpay') || fn.includes('google pay') || header.includes('google pay app') || header.includes('payments made by you on the google pay')) {
+      bankName = 'Google Pay';
+      color = '#4338ca';
+    } else if (fn.includes('phonepe') || header.includes('phonepe statement') || header.includes('phonepe private limited')) {
+      bankName = 'PhonePe';
+      color = '#6b21a8';
+    } else if (fn.includes('paytm') || header.includes('paytm payments bank') || header.includes('paytm wallet') || header.includes('paytm transaction statement')) {
+      bankName = 'Paytm';
+      color = '#0369a1';
     } else if (fn.includes('sbi') || fn.includes('state bank') || header.includes('state bank of india') || /\bsbin\b/i.test(header) || header.includes('wdl tfr') || header.includes('dep tfr')) {
       bankName = 'State Bank of India (SBI)';
       color = '#065f46';
-    } else if (fn.includes('phonepe') || header.includes('phonepe')) {
+    } else if (header.includes('phonepe')) {
       bankName = 'PhonePe';
       color = '#6b21a8';
-    } else if (fn.includes('paytm') || header.includes('paytm')) {
+    } else if (header.includes('paytm')) {
       bankName = 'Paytm';
       color = '#0369a1';
-    } else if (fn.includes('gpay') || fn.includes('google pay') || header.includes('google pay') || /\bgpay\b/i.test(header)) {
+    } else if (header.includes('google pay') || /\bgpay\b/i.test(header)) {
       bankName = 'Google Pay';
       color = '#4338ca';
     } else if (fn.includes('hdfc') || header.includes('hdfc bank') || header.includes('www.hdfcbank.com') || header.includes('hdfc card')) {
@@ -1547,7 +1568,7 @@ class StatementParser {
     if (type === 'credit_card') {
       name = `${bankName} Credit Card` + (last4 ? ` (•••• ${last4})` : '');
     } else if (type === 'wallet') {
-      name = /upi/i.test(bankName) ? `${bankName} Wallet` : `${bankName} UPI Wallet`;
+      name = /wallet/i.test(bankName) ? bankName : `${bankName} Wallet`;
     } else if (type === 'cash') {
       name = 'Cash in Hand';
     } else {

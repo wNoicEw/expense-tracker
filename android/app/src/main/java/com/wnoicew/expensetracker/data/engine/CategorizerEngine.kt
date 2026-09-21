@@ -274,9 +274,10 @@ object CategorizerEngine {
             val direction = naviMatch.groupValues[1].lowercase()
             val person = naviMatch.groupValues[2].trim()
             val note = naviMatch.groupValues.getOrNull(3)?.trim() ?: ""
-            val personClean = person.split(Regex("""\s+""")).joinToString(" ") { it.replaceFirstChar { c -> c.uppercase() } }
+            val personClean = person.split(Regex("""\s+""")).joinToString(" ") { it.lowercase().replaceFirstChar { c -> c.uppercase() } }
 
-            if (note.length > 1) {
+            val isBoilerplate = Regex("""^paid\s+(?:via|using|on)\s+.*""", RegexOption.IGNORE_CASE).matches(note)
+            if (note.length > 1 && !isBoilerplate) {
                 return "$personClean ($note)".take(40)
             } else if (direction.contains("received")) {
                 return "$personClean (Received)".take(40)

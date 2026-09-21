@@ -315,7 +315,8 @@ class Categorizer {
       const note = (naviMatch[3] || '').trim();
       const personClean = person.split(/\s+/).map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
 
-      if (note && note.length > 1) {
+      const isBoilerplate = /^paid\s+(?:via|using|on)\s+/i.test(note);
+      if (note && note.length > 1 && !isBoilerplate) {
         return `${personClean} (${note})`.slice(0, 40);
       } else if (direction.includes('received')) {
         return `${personClean} (Received)`.slice(0, 40);

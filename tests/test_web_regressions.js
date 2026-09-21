@@ -182,6 +182,25 @@ t('account detection: Navi statement is a UPI wallet, not "State Bank of India" 
   assert.strictEqual(m.type, 'wallet');
 });
 
+t('Navi: glued bank account "Paid to JOHN DOE HDFC Bank - 1234" splits payee and extracts HDFC Bank account', () => {
+  const rows = [
+    row(['Date', 28], ['Transaction details', 115], ['Account', 382], ['Amount', 520]),
+    row(['27 Aug 2026', 28], ['Paid to JOHN DOE HDFC Bank - 1234', 115], ['₹70.00', 536]),
+    row(['12:00 AM', 28], ['UPI txn ID: 100000000001', 115]),
+    row(['Note: Paid via Navi UPI', 115])
+  ];
+  const { records } = p.parseNaviBlocks(rows, '', {});
+  assert.strictEqual(records.length, 1);
+  assert.strictEqual(records[0].amount, 70);
+  assert.strictEqual(records[0].narration, 'Paid to JOHN DOE — Paid via Navi UPI');
+  assert.strictEqual(records[0].accountInfo, 'HDFC Bank - 1234');
+});
+
+t('categorizer: cleanIndianTransactionTitle skips boilerplate "Paid via Navi UPI" note', () => {
+  const title = c.cleanIndianTransactionTitle('Paid to JOHN DOE — Paid via Navi UPI');
+  assert.strictEqual(title, 'John Doe');
+});
+
 t('RuPay card: two-digit masked suffix "XX99" is captured', () => {
   const m = p.detectRuPayCC('HDFC Bank RuPay Credit Card - XX99');
   assert.strictEqual(m.last4, '99');
@@ -232,6 +251,31 @@ t('Google Pay: year wrapped onto the 2nd row is re-joined; "Paid by <bank> <last
   assert.strictEqual(records[0].narration, 'Paid to SOME SHOP');
   assert.strictEqual(records[0].referenceNo, '100000000001');
   assert.strictEqual(records[1].explicitType, 'income');
+});
+
+t('Google Pay: skips statement period range header, recognizes Self transfer as transfer, and handles 2-digit masked RuPay card', () => {
+  const rows = [
+    row(['Transaction statement', 28]),
+    row(['01 March 2026 - 31 August 2026', 28], ['₹50,000.00', 400], ['₹20,000.00', 480]), // Period range header to skip
+    row(['Date & time', 28], ['Transaction details', 110], ['Amount', 480]),
+    row(['01 Mar, 2026 Paid to SOME SHOP ₹400', 28]),
+    row(['12:04 PM UPI Transaction ID: 100000000001', 28]),
+    row(['Paid by HDFC Bank XX99 | RuPay credit card', 28]),
+    row(['03 Mar, 2026 Received from A FRIEND ₹982', 28]),
+    row(['11:11 AM UPI Transaction ID: 100000000002', 28]),
+    row(['Paid to State Bank of India 1234', 28]),
+    row(['06 Apr, 2026 Self transfer to State Bank of India 1234 ₹30,000', 28]),
+    row(['10:01 AM UPI Transaction ID: 100000000003', 28]),
+    row(['Paid by HDFC Bank 5678', 28])
+  ];
+  const { records } = p.parseUPIAppPDF(rows, '', { bankName: 'Google Pay' });
+  assert.strictEqual(records.length, 3);
+  assert.deepStrictEqual(records.map(r => r.date), ['2026-03-01', '2026-03-03', '2026-04-06']);
+  assert.deepStrictEqual(records.map(r => r.amount), [400, 982, 30000]);
+  assert.deepStrictEqual(records.map(r => r.explicitType), ['expense', 'income', 'transfer']);
+  assert.strictEqual(records[0].accountInfo, 'HDFC Bank XX99 | RuPay credit card on UPI');
+  assert.strictEqual(records[1].accountInfo, 'State Bank of India 1234');
+  assert.strictEqual(records[2].accountInfo, 'HDFC Bank 5678');
 });
 
 t('Paytm: "Your Account" column (incl. wrapped text) and block-format "Paid from" lines become accountInfo', () => {

@@ -40,6 +40,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.wnoicew.expensetracker.data.engine.CurrencyEngine
 import com.wnoicew.expensetracker.data.model.AccountEntity
+import com.wnoicew.expensetracker.data.model.AccountWithMetrics
 import com.wnoicew.expensetracker.data.model.CategoryBreakdownItem
 import com.wnoicew.expensetracker.data.model.TransactionEntity
 import com.wnoicew.expensetracker.data.model.TransactionType
@@ -93,7 +94,7 @@ fun DashboardScreen(
     val netWorth by viewModel.totalNetWorth.collectAsState()
     val categoryBreakdown by viewModel.categoryBreakdown.collectAsState()
     val transactions by viewModel.transactions.collectAsState()
-    val accounts by viewModel.accounts.collectAsState()
+    val accountsWithMetrics by viewModel.accountsWithMetrics.collectAsState()
     val needsReviewCount by viewModel.needsReviewCount.collectAsState()
     val shouldShowBackupReminder by viewModel.shouldShowBackupReminder.collectAsState()
 
@@ -769,7 +770,7 @@ fun DashboardScreen(
         }
 
         // 7. Mini Connected Accounts Snapshot
-        if (accounts.isNotEmpty()) {
+        if (accountsWithMetrics.isNotEmpty()) {
             item {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -790,7 +791,15 @@ fun DashboardScreen(
 
             item {
                 HigInsetGroup {
-                    accounts.take(3).forEachIndexed { index, acc ->
+                    accountsWithMetrics.take(3).forEachIndexed { index, item ->
+                        val acc = item.account
+                        val isCreditCard = acc.type.equals("Credit Card", ignoreCase = true)
+                        val accFormat = if (acc.currency.isNotBlank() && !acc.currency.equals(primaryCurrency, ignoreCase = true)) {
+                            CurrencyEngine.getFormat(acc.currency)
+                        } else {
+                            currencyFormat
+                        }
+
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -798,27 +807,47 @@ fun DashboardScreen(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Row(
+                                modifier = Modifier.weight(1f).padding(end = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
                                 Icon(
-                                    imageVector = if (acc.type.contains("Credit", ignoreCase = true)) Icons.Default.CreditCard else Icons.Default.AccountBalance,
+                                    imageVector = when {
+                                        isCreditCard -> Icons.Default.CreditCard
+                                        acc.type.contains("Wallet", ignoreCase = true) -> Icons.Default.AccountBalanceWallet
+                                        acc.type.contains("Cash", ignoreCase = true) -> Icons.Default.Payments
+                                        else -> Icons.Default.AccountBalance
+                                    },
                                     contentDescription = null,
                                     tint = PrimaryBlue,
                                     modifier = Modifier.size(20.dp)
                                 )
                                 Column {
-                                    Text(text = acc.name, fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface)
-                                    Text(text = acc.type, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text(
+                                        text = acc.name,
+                                        fontWeight = FontWeight.SemiBold,
+                                        fontSize = 13.sp,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = acc.type,
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
                                 }
                             }
 
                             Text(
-                                text = currencyFormat.format(acc.balance),
+                                text = accFormat.format(item.computedBalance),
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 14.sp,
-                                color = if (acc.balance >= 0) IncomeGreen else ExpenseRose
+                                color = if (isCreditCard) ExpenseRose else if (item.computedBalance >= 0) IncomeGreen else ExpenseRose
                             )
                         }
-                        if (index < accounts.take(3).size - 1) {
+                        if (index < accountsWithMetrics.take(3).size - 1) {
                             HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f))
                         }
                     }

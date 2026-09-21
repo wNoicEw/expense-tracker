@@ -4,6 +4,31 @@ All notable changes to **Money Tracker (Offline AI Expense Tracker & Financial I
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.1] - 2026-09-21
+
+### Fixed - UPI Statement Intelligence: Google Pay, Navi Bank Account Detection & Clean Formatting
+- **Dashboard Accounts & Cards Live Balance Snapshot (Android & Web)**:
+  - Fixed an issue where the Dashboard "Accounts & Cards" snapshot displayed `₹0` for accounts and credit cards, despite the correct amounts appearing inside the "Manage" screen (`AccountsScreen`).
+  - Resolved the root cause by binding the Dashboard snapshot to `accountsWithMetrics` instead of raw static account entities, calculating live balances, card spends, and dues in real time with dynamic currency formatting and color coding.
+- **Navi Statement Glued Bank Account & Last-4 Resolution (Android & Web)**:
+  - Fixed an issue where bank account narrations with last-4 digits glued to the payee row (such as `JOHN DOE HDFC Bank - 1234`) were failing account splitting and defaulting to the file-level account (`Navi UPI Wallet`).
+  - Added support for bank names ending with last-4 digits directly on the payee line, cleanly extracting the true linked bank account (e.g. `HDFC Bank Account (•••• 1234)`) and preserving the clean merchant/person title.
+  - Expanded bank name recognition patterns to support multi-word Indian banks (Kotak Mahindra Bank, Punjab National Bank, Bank of Baroda, Union Bank of India, etc.) without greedily consuming preceding payee words.
+- **Boilerplate Watermark Filtering in Categorizer Titles (Android & Web)**:
+  - Filtered out payment app boilerplate notes (`Note: Paid via Navi UPI`, `Paid using ...`) from transaction titles so that descriptions read cleanly as the merchant/payee (e.g. `John Doe`) rather than truncated strings like `JOHN DOE (Paid vi...`.
+- **Google Pay Statement Detection & Priority Routing (Web & Android)**:
+  - Fixed statement routing order so Google Pay statement signatures take priority over underlying bank names mentioned in transaction rows (such as State Bank of India, HDFC Bank, ICICI Bank), preventing Google Pay statements with SBI transactions from being falsely hijacked by SBI table parsers.
+  - Refined bank detection in `extractAccountMetadata` to avoid false positives on UPI narrations in bank statements while reliably matching Google Pay signatures (`google pay app`, `gpay`).
+- **Google Pay Self-Transfer & Exact Inflow/Outflow Parity (Web & Android)**:
+  - Added support for `Self transfer to <Bank> <Account>` rows, classifying them as `transfer` transactions instead of expenses.
+  - Excluded internal self-transfers from statement outflow totals in Google Pay, achieving 100% exact parity with official Google Pay statement summary figures (Sent / Received totals).
+- **RuPay Credit Card 2-Digit Masked Account Detection (Web & Android)**:
+  - Added support for 2-digit masked card identifiers (e.g. `XX99`), common on Google Pay UPI linked credit cards, ensuring RuPay cards are properly recognized with their last digits and assigned dedicated credit card accounts.
+- **Incoming UPI Receipt Bank Account Resolution (Android & Web)**:
+  - Enhanced Android's account hint extractor to recognize `Paid to <Bank> <Account>` lines on received transactions, correctly attributing incoming transfers to destination bank accounts.
+- **Statement Period Summary Header Filtering (Web)**:
+  - Filtered date-range summary headers (e.g. `01 March 2026 - 31 August 2026`) in `parseUPIAppPDF`, preventing phantom transactions from being created for period totals.
+
 ## [1.6.0] - 2026-09-19
 
 ### Added - Currency Hub, Refund Intelligence, Cross-Platform Interoperability & Dedicated Ledger Filtering

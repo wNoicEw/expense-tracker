@@ -569,8 +569,8 @@ class App {
                 </div>
               </div>
               <div style="text-align:right;">
-                <div style="font-family:var(--font-mono); font-weight:700; font-size:0.95rem; color:${isCard ? '#f43f5e' : '#10b981'};">
-                  ₹ ${Math.abs(acc.computedBalance || 0).toLocaleString('en-IN')}
+                <div style="font-family:var(--font-mono); font-weight:700; font-size:0.95rem; color:${isCard ? '#f43f5e' : (acc.computedBalance >= 0 ? '#10b981' : '#f43f5e')};">
+                  ${window.CurrencyEngine ? window.CurrencyEngine.format(acc.computedBalance || 0, acc.currency || primaryCurrency, { maximumFractionDigits: 0 }) : '₹ ' + (acc.computedBalance || 0).toLocaleString('en-IN')}
                 </div>
                 <div style="font-size:0.7rem; color:var(--text-dim);">${isCard ? `${acc.utilizationPercent}% limit used` : 'Available'}</div>
               </div>

@@ -933,6 +933,44 @@ class LogicTests {
     }
 
     @Test
+    fun testNaviRowAccountHdfcBankGluedToPayee() {
+        val r = StatementParserEngine.splitNaviAccount(
+            "JOHN DOE HDFC Bank - 1234",
+            listOf("12:00 AM UPI txn ID: 100000000001", "Note: Paid via Navi UPI")
+        )
+        assertEquals("JOHN DOE", r.payee)
+        assertEquals("HDFC Bank", r.account?.bankName)
+        assertEquals("Bank Account", r.account?.type)
+        assertEquals("1234", r.account?.lastFour)
+        assertEquals("HDFC Bank Account (•••• 1234)", r.account?.name)
+        assertFalse(r.account?.isRuPay == true)
+    }
+
+    @Test
+    fun testNaviCategorizerSkipsBoilerplateNote() {
+        val title = CategorizerEngine.cleanIndianTransactionTitle("Paid to JOHN DOE — Paid via Navi UPI")
+        assertEquals("John Doe", title)
+    }
+
+    @Test
+    fun testNaviPdfFullParseGluedHdfcAccount() {
+        val lines = listOf(
+            "Date Transaction details Account Amount",
+            "27 Aug 2026 Paid to JOHN DOE HDFC Bank - 1234 70.00",
+            "12:00 AM UPI txn ID: 100000000001",
+            "Note: Paid via Navi UPI"
+        )
+        val res = StatementParserEngine.parseNaviPdf(lines, "Navi_Statement.pdf", "", "", emptyList())
+        assertEquals(1, res.transactions.size)
+        assertEquals("John Doe", res.transactions[0].description)
+        assertEquals(70.0, res.transactions[0].amount, 0.001)
+        assertEquals("HDFC Bank", res.rowAccounts[0]?.bankName)
+        assertEquals("1234", res.rowAccounts[0]?.lastFour)
+        assertEquals("Bank Account", res.rowAccounts[0]?.type)
+        assertEquals("HDFC Bank Account (•••• 1234)", res.rowAccounts[0]?.name)
+    }
+
+    @Test
     fun testAccountHintFromInstrumentShapes() {
         val masked = StatementParserEngine.accountHintFromInstrument("Paid by XXXXXXXX3863")!!
         assertEquals("Bank Account", masked.type)
@@ -1006,6 +1044,67 @@ class LogicTests {
         assertNull(res.rowAccounts[2])
         assertEquals(500.0, res.totalInflow, 0.001)
         assertEquals(1333.5, res.totalOutflow, 0.001)
+    }
+
+    @Test
+    fun testGooglePaySelfTransferRuPayAndReceivedAccount() {
+        val lines = listOf(
+            "Transaction statement",
+            "Note: This statement reflects payments made by you on the Google Pay app.",
+            "01 Mar, 2026",
+            "12:04 PM",
+            "Paid to SOME SHOP",
+            "UPI Transaction ID: 100000000001",
+            "Paid by HDFC Bank XX99 | RuPay credit card",
+            "₹400",
+            "03 Mar, 2026",
+            "11:11 AM",
+            "Received from A FRIEND",
+            "UPI Transaction ID: 100000000002",
+            "Paid to State Bank of India 1234",
+            "₹982",
+            "06 Apr, 2026",
+            "10:01 AM",
+            "Self transfer to State Bank of India 1234",
+            "UPI Transaction ID: 100000000003",
+            "Paid by HDFC Bank 5678",
+            "₹30,000"
+        )
+        val res = StatementParserEngine.parseGooglePayLines(lines, "gpay_statement.pdf")
+        assertEquals(3, res.transactions.size)
+        assertEquals(listOf(400.0, 982.0, 30000.0), res.transactions.map { it.amount })
+        assertEquals(TransactionType.EXPENSE, res.transactions[0].type)
+        assertEquals(TransactionType.INCOME, res.transactions[1].type)
+        assertEquals(TransactionType.TRANSFER, res.transactions[2].type)
+
+        // RuPay 2-digit masked card
+        assertEquals("99", res.rowAccounts[0]?.lastFour)
+        assertTrue(res.rowAccounts[0]?.isRuPay == true)
+        assertEquals("UPI (RuPay Credit Card)", res.transactions[0].paymentMode)
+
+        // Incoming account line Paid to State Bank of India 1234
+        assertEquals("1234", res.rowAccounts[1]?.lastFour)
+        assertEquals("State Bank of India (SBI)", res.rowAccounts[1]?.bankName)
+
+        // Self transfer source account
+        assertEquals("5678", res.rowAccounts[2]?.lastFour)
+        assertEquals("HDFC Bank", res.rowAccounts[2]?.bankName)
+
+        // Transfers excluded from outflow
+        assertEquals(982.0, res.totalInflow, 0.001)
+        assertEquals(400.0, res.totalOutflow, 0.001)
+    }
+
+    @Test
+    fun testGooglePayMetadataExtractionAndRoutingOverSbiMentions() {
+        val fullText = """
+            Transaction statement
+            Note: This statement reflects payments made by you on the Google Pay app.
+            Self transfer to State Bank of India 1234
+            Paid to State Bank of India 1234
+        """.trimIndent()
+        val meta = StatementParserEngine.extractAccountMetadata(fullText, "gpay_statement.pdf")
+        assertEquals("Google Pay", meta.bankName)
     }
 
     // ==========================================

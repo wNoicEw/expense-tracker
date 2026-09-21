@@ -1,7 +1,7 @@
 # 💎 Money Tracker — Offline AI Expense Tracker & Financial Intelligence
 
-[![Version](https://img.shields.io/badge/version-1.6.0-10b981.svg?style=flat-square)](https://github.com/wNoicew/expense-tracker/releases/tag/v1.6.0)
-[![Android](https://img.shields.io/badge/android-v1.6.0%20(SDK%2035)-3DDC84.svg?style=flat-square&logo=android&logoColor=white)](#-native-android-application-v160)
+[![Version](https://img.shields.io/badge/version-1.6.1-10b981.svg?style=flat-square)](https://github.com/wNoicew/expense-tracker/releases/tag/v1.6.1)
+[![Android](https://img.shields.io/badge/android-v1.6.1%20(SDK%2035)-3DDC84.svg?style=flat-square&logo=android&logoColor=white)](#-native-android-application-v161)
 [![Privacy](https://img.shields.io/badge/privacy-100%25%20On--Device-6366f1.svg?style=flat-square)](#-privacy--security-guarantee)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg?style=flat-square)](LICENSE)
 
@@ -9,10 +9,11 @@ An executive-grade, **local-first financial intelligence suite** and offline exp
 
 ---
 
-## 📱 Native Android Application (v1.6.0)
+## 📱 Native Android Application (v1.6.1)
 
 The native Android app brings 100% feature parity with the browser application into a modern mobile experience:
 
+- **UPI Statement Engine (Google Pay & Navi) & Exact Account Attribution**: Automatic offline parsing for multi-page Google Pay and Navi statements, resolving glued bank accounts (e.g. `HDFC Bank - 1234`), internal self-transfers, 2-digit masked RuPay credit cards (`XX99`), incoming transfer receipts (`Paid to <Bank>`), and clean title categorization without boilerplate watermarks.
 - **Refund Auto-Detection & Dedicated Ledger Filtering**: Auto-detects refunds and reversal credits across bank and card statements (Navi, Paytm, generic CSV/PDF), categorizing them as dedicated `refund` transactions (inflow) with 1-tap segment filtering in the Android ledger.
 - **Form Keyboard Insets & Accessible Navigation**: Full soft-keyboard inset handling (`imePadding`) and scrollability across all modal bottom sheets, plus WCAG 2.1 AA accessible focus trapping across Web dialogs.
 - **Bi-Directional Web & Android Backup Interoperability**: Seamlessly restore Web application JSON backups directly on Android and vice-versa, with automated ISO date ↔ epoch millisecond normalization and schema cross-compatibility.
@@ -28,7 +29,7 @@ The native Android app brings 100% feature parity with the browser application i
 - **Category Budgets & Health Scoring**: Visual progress allowances and real-time Financial Health Score (0–100).
 - **Direct APK Distribution**:
   - **Main Root (Always Latest)**: [**`ExpenseTracker.apk`**](ExpenseTracker.apk)
-  - **Version Archive**: [**`apks/`**](apks/) (Emergency fallback versions: `v1.4.2`, `v1.5.0`, `v1.5.1`, `v1.6.0`)
+  - **Version Archive**: [**`apks/`**](apks/) (Emergency fallback versions: `v1.4.2`, `v1.5.0`, `v1.5.1`, `v1.6.0`, `v1.6.1`)
 
 ---
 
