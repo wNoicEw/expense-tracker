@@ -65,7 +65,8 @@ enum class SubScreen {
     DUPLICATES,
     RULES,
     REPORTS,
-    CURRENCY_RATES
+    CURRENCY_RATES,
+    PERSONAL_TRANSACTIONS
 }
 
 class MainActivity : ComponentActivity() {
@@ -142,6 +143,8 @@ fun MainAppRoot(viewModel: MainViewModel) {
     var activeSubScreen by rememberSaveable { mutableStateOf(SubScreen.NONE) }
     var showProfileManagerSheet by rememberSaveable { mutableStateOf(false) }
     var showAddTxnSheet by rememberSaveable { mutableStateOf(false) }
+    var addTxnPrefillCategory by rememberSaveable { mutableStateOf<String?>(null) }
+    var addTxnPrefillDesc by rememberSaveable { mutableStateOf<String?>(null) }
 
     fun navigateToTab(tab: BottomTab) {
         activeSubScreen = SubScreen.NONE
@@ -265,6 +268,7 @@ fun MainAppRoot(viewModel: MainViewModel) {
                                         SubScreen.RULES -> "Learned Rules"
                                         SubScreen.REPORTS -> "Reports & Exports"
                                         SubScreen.CURRENCY_RATES -> "Currency & Rates"
+                                        SubScreen.PERSONAL_TRANSACTIONS -> "Personal Transactions"
                                         else -> ""
                                     },
                                     style = MaterialTheme.typography.titleMedium,
@@ -278,6 +282,14 @@ fun MainAppRoot(viewModel: MainViewModel) {
                                 SubScreen.RULES -> LearnedRulesScreen(viewModel = viewModel)
                                 SubScreen.REPORTS -> ReportsScreen(viewModel = viewModel)
                                 SubScreen.CURRENCY_RATES -> CurrencyRatesScreen(viewModel = viewModel)
+                                SubScreen.PERSONAL_TRANSACTIONS -> PersonalTransactionsScreen(
+                                    viewModel = viewModel,
+                                    onOpenAddFriendTxn = { prefillName ->
+                                        addTxnPrefillCategory = "Friend"
+                                        addTxnPrefillDesc = prefillName ?: ""
+                                        showAddTxnSheet = true
+                                    }
+                                )
                                 else -> {}
                             }
                         }
@@ -304,6 +316,7 @@ fun MainAppRoot(viewModel: MainViewModel) {
                             BottomTab.MORE -> MoreMenuScreen(
                                 viewModel = viewModel,
                                 onNavigateToAccounts = { activeSubScreen = SubScreen.ACCOUNTS },
+                                onNavigateToPersonalTransactions = { activeSubScreen = SubScreen.PERSONAL_TRANSACTIONS },
                                 onNavigateToDuplicates = { activeSubScreen = SubScreen.DUPLICATES },
                                 onNavigateToRules = { activeSubScreen = SubScreen.RULES },
                                 onNavigateToReports = { activeSubScreen = SubScreen.REPORTS },
@@ -329,7 +342,13 @@ fun MainAppRoot(viewModel: MainViewModel) {
                 AddTransactionBottomSheet(
                     accounts = accounts.map { it.name },
                     defaultCurrency = profileCur,
-                    onDismiss = { showAddTxnSheet = false },
+                    initialCategory = addTxnPrefillCategory,
+                    initialDescription = addTxnPrefillDesc,
+                    onDismiss = {
+                        showAddTxnSheet = false
+                        addTxnPrefillCategory = null
+                        addTxnPrefillDesc = null
+                    },
                     onAdd = { desc, amount, type, category, accountName, mode, notes, date, cur ->
                         viewModel.addTransaction(
                             description = desc,
@@ -343,6 +362,8 @@ fun MainAppRoot(viewModel: MainViewModel) {
                             currency = cur
                         )
                         showAddTxnSheet = false
+                        addTxnPrefillCategory = null
+                        addTxnPrefillDesc = null
                     }
                 )
             }
@@ -354,6 +375,7 @@ fun MainAppRoot(viewModel: MainViewModel) {
 fun MoreMenuScreen(
     viewModel: MainViewModel,
     onNavigateToAccounts: () -> Unit,
+    onNavigateToPersonalTransactions: () -> Unit,
     onNavigateToDuplicates: () -> Unit,
     onNavigateToRules: () -> Unit,
     onNavigateToReports: () -> Unit,
@@ -364,6 +386,7 @@ fun MoreMenuScreen(
     val duplicatePairs = viewModel.duplicatePairs
     val rules by viewModel.rules.collectAsState()
     val accounts by viewModel.accounts.collectAsState()
+    val friendsCount by viewModel.totalFriendsCount.collectAsState()
 
     LazyColumn(
         modifier = Modifier
@@ -454,7 +477,18 @@ fun MoreMenuScreen(
                     showDivider = true
                 )
 
-                // 2. Duplicate Resolver
+                // 2. Personal Transactions (Friends & P2P Balances)
+                MoreMenuRow(
+                    title = "Personal Transactions",
+                    subtitle = "Friends, UPI IDs & peer-to-peer balances",
+                    icon = Icons.Default.People,
+                    iconColor = Color(0xFFA855F7),
+                    badgeText = if (friendsCount > 0) "$friendsCount Friends" else null,
+                    onClick = onNavigateToPersonalTransactions,
+                    showDivider = true
+                )
+
+                // 3. Duplicate Resolver
                 MoreMenuRow(
                     title = "Duplicate Resolver",
                     subtitle = "Cross-statement transaction matching",

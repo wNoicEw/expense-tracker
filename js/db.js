@@ -104,6 +104,8 @@ class Database {
    */
   async seedDefaultCategories() {
     const existingCategories = await this.getAll('categories');
+    const friendCategory = { id: 'cat_friend', name: 'Friend', icon: 'users', color: '#a855f7', type: 'expense', budget: 0 };
+
     if (existingCategories.length === 0) {
       const defaultCategories = [
         { id: 'cat_food', name: 'Food & Dining', icon: 'utensils', color: '#f59e0b', type: 'expense', budget: 12000 },
@@ -118,12 +120,18 @@ class Database {
         { id: 'cat_salary', name: 'Salary & Professional', icon: 'briefcase', color: '#22c55e', type: 'income', budget: 0 },
         { id: 'cat_freelance', name: 'Freelance & Side Hustle', icon: 'code', color: '#06b6d4', type: 'income', budget: 0 },
         { id: 'cat_transfers', name: 'Transfers & CC Bill', icon: 'arrow-left-right', color: '#94a3b8', type: 'transfer', budget: 0 },
+        friendCategory,
         { id: 'cat_uncategorized', name: 'Uncategorized', icon: 'help-circle', color: '#94a3b8', type: 'expense', budget: 0 },
         { id: 'cat_other', name: 'Miscellaneous', icon: 'circle-dot', color: '#64748b', type: 'expense', budget: 5000 }
       ];
 
       for (const cat of defaultCategories) {
         await this.put('categories', cat);
+      }
+    } else {
+      // Ensure Friend category is present in existing databases
+      if (!existingCategories.some(c => (c.name || '').toLowerCase() === 'friend')) {
+        await this.put('categories', friendCategory);
       }
     }
   }

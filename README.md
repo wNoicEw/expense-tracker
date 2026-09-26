@@ -1,7 +1,7 @@
 # 💎 Money Tracker — Offline AI Expense Tracker & Financial Intelligence
 
-[![Version](https://img.shields.io/badge/version-1.7.0-10b981.svg?style=flat-square)](https://github.com/wNoicew/expense-tracker/releases/tag/v1.7.0)
-[![Android](https://img.shields.io/badge/android-v1.7.0%20(SDK%2035)-3DDC84.svg?style=flat-square&logo=android&logoColor=white)](#-native-android-application-v170)
+[![Version](https://img.shields.io/badge/version-1.8.0-10b981.svg?style=flat-square)](https://github.com/wNoicew/expense-tracker/releases/tag/v1.8.0)
+[![Android](https://img.shields.io/badge/android-v1.8.0%20(SDK%2035)-3DDC84.svg?style=flat-square&logo=android&logoColor=white)](#-native-android-application-v180)
 [![Privacy](https://img.shields.io/badge/privacy-100%25%20On--Device-6366f1.svg?style=flat-square)](https://github.com/wNoicew/expense-tracker/releases)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg?style=flat-square)](LICENSE)
 
@@ -9,10 +9,17 @@ An executive-grade, **local-first financial intelligence suite** and offline exp
 
 ---
 
-## 📱 Native Android Application (v1.7.0)
+## 📱 Native Android & Web Application (v1.8.0)
 
-The native Android app brings 100% feature parity with the browser application into a modern mobile experience:
+The application brings 100% feature parity between browser and mobile environments:
 
+- **Personal Transactions & Friend Profiles Hub (`FriendsManager`)**:
+  - Dedicated **Personal Transactions** navigation tab visualizing peer-to-peer ledgers with friends, colleagues, and UPI counterparties.
+  - Selecting the category **"Friend"** on any transaction automatically identifies the counterparty's UPI ID or account details and extracts a clean, human-readable name from raw bank narrations.
+  - Real-time peer-to-peer balance computation: calculates incoming (received) and outgoing (sent) transactions to display instant status pills: **"You Get"** (green), **"You Owe"** (rose), or **"Settled Up"** (slate).
+  - Top Bento KPI cards for *Friends Tracked*, *You Get (To Receive)*, *You Owe (To Pay)*, and *Net Position*.
+  - Full-detail Friend Ledger view with transaction history, individual transaction deletion/editing, inline friend profile renaming, and safe deletion options (remove from personal transactions while preserving accounting vs. full transaction purge).
+  - Pure visualization mode that does not tamper with or alter any main financial calculations, account balances, or statement records.
 - **Groww-Inspired Multi-Category Filter Architecture (`LedgerFilterSheet`)**: Clean single-line toolbar with a dedicated Filter button and active badge count, opening a split two-pane bottom sheet with category tabs (`Type`, `Category`, `Account`, `Currency`, `Status`), multi-select checkboxes, "Clear all", and a live "View X Transactions" sticky CTA.
 - **Dedicated Sorting Bottom Sheet (`LedgerSortSheet`)**: Instant sort selection pill button with options for *Newest to Oldest*, *Oldest to Newest*, *Highest Amount*, and *Lowest Amount*.
 - **Active Filter Dismiss Pills (`LedgerFilterSortBar`)**: Removable filter pills with 1-tap dismiss (`✕`) alongside a quick-action "Review (N)" chip for rapid access to unreviewed transactions.
@@ -31,11 +38,11 @@ The native Android app brings 100% feature parity with the browser application i
 - **On-Device Backup Reminder Banner**: Proactive Apple HIG backup banner alerting the user when local data hasn't been backed up in the last 30 days.
 - **Universal Statement CSV & Document Picker**: Ingest bank & UPI statements with Android SAF `OpenDocument` supporting all PDF and CSV formats, with in-memory byte caching for password-protected statements.
 - **Cross-Statement Duplicate Resolver**: 99% UTR reference matching and ±24h date-proximity scoring with 1-tap "Merge & Enrich".
-- **Dynamic Rule Engine**: Automatic UPI handle stripping, 12 built-in financial categories, and retroactive ledger reclassification.
+- **Dynamic Rule Engine**: Automatic UPI handle stripping, 13 built-in financial categories, and retroactive ledger reclassification.
 - **Category Budgets & Health Scoring**: Visual progress allowances and real-time Financial Health Score (0–100).
 - **Direct APK Distribution**:
   - **Main Root (Always Latest)**: [**`ExpenseTracker.apk`**](ExpenseTracker.apk)
-  - **Version Archive**: [**`apks/`**](apks/) (Emergency fallback versions: `v1.5.1`, `v1.6.0`, `v1.6.1`, `v1.6.2`, `v1.7.0`)
+  - **Version Archive**: [**`apks/`**](apks/) (Emergency fallback versions: `v1.6.0`, `v1.6.1`, `v1.6.2`, `v1.7.0`, `v1.8.0`)
 
 ---
 

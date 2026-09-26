@@ -8,6 +8,9 @@ import com.wnoicew.expensetracker.data.engine.CategorizerEngine
 import com.wnoicew.expensetracker.data.engine.CurrencyEngine
 import com.wnoicew.expensetracker.data.engine.DuplicateDetectorEngine
 import com.wnoicew.expensetracker.data.engine.ExportEngine
+import com.wnoicew.expensetracker.data.engine.FriendsEngine
+import com.wnoicew.expensetracker.data.engine.FriendProfile
+import com.wnoicew.expensetracker.data.engine.FriendBalanceStatus
 import com.wnoicew.expensetracker.data.engine.StatementParserEngine
 import com.wnoicew.expensetracker.data.model.*
 import com.wnoicew.expensetracker.ui.KpiMath
@@ -1546,5 +1549,192 @@ class LogicTests {
         CurrencyEngine.resetRatesForTesting()
         assertFalse(CurrencyEngine.isManualOverride("INR"))
         assertEquals(83.5 / 0.92, CurrencyEngine.getRateAgainstBase("INR", "EUR"), 0.001)
+    }
+
+    // ==========================================
+    // 17. PERSONAL TRANSACTIONS & FRIENDS ENGINE TESTS
+    // ==========================================
+
+    @Test
+    fun testFriendsEngineUpiExtraction() {
+        assertEquals("rahul@okaxis", FriendsEngine.extractUpiId("Paid to rahul@okaxis via UPI"))
+        assertEquals("priya.sharma_12@okhdfcbank", FriendsEngine.extractUpiId("UPI/DR/123/priya.sharma_12@okhdfcbank/ref"))
+        assertEquals("", FriendsEngine.extractUpiId("Cash withdrawal from ATM"))
+    }
+
+    @Test
+    fun testFriendsEngineNameExtraction() {
+        val txn1 = TransactionEntity(
+            description = "Dinner split",
+            amount = 450.0,
+            rawNarration = "Paid to Rohit Sharma — Weekend dinner share",
+            referenceNo = "rohit@okaxis"
+        )
+        assertEquals("Rohit Sharma", FriendsEngine.extractFriendName(txn1))
+
+        val txn2 = TransactionEntity(
+            description = "Cab fare",
+            amount = 250.0,
+            rawNarration = "Received from Priya Patel",
+            referenceNo = ""
+        )
+        assertEquals("Priya Patel", FriendsEngine.extractFriendName(txn2))
+
+        val txn3 = TransactionEntity(
+            description = "UPI Transfer",
+            amount = 1200.0,
+            rawNarration = "UPI/DR/987654321/Aman Gupta/HDFC/aman@okhdfc/Payment",
+            referenceNo = ""
+        )
+        assertEquals("Aman Gupta", FriendsEngine.extractFriendName(txn3))
+
+        val txn4 = TransactionEntity(
+            description = "Vikram Singh (Movie tickets)",
+            amount = 600.0,
+            rawNarration = "",
+            referenceNo = "vikram.singh@okaxis"
+        )
+        assertEquals("Vikram Singh", FriendsEngine.extractFriendName(txn4))
+
+        val txn5 = TransactionEntity(
+            description = "",
+            amount = 600.0,
+            rawNarration = "",
+            referenceNo = "ananya.verma@okaxis"
+        )
+        assertEquals("Ananya Verma", FriendsEngine.extractFriendName(txn5))
+    }
+
+    @Test
+    fun testFriendsEngineBalanceMathAndCustomRename() {
+        val txns = listOf(
+            // Friend 1: Rahul (You paid 1500, received 500 -> You get 1000)
+            TransactionEntity(
+                id = "t1",
+                description = "Paid to Rahul Sharma",
+                rawNarration = "Paid to Rahul Sharma — Concert tickets",
+                amount = 1500.0,
+                type = TransactionType.EXPENSE,
+                category = "Friend",
+                referenceNo = "rahul@okaxis",
+                date = 1000L
+            ),
+            TransactionEntity(
+                id = "t2",
+                description = "Received from Rahul Sharma",
+                rawNarration = "Received from Rahul Sharma",
+                amount = 500.0,
+                type = TransactionType.INCOME,
+                category = "Friend",
+                referenceNo = "rahul@okaxis",
+                date = 2000L
+            ),
+            // Friend 2: Sneha (You paid 200, received 600 -> You owe 400)
+            TransactionEntity(
+                id = "t3",
+                description = "Paid to Sneha Roy",
+                rawNarration = "Paid to Sneha Roy",
+                amount = 200.0,
+                type = TransactionType.EXPENSE,
+                category = "Friend",
+                referenceNo = "sneha@oksbi",
+                date = 1500L
+            ),
+            TransactionEntity(
+                id = "t4",
+                description = "Received from Sneha Roy",
+                rawNarration = "Received from Sneha Roy",
+                amount = 600.0,
+                type = TransactionType.INCOME,
+                category = "Friend",
+                referenceNo = "sneha@oksbi",
+                date = 2500L
+            ),
+            // Friend 3: Settled friend (Sent 300, Received 300)
+            TransactionEntity(
+                id = "t5",
+                description = "Paid to Amit",
+                rawNarration = "Paid to Amit",
+                amount = 300.0,
+                type = TransactionType.EXPENSE,
+                category = "Friend",
+                referenceNo = "amit@paytm",
+                date = 1200L
+            ),
+            TransactionEntity(
+                id = "t6",
+                description = "Received from Amit",
+                rawNarration = "Received from Amit",
+                amount = 300.0,
+                type = TransactionType.INCOME,
+                category = "Friend",
+                referenceNo = "amit@paytm",
+                date = 1800L
+            ),
+            // Non-friend transaction (must be ignored)
+            TransactionEntity(
+                id = "t7",
+                description = "Grocery shopping",
+                amount = 800.0,
+                type = TransactionType.EXPENSE,
+                category = "Groceries & Mart",
+                date = 3000L
+            ),
+            // Merged friend transaction (must be ignored)
+            TransactionEntity(
+                id = "t8",
+                description = "Paid to Rahul Sharma",
+                amount = 1500.0,
+                type = TransactionType.EXPENSE,
+                category = "Friend",
+                referenceNo = "rahul@okaxis",
+                duplicateStatus = "merged",
+                date = 1000L
+            )
+        )
+
+        // Custom rename map: e.g. rename Sneha to "Sneha (Roommate)"
+        val customNames = mapOf(
+            "upi:sneha@oksbi" to "Sneha (Roommate)"
+        )
+
+        val profiles = FriendsEngine.computeFriendProfiles(txns, customNames, "INR")
+        assertEquals(3, profiles.size)
+
+        // Profiles sorted: unsettled with largest net balance first
+        val rahul = profiles.find { it.id == "upi:rahul@okaxis" }
+        assertNotNull(rahul)
+        assertEquals("Rahul Sharma", rahul!!.displayName)
+        assertFalse(rahul.isCustomName)
+        assertEquals(1500.0, rahul.totalOutgoing, 0.001)
+        assertEquals(500.0, rahul.totalIncoming, 0.001)
+        assertEquals(1000.0, rahul.netBalance, 0.001)
+        assertEquals(FriendBalanceStatus.OWES_YOU, rahul.status)
+        assertEquals("You get", rahul.statusText)
+        assertEquals(2, rahul.transactionCount)
+
+        val sneha = profiles.find { it.id == "upi:sneha@oksbi" }
+        assertNotNull(sneha)
+        assertEquals("Sneha (Roommate)", sneha!!.displayName)
+        assertTrue(sneha.isCustomName)
+        assertEquals("Sneha Roy", sneha.extractedName)
+        assertEquals(200.0, sneha.totalOutgoing, 0.001)
+        assertEquals(600.0, sneha.totalIncoming, 0.001)
+        assertEquals(-400.0, sneha.netBalance, 0.001)
+        assertEquals(FriendBalanceStatus.YOU_OWE, sneha.status)
+        assertEquals("You owe", sneha.statusText)
+
+        val amit = profiles.find { it.id == "upi:amit@paytm" }
+        assertNotNull(amit)
+        assertEquals(300.0, amit!!.totalOutgoing, 0.001)
+        assertEquals(300.0, amit.totalIncoming, 0.001)
+        assertEquals(0.0, amit.netBalance, 0.001)
+        assertEquals(FriendBalanceStatus.SETTLED, amit.status)
+        assertEquals("Settled up", amit.statusText)
+
+        // Verify ordering: Rahul (1000) first, then Sneha (-400), then settled Amit
+        assertEquals("upi:rahul@okaxis", profiles[0].id)
+        assertEquals("upi:sneha@oksbi", profiles[1].id)
+        assertEquals("upi:amit@paytm", profiles[2].id)
     }
 }

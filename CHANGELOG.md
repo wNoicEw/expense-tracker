@@ -4,6 +4,43 @@ All notable changes to **Money Tracker (Offline AI Expense Tracker & Financial I
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.0] - 2026-09-26
+
+### Added - Personal Transactions, Friend Profiles Hub & P2P Balance Ledgers
+- **Dedicated Personal Transactions Hub (`FriendsManager` & `panel-personal`)**:
+  - Introduced a dedicated **Personal Transactions** navigation tab allowing users to track peer-to-peer spending, splitting, and settlement balances with friends, colleagues, and UPI counterparties.
+  - Added new financial category **"Friend"** (`cat_friend`, `#a855f7`, `users` icon) with automatic seeding across new and existing profiles.
+  - Selecting "Friend" on any transaction automatically groups and creates a dedicated Friend Profile using that transaction's counterparty UPI ID, account details, or extracted person name.
+- **Smart Counterparty Name & UPI Identification**:
+  - Automatically parses and extracts clean counterparty names from complex bank and UPI narrations (e.g. `UPI/DR/.../NAME/...`, `Paid to NAME`, `Received from NAME`, `IMPS/.../NAME`, and handle extraction).
+  - Normalizes UPI addresses and formats clean titles without boilerplate keywords or banking codes.
+- **Real-Time Peer-to-Peer Balance Math**:
+  - Dynamically calculates the live net balance for each friend profile:
+    - `Outgoing (Sent)`: Transactions where user sent money (expense or outgoing transfer).
+    - `Incoming (Received)`: Transactions where friend sent money to user (income, refund, or incoming transfer).
+    - `Net Balance = Outgoing - Incoming`.
+  - Intuitive status badges:
+    - **"You Get +₹X"**: Friend owes user (emerald green pill).
+    - **"You Owe -₹Y"**: User owes friend (rose crimson pill).
+    - **"Settled Up"**: Zero balance (slate pill).
+- **Executive Bento KPI Summary**:
+  - Summary cards displaying *Friends Tracked*, *You Get (Total to Receive)*, *You Owe (Total to Pay)*, and *Net Position* (overall peer surplus/deficit).
+  - Filter chips for *All Friends*, *You Get*, *You Owe*, and *Settled*, alongside real-time search by friend name or UPI ID.
+- **Friend Detail Ledger View**:
+  - Full-detail view opening upon tapping any friend profile card.
+  - Complete chronological transaction ledger with flow indicators, exact amount, date, time, description, payment mode, and reference UTR.
+  - Individual transaction editing and deletion directly from the friend ledger with instant balance re-calculation.
+- **Friend Profile Renaming & Safe Deletion**:
+  - **Inline Profile Renaming (`setFriendCustomName`)**: Allows users to assign a friendly nickname or verified name to any UPI ID / friend profile, persisted locally.
+  - **Safe Deletion Dialog (`deleteFriendModal`)**: Offers two distinct, clear options:
+    - *Option 1 (Remove Profile Only)*: Re-categorizes friend transactions to "Miscellaneous", removing the profile from Personal Transactions while preserving 100% of accounting, statement records, and account balances.
+    - *Option 2 (Delete Profile & All Transactions)*: Permanently purges all associated transactions from the ledger.
+- **Zero Impact on Main Calculations**:
+  - Personal transactions are completely integrated as standard transactions in the primary database, ensuring dashboard KPIs, bank balances, statements, duplicate detection, and cashflow charts remain 100% accurate and mathematically unaltered.
+- **Direct APK Distribution**:
+  - Pruned oldest fallback version `ExpenseTracker-v1.5.1.apk` per 5-version retention policy.
+  - Archived `ExpenseTracker-v1.8.0.apk` in `apks/` and updated root `ExpenseTracker.apk`.
+
 ## [1.7.0] - 2026-09-22
 
 ### Added - Groww-Style Ledger Filter Hub, Multi-Sort Sheet & Long-Press Multi-Select Deletion

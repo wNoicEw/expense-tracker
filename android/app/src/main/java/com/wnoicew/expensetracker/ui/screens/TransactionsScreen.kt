@@ -627,14 +627,16 @@ fun AddTransactionBottomSheet(
     onDismiss: () -> Unit,
     onAdd: (String, Double, TransactionType, String, String, String, String, Long, String) -> Unit,
     initialDateMillis: Long? = null,
-    defaultCurrency: String = CurrencyEngine.DEFAULT_CURRENCY
+    defaultCurrency: String = CurrencyEngine.DEFAULT_CURRENCY,
+    initialCategory: String? = null,
+    initialDescription: String? = null
 ) {
     val context = LocalContext.current
-    var description by rememberSaveable { mutableStateOf("") }
+    var description by rememberSaveable { mutableStateOf(initialDescription ?: "") }
     var amountText by rememberSaveable { mutableStateOf("") }
     var selectedCurrency by rememberSaveable { mutableStateOf(defaultCurrency) }
     var selectedTypeIndex by rememberSaveable { mutableIntStateOf(0) } // 0: Expense, 1: Income, 2: Transfer
-    var selectedCategory by rememberSaveable { mutableStateOf(ALL_CATEGORIES.first()) }
+    var selectedCategory by rememberSaveable { mutableStateOf(initialCategory ?: ALL_CATEGORIES.first()) }
     var selectedAccount by rememberSaveable { mutableStateOf(accounts.firstOrNull() ?: "Main Account") }
     var paymentMode by rememberSaveable { mutableStateOf("UPI") }
     var notes by rememberSaveable { mutableStateOf("") }

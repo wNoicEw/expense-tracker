@@ -17,6 +17,9 @@ import com.wnoicew.expensetracker.data.engine.CategorizerEngine
 import com.wnoicew.expensetracker.data.engine.CurrencyEngine
 import com.wnoicew.expensetracker.data.engine.DuplicateDetectorEngine
 import com.wnoicew.expensetracker.data.engine.ExportEngine
+import com.wnoicew.expensetracker.data.engine.FriendsEngine
+import com.wnoicew.expensetracker.data.engine.FriendProfile
+import com.wnoicew.expensetracker.data.engine.FriendBalanceStatus
 import com.wnoicew.expensetracker.data.engine.StatementParserEngine
 import com.wnoicew.expensetracker.data.model.*
 import androidx.room.withTransaction
@@ -49,6 +52,7 @@ val ALL_CATEGORIES = listOf(
     "Transfers & CC Bill",
     "Salary & Professional",
     "Freelance & Side Hustle",
+    "Friend",
     "Uncategorized"
 )
 
@@ -206,6 +210,30 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val needsReviewCount: StateFlow<Int> = needsReviewTransactions.map { it.size }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
+
+    // Personal Transactions & Friend Profiles
+    private fun getFriendsPrefs(profileId: String) =
+        getApplication<Application>().getSharedPreferences("expense_tracker_friends_$profileId", Context.MODE_PRIVATE)
+
+    private val friendCustomNamesVersion = MutableStateFlow(0)
+
+    val friendProfiles: StateFlow<List<FriendProfile>> = combine(
+        transactions,
+        snapshotFlow { profileManager.activeProfile.value },
+        friendCustomNamesVersion,
+        snapshotFlow { currencyStateVersion.value }
+    ) { txnList, profile, _, _ ->
+        if (profile == null) return@combine emptyList()
+        val prefs = getFriendsPrefs(profile.id)
+        val customMap = prefs.all.mapNotNull { (key, value) ->
+            if (value is String) key to value else null
+        }.toMap()
+        val primaryCur = profile.currency.ifBlank { CurrencyEngine.DEFAULT_CURRENCY }
+        FriendsEngine.computeFriendProfiles(txnList, customMap, primaryCur)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val totalFriendsCount: StateFlow<Int> = friendProfiles.map { it.size }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
 
     // Currency State Version to trigger UI recomposition when rates change
@@ -418,6 +446,47 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             val db = ExpenseTrackerDatabase.getDatabase(getApplication(), profile.id)
             db.transactionDao().deleteTransactionsByIds(ids)
+        }
+    }
+
+    // Friend Profile Management (Personal Transactions)
+    fun renameFriend(friendKey: String, newName: String) {
+        val profile = activeProfile.value ?: return
+        val trimmed = newName.trim()
+        if (friendKey.isBlank() || trimmed.isBlank()) return
+        val prefs = getFriendsPrefs(profile.id)
+        prefs.edit().putString(friendKey, trimmed).apply()
+        friendCustomNamesVersion.value++
+    }
+
+    fun resetFriendName(friendKey: String) {
+        val profile = activeProfile.value ?: return
+        val prefs = getFriendsPrefs(profile.id)
+        prefs.edit().remove(friendKey).apply()
+        friendCustomNamesVersion.value++
+    }
+
+    fun untagFriendTransactions(friendProfile: FriendProfile) {
+        val profile = activeProfile.value ?: return
+        val updated = friendProfile.transactions.map { it.copy(category = "Uncategorized") }
+        viewModelScope.launch {
+            val db = ExpenseTrackerDatabase.getDatabase(getApplication(), profile.id)
+            db.transactionDao().updateTransactions(updated)
+            val prefs = getFriendsPrefs(profile.id)
+            prefs.edit().remove(friendProfile.id).apply()
+            friendCustomNamesVersion.value++
+        }
+    }
+
+    fun deleteFriendProfileAndTransactions(friendProfile: FriendProfile) {
+        val profile = activeProfile.value ?: return
+        val toDelete = friendProfile.transactions
+        viewModelScope.launch {
+            val db = ExpenseTrackerDatabase.getDatabase(getApplication(), profile.id)
+            db.transactionDao().deleteTransactions(toDelete)
+            val prefs = getFriendsPrefs(profile.id)
+            prefs.edit().remove(friendProfile.id).apply()
+            friendCustomNamesVersion.value++
         }
     }
 

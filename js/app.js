@@ -18,6 +18,8 @@ class App {
     this.chartViewMode = 'cumulative';
     this.theme = 'dark';
     this.txnViewMode = 'table';
+    this.personalFilter = 'all';
+    this.activeFriendKey = null;
     this._modalFocusReturn = new Map();
   }
 
@@ -386,6 +388,9 @@ class App {
       case 'accounts':
         await this.renderAccountsView();
         break;
+      case 'personal':
+        await this.renderPersonalView();
+        break;
       case 'rules':
         await this.renderRulesView();
         break;
@@ -428,6 +433,18 @@ class App {
         reviewBadge.style.display = 'inline-block';
       } else {
         reviewBadge.style.display = 'none';
+      }
+    }
+
+    // Personal Transactions Friend Badge
+    const friendTxns = txns.filter(t => (t.category || '').toLowerCase() === 'friend');
+    const personalBadge = document.getElementById('sidebarPersonalBadge');
+    if (personalBadge) {
+      if (friendTxns.length > 0) {
+        personalBadge.textContent = `${friendTxns.length}`;
+        personalBadge.style.display = 'inline-block';
+      } else {
+        personalBadge.style.display = 'none';
       }
     }
 
@@ -1274,6 +1291,7 @@ class App {
       'Food & Dining': '#f59e0b', 'Groceries & Mart': '#10b981', 'Shopping & E-Comm': '#ec4899',
       'Travel & Commute': '#06b6d4', 'Bills & Utilities': '#8b5cf6', 'Subscriptions & OTT': '#ef4444',
       'Health & Pharmacy': '#14b8a6', 'Investments & SIP': '#3b82f6', 'Rent & Housing': '#6366f1',
+      'Friend': '#a855f7',
       'Miscellaneous': '#64748b', 'Uncategorized': '#94a3b8'
     };
 
@@ -1648,6 +1666,593 @@ class App {
         await this.refreshAllViews();
       });
     }
+  }
+
+  // --- TAB: PERSONAL TRANSACTIONS & FRIEND PROFILES ---
+
+  async renderPersonalView() {
+    if (!window.friendsManager) return;
+
+    const allTxns = await window.db.getAll('transactions');
+    const profiles = window.friendsManager.getFriendProfiles(allTxns);
+    const active = window.profileManager?.getActiveProfile();
+    const primaryCurrency = (active && active.currency) || 'INR';
+
+    this.renderPersonalKpis(profiles, primaryCurrency);
+
+    if (this.activeFriendKey) {
+      const activeProf = profiles.find(p => p.id === this.activeFriendKey);
+      if (activeProf) {
+        this.renderPersonalFriendDetail(activeProf, primaryCurrency);
+        return;
+      } else {
+        this.activeFriendKey = null;
+      }
+    }
+
+    // Main directory view
+    const mainView = document.getElementById('personalMainView');
+    const detailView = document.getElementById('personalDetailView');
+    if (mainView) mainView.style.display = 'block';
+    if (detailView) detailView.style.display = 'none';
+
+    this.renderPersonalFriendsGrid(profiles, primaryCurrency);
+  }
+
+  renderPersonalKpis(profiles, currency) {
+    const kpiGrid = document.getElementById('personalKpiGrid');
+    if (!kpiGrid) return;
+
+    const totalFriends = profiles.length;
+    let totalToReceive = 0; // Sum of positive balances (they owe you)
+    let totalToPay = 0;     // Sum of negative balances (you owe them)
+
+    for (const p of profiles) {
+      if (p.netBalance > 0) {
+        totalToReceive += p.netBalance;
+      } else if (p.netBalance < 0) {
+        totalToPay += Math.abs(p.netBalance);
+      }
+    }
+
+    const netPosition = totalToReceive - totalToPay;
+    const format = (v) => window.CurrencyEngine ? window.CurrencyEngine.format(v, currency, { maximumFractionDigits: 0 }) : `₹${Math.round(v).toLocaleString('en-IN')}`;
+
+    kpiGrid.innerHTML = `
+      <div class="personal-kpi-card">
+        <div class="personal-kpi-header">
+          <span class="personal-kpi-title">Friends Tracked</span>
+          <div class="personal-kpi-icon-wrap" style="background:rgba(168,85,247,0.12); color:#a855f7;">
+            <i data-lucide="users" style="width:18px; height:18px;"></i>
+          </div>
+        </div>
+        <div class="personal-kpi-amount">${totalFriends}</div>
+        <div class="personal-kpi-subtitle">Profiles with categorized activity</div>
+      </div>
+
+      <div class="personal-kpi-card">
+        <div class="personal-kpi-header">
+          <span class="personal-kpi-title">You Get (To Receive)</span>
+          <div class="personal-kpi-icon-wrap" style="background:rgba(16,185,129,0.12); color:#10b981;">
+            <i data-lucide="arrow-down-left" style="width:18px; height:18px;"></i>
+          </div>
+        </div>
+        <div class="personal-kpi-amount" style="color:#10b981;">${format(totalToReceive)}</div>
+        <div class="personal-kpi-subtitle">Incoming balance friends owe you</div>
+      </div>
+
+      <div class="personal-kpi-card">
+        <div class="personal-kpi-header">
+          <span class="personal-kpi-title">You Owe (To Pay)</span>
+          <div class="personal-kpi-icon-wrap" style="background:rgba(244,63,94,0.12); color:#f43f5e;">
+            <i data-lucide="arrow-up-right" style="width:18px; height:18px;"></i>
+          </div>
+        </div>
+        <div class="personal-kpi-amount" style="color:#f43f5e;">${format(totalToPay)}</div>
+        <div class="personal-kpi-subtitle">Outgoing balance you owe to friends</div>
+      </div>
+
+      <div class="personal-kpi-card">
+        <div class="personal-kpi-header">
+          <span class="personal-kpi-title">Net Position</span>
+          <div class="personal-kpi-icon-wrap" style="background:rgba(59,130,246,0.12); color:#3b82f6;">
+            <i data-lucide="scale" style="width:18px; height:18px;"></i>
+          </div>
+        </div>
+        <div class="personal-kpi-amount" style="color:${netPosition >= 0 ? '#10b981' : '#f43f5e'};">
+          ${netPosition >= 0 ? '+' : ''}${format(netPosition)}
+        </div>
+        <div class="personal-kpi-subtitle">${netPosition >= 0 ? 'Overall surplus across all friends' : 'Overall deficit across all friends'}</div>
+      </div>
+    `;
+    this.hydrateIcons();
+  }
+
+  renderPersonalFriendsGrid(profiles, currency) {
+    const grid = document.getElementById('personalFriendsGrid');
+    if (!grid) return;
+
+    const searchInput = document.getElementById('personalSearchInput');
+    const search = (searchInput?.value || '').toLowerCase().trim();
+
+    let filtered = profiles;
+
+    // Filter by tab pill
+    if (this.personalFilter === 'owes_you') {
+      filtered = filtered.filter(p => p.status === 'owes_you');
+    } else if (this.personalFilter === 'you_owe') {
+      filtered = filtered.filter(p => p.status === 'you_owe');
+    } else if (this.personalFilter === 'settled') {
+      filtered = filtered.filter(p => p.status === 'settled');
+    }
+
+    // Filter by search query
+    if (search) {
+      filtered = filtered.filter(p => 
+        p.displayName.toLowerCase().includes(search) ||
+        p.upiId.toLowerCase().includes(search) ||
+        p.extractedName.toLowerCase().includes(search)
+      );
+    }
+
+    if (profiles.length === 0) {
+      grid.innerHTML = `
+        <div style="grid-column: 1 / -1; text-align:center; padding: 48px 24px; background: var(--bg-card); border: 1px dashed var(--glass-border); border-radius: var(--radius-lg);">
+          <div style="width:56px; height:56px; border-radius:50%; background:rgba(168,85,247,0.12); color:#a855f7; display:flex; align-items:center; justify-content:center; margin: 0 auto 16px;">
+            <i data-lucide="users" style="width:28px; height:28px;"></i>
+          </div>
+          <h4 style="font-size:1.15rem; font-weight:700; margin-bottom:8px; color:var(--text-main);">No Friend Profiles Yet</h4>
+          <p style="color:var(--text-dim); font-size:0.88rem; max-width:480px; margin: 0 auto 20px;">
+            To track peer-to-peer balances, simply select the category <strong>"Friend"</strong> when adding or editing any transaction. Their UPI ID or account details will automatically create a dedicated friend profile here!
+          </p>
+          <button class="btn btn-primary btn-sm" onclick="app.openAddTxnForFriend()">
+            <i data-lucide="plus" style="width:16px; height:16px;"></i> Add Friend Transaction
+          </button>
+        </div>
+      `;
+      this.hydrateIcons();
+      return;
+    }
+
+    if (filtered.length === 0) {
+      grid.innerHTML = `
+        <div style="grid-column: 1 / -1; text-align:center; padding: 36px 20px; background: var(--bg-card); border: 1px solid var(--glass-border); border-radius: var(--radius-lg);">
+          <i data-lucide="search-x" style="width:28px; height:28px; color:var(--text-muted); margin: 0 auto 10px; display:block;"></i>
+          <p style="color:var(--text-muted); font-size:0.9rem;">No friend profiles match your current search or filter.</p>
+        </div>
+      `;
+      this.hydrateIcons();
+      return;
+    }
+
+    const format = (v) => window.CurrencyEngine ? window.CurrencyEngine.format(v, currency, { maximumFractionDigits: 0 }) : `₹${Math.round(v).toLocaleString('en-IN')}`;
+
+    grid.innerHTML = filtered.map(p => {
+      let bannerIcon = 'check';
+      let bannerLabel = 'Settled up';
+      let bannerVal = format(0);
+
+      if (p.status === 'owes_you') {
+        bannerIcon = 'arrow-down-left';
+        bannerLabel = 'You get';
+        bannerVal = format(p.netBalance);
+      } else if (p.status === 'you_owe') {
+        bannerIcon = 'arrow-up-right';
+        bannerLabel = 'You owe';
+        bannerVal = format(Math.abs(p.netBalance));
+      }
+
+      return `
+        <div class="friend-card" onclick="app.openFriendDetail('${this.escape(p.id)}')">
+          <div class="friend-card-top">
+            <div class="friend-avatar" style="background:${p.gradient};">
+              ${this.escape(p.initials)}
+            </div>
+            <div class="friend-meta">
+              <div class="friend-name" title="${this.escape(p.displayName)}">
+                ${this.escape(p.displayName)}
+                ${p.isCustomName ? '<span style="font-size:0.68rem; color:var(--text-muted); font-weight:normal; margin-left:4px;">(Renamed)</span>' : ''}
+              </div>
+              ${p.upiId ? `
+                <div class="friend-upi-badge" title="${this.escape(p.upiId)}">
+                  <i data-lucide="smartphone" style="width:11px; height:11px;"></i>
+                  ${this.escape(p.upiId)}
+                </div>
+              ` : `
+                <div class="friend-upi-badge">
+                  <i data-lucide="user" style="width:11px; height:11px;"></i>
+                  ${this.escape(p.extractedName || 'Friend')}
+                </div>
+              `}
+            </div>
+          </div>
+
+          <div class="personal-net-banner ${p.status}">
+            <span class="personal-net-label">
+              <i data-lucide="${bannerIcon}" style="width:14px; height:14px;"></i>
+              ${bannerLabel}
+            </span>
+            <span class="personal-net-value">${bannerVal}</span>
+          </div>
+
+          <div class="friend-stats-row">
+            <span>Sent: <strong style="color:var(--text-main);">${format(p.totalOutgoing)}</strong></span>
+            <span>Received: <strong style="color:var(--text-main);">${format(p.totalIncoming)}</strong></span>
+          </div>
+
+          <div class="friend-card-actions" onclick="event.stopPropagation()">
+            <span style="font-size:0.75rem; color:var(--text-muted);">
+              ${p.transactionCount} txn${p.transactionCount === 1 ? '' : 's'}
+            </span>
+            <div style="display:flex; align-items:center; gap:6px;">
+              <button
+                class="btn btn-ghost btn-sm btn-icon-only"
+                title="Edit Friend Name"
+                onclick="app.openEditFriendNameModal('${this.escape(p.id)}')"
+              >
+                <i data-lucide="pencil" style="width:14px; height:14px;"></i>
+              </button>
+              <button
+                class="btn btn-ghost btn-sm btn-icon-only"
+                style="color:var(--color-expense);"
+                title="Delete Friend Profile"
+                onclick="app.openDeleteFriendModal('${this.escape(p.id)}')"
+              >
+                <i data-lucide="trash-2" style="width:14px; height:14px;"></i>
+              </button>
+              <button
+                class="btn btn-secondary btn-sm"
+                onclick="app.openFriendDetail('${this.escape(p.id)}')"
+              >
+                <span>View Ledger</span>
+                <i data-lucide="chevron-right" style="width:14px; height:14px;"></i>
+              </button>
+            </div>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    this.hydrateIcons();
+  }
+
+  setPersonalFilter(filter) {
+    this.personalFilter = filter;
+    document.querySelectorAll('#personalFilterPills .personal-filter-pill').forEach(btn => {
+      if (btn.getAttribute('data-filter') === filter) {
+        btn.classList.add('active');
+      } else {
+        btn.classList.remove('active');
+      }
+    });
+    this.refreshCurrentTab();
+  }
+
+  filterPersonalTransactions() {
+    this.refreshCurrentTab();
+  }
+
+  openFriendDetail(friendKey) {
+    this.activeFriendKey = friendKey;
+    this.renderPersonalView();
+  }
+
+  closeFriendDetail() {
+    this.activeFriendKey = null;
+    this.renderPersonalView();
+  }
+
+  renderPersonalFriendDetail(friend, currency) {
+    const mainView = document.getElementById('personalMainView');
+    const detailView = document.getElementById('personalDetailView');
+    if (!detailView) return;
+
+    if (mainView) mainView.style.display = 'none';
+    detailView.style.display = 'block';
+
+    const format = (v) => window.CurrencyEngine ? window.CurrencyEngine.format(v, currency, { maximumFractionDigits: 0 }) : `₹${Math.round(v).toLocaleString('en-IN')}`;
+
+    let bannerIcon = 'check';
+    let bannerLabel = 'Settled up';
+    let bannerVal = format(0);
+
+    if (friend.status === 'owes_you') {
+      bannerIcon = 'arrow-down-left';
+      bannerLabel = 'You get';
+      bannerVal = format(friend.netBalance);
+    } else if (friend.status === 'you_owe') {
+      bannerIcon = 'arrow-up-right';
+      bannerLabel = 'You owe';
+      bannerVal = format(Math.abs(friend.netBalance));
+    }
+
+    detailView.innerHTML = `
+      <div class="personal-detail-header-card">
+        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; flex-wrap:wrap; gap:10px;">
+          <button class="btn btn-secondary btn-sm" onclick="app.closeFriendDetail()">
+            <i data-lucide="arrow-left" style="width:15px; height:15px;"></i>
+            <span>Back to All Friends</span>
+          </button>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <button class="btn btn-ghost btn-sm" onclick="app.openEditFriendNameModal('${this.escape(friend.id)}')">
+              <i data-lucide="pencil" style="width:14px; height:14px;"></i>
+              <span>Rename Profile</span>
+            </button>
+            <button class="btn btn-ghost btn-sm" style="color:var(--color-expense);" onclick="app.openDeleteFriendModal('${this.escape(friend.id)}')">
+              <i data-lucide="trash-2" style="width:14px; height:14px;"></i>
+              <span>Delete Profile</span>
+            </button>
+            <button class="btn btn-primary btn-sm" onclick="app.openAddTxnForFriend('${this.escape(friend.id)}')">
+              <i data-lucide="plus" style="width:15px; height:15px;"></i>
+              <span>Add Transaction</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="personal-detail-top">
+          <div class="personal-detail-profile">
+            <div class="personal-detail-avatar" style="background:${friend.gradient};">
+              ${this.escape(friend.initials)}
+            </div>
+            <div>
+              <div class="personal-detail-name-wrap">
+                <h3 class="personal-detail-name">${this.escape(friend.displayName)}</h3>
+              </div>
+              <div style="display:flex; align-items:center; gap:8px; margin-top:4px; flex-wrap:wrap;">
+                ${friend.upiId ? `
+                  <span class="friend-upi-badge">
+                    <i data-lucide="smartphone" style="width:12px; height:12px;"></i>
+                    ${this.escape(friend.upiId)}
+                  </span>
+                ` : ''}
+                <span style="font-size:0.75rem; color:var(--text-muted);">
+                  ${friend.transactionCount} transaction${friend.transactionCount === 1 ? '' : 's'} recorded
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div style="text-align:right;">
+            <div class="personal-net-banner ${friend.status}" style="margin:0; padding:10px 18px;">
+              <span class="personal-net-label" style="font-size:0.85rem;">
+                <i data-lucide="${bannerIcon}" style="width:15px; height:15px;"></i>
+                ${bannerLabel}
+              </span>
+              <span class="personal-net-value" style="font-size:1.35rem; margin-left:14px;">${bannerVal}</span>
+            </div>
+          </div>
+        </div>
+
+        <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:12px; margin-top:16px; padding-top:16px; border-top:1px solid var(--glass-border);">
+          <div style="padding:10px; border-radius:10px; background:rgba(255,255,255,0.03);">
+            <div style="font-size:0.72rem; text-transform:uppercase; color:var(--text-muted); font-weight:700;">Total Sent (Outgoing)</div>
+            <div style="font-family:var(--font-numbers); font-size:1.15rem; font-weight:800; color:var(--text-main); margin-top:2px;">
+              ${format(friend.totalOutgoing)}
+            </div>
+          </div>
+          <div style="padding:10px; border-radius:10px; background:rgba(255,255,255,0.03);">
+            <div style="font-size:0.72rem; text-transform:uppercase; color:var(--text-muted); font-weight:700;">Total Received (Incoming)</div>
+            <div style="font-family:var(--font-numbers); font-size:1.15rem; font-weight:800; color:var(--text-main); margin-top:2px;">
+              ${format(friend.totalIncoming)}
+            </div>
+          </div>
+          <div style="padding:10px; border-radius:10px; background:rgba(255,255,255,0.03);">
+            <div style="font-size:0.72rem; text-transform:uppercase; color:var(--text-muted); font-weight:700;">Balance Status</div>
+            <div style="font-family:var(--font-numbers); font-size:1.15rem; font-weight:800; color:${friend.status === 'owes_you' ? '#10b981' : friend.status === 'you_owe' ? '#f43f5e' : 'var(--text-muted)'}; margin-top:2px;">
+              ${friend.statusText}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Friend Transactions Ledger Table -->
+      <div class="glass-card">
+        <div class="glass-card-header">
+          <div class="glass-card-title">
+            <i data-lucide="receipt" style="width:18px; height:18px; color:#a855f7;"></i>
+            <span>Transaction History with ${this.escape(friend.displayName)}</span>
+          </div>
+        </div>
+
+        <div class="table-responsive">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Date &amp; Time</th>
+                <th>Flow</th>
+                <th>Description / Narration</th>
+                <th>Mode &amp; Ref</th>
+                <th style="text-align:right;">Amount</th>
+                <th style="text-align:center;">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${friend.transactions.map(t => {
+                const rawAmt = Math.abs(parseFloat(t.amount) || 0);
+                const amt = window.CurrencyEngine
+                  ? window.CurrencyEngine.convert(rawAmt, t.currency || currency, currency)
+                  : rawAmt;
+                const isIncoming = t.type === 'income' || t.type === 'refund' ||
+                  (t.type === 'transfer' && (t.explicitType === 'income' || /\b(cr|credit|received|deposit)\b/i.test(t.rawNarration || '')));
+
+                return `
+                  <tr>
+                    <td style="white-space:nowrap;">
+                      <div style="font-weight:600; color:var(--text-main);">${this.escape(t.date || '')}</div>
+                      ${t.time ? `<div style="font-size:0.75rem; color:var(--text-muted); font-family:var(--font-mono);">${this.escape(t.time)}</div>` : ''}
+                    </td>
+                    <td>
+                      ${isIncoming ? `
+                        <span class="badge" style="background:rgba(16,185,129,0.15); color:#10b981; border:1px solid rgba(16,185,129,0.3); display:inline-flex; align-items:center; gap:4px; padding:3px 8px;">
+                          <i data-lucide="arrow-down-left" style="width:12px; height:12px;"></i> Received
+                        </span>
+                      ` : `
+                        <span class="badge" style="background:rgba(244,63,94,0.15); color:#f43f5e; border:1px solid rgba(244,63,94,0.3); display:inline-flex; align-items:center; gap:4px; padding:3px 8px;">
+                          <i data-lucide="arrow-up-right" style="width:12px; height:12px;"></i> Sent
+                        </span>
+                      `}
+                    </td>
+                    <td>
+                      <div style="font-weight:600; color:var(--text-main);">${this.escape(t.description || 'Transaction')}</div>
+                      ${t.rawNarration && t.rawNarration !== t.description ? `
+                        <div style="font-size:0.75rem; color:var(--text-muted); max-width:320px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${this.escape(t.rawNarration)}">
+                          ${this.escape(t.rawNarration)}
+                        </div>
+                      ` : ''}
+                      ${t.notes ? `<div style="font-size:0.72rem; color:var(--text-dim); margin-top:2px;">Note: ${this.escape(t.notes)}</div>` : ''}
+                    </td>
+                    <td>
+                      <div style="font-size:0.8rem; font-weight:500;">${this.escape(t.paymentMode || 'UPI')}</div>
+                      ${t.referenceNo ? `<div style="font-size:0.72rem; color:var(--text-muted); font-family:var(--font-mono);">${this.escape(t.referenceNo)}</div>` : ''}
+                    </td>
+                    <td style="text-align:right; font-family:var(--font-numbers); font-weight:700; font-size:1.05rem; color:${isIncoming ? '#10b981' : '#f43f5e'};">
+                      ${isIncoming ? '+' : '-'}${format(amt)}
+                    </td>
+                    <td style="text-align:center; white-space:nowrap;">
+                      <button
+                        class="btn btn-ghost btn-sm btn-icon-only"
+                        title="Edit Transaction"
+                        onclick="app.openEditTxnModal('${this.escape(t.id)}')"
+                      >
+                        <i data-lucide="pencil" style="width:14px; height:14px;"></i>
+                      </button>
+                      <button
+                        class="btn btn-ghost btn-sm btn-icon-only"
+                        style="color:var(--color-expense);"
+                        title="Delete Transaction"
+                        onclick="app.deleteTransaction('${this.escape(t.id)}')"
+                      >
+                        <i data-lucide="trash-2" style="width:14px; height:14px;"></i>
+                      </button>
+                    </td>
+                  </tr>
+                `;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    `;
+
+    this.hydrateIcons();
+  }
+
+  openAddTxnForFriend(friendKey = null) {
+    if (friendKey && window.friendsManager) {
+      window.db.getAll('transactions').then(all => {
+        const profiles = window.friendsManager.getFriendProfiles(all);
+        const p = profiles.find(pr => pr.id === friendKey);
+        this.openManualTxnModal(null, null, 'Friend', p ? p.displayName : null);
+      });
+    } else {
+      this.openManualTxnModal(null, null, 'Friend', null);
+    }
+  }
+
+  openEditFriendNameModal(friendKey) {
+    const modal = document.getElementById('editFriendNameModal');
+    if (!modal || !window.friendsManager) return;
+
+    window.db.getAll('transactions').then(all => {
+      const profiles = window.friendsManager.getFriendProfiles(all);
+      const prof = profiles.find(p => p.id === friendKey);
+      const input = document.getElementById('editFriendNameInput');
+      const keyInput = document.getElementById('editFriendKeyInput');
+      if (input && prof) input.value = prof.displayName;
+      if (keyInput) keyInput.value = friendKey;
+
+      modal.style.display = 'flex';
+      this.hydrateIcons();
+      this.trapModalFocus(modal);
+      if (input) input.focus();
+    });
+  }
+
+  closeEditFriendNameModal() {
+    const modal = document.getElementById('editFriendNameModal');
+    if (modal) {
+      modal.style.display = 'none';
+      this.releaseModalFocus(modal);
+    }
+  }
+
+  saveFriendName() {
+    const key = document.getElementById('editFriendKeyInput')?.value;
+    const name = document.getElementById('editFriendNameInput')?.value;
+    if (!key || !name || !name.trim()) {
+      alert('Please enter a valid display name.');
+      return;
+    }
+
+    if (window.friendsManager) {
+      window.friendsManager.setFriendCustomName(key, name.trim());
+      this.closeEditFriendNameModal();
+      this.showToast(`Friend profile renamed to "${name.trim()}"`, 'success');
+      this.refreshCurrentTab();
+    }
+  }
+
+  openDeleteFriendModal(friendKey) {
+    const modal = document.getElementById('deleteFriendModal');
+    if (!modal || !window.friendsManager) return;
+
+    window.db.getAll('transactions').then(all => {
+      const profiles = window.friendsManager.getFriendProfiles(all);
+      const prof = profiles.find(p => p.id === friendKey);
+      const keyInput = document.getElementById('deleteFriendKeyInput');
+      const nameDisplay = document.getElementById('deleteFriendNameDisplay');
+
+      if (keyInput) keyInput.value = friendKey;
+      if (nameDisplay && prof) nameDisplay.textContent = prof.displayName;
+
+      modal.style.display = 'flex';
+      this.hydrateIcons();
+      this.trapModalFocus(modal);
+    });
+  }
+
+  closeDeleteFriendModal() {
+    const modal = document.getElementById('deleteFriendModal');
+    if (modal) {
+      modal.style.display = 'none';
+      this.releaseModalFocus(modal);
+    }
+  }
+
+  async confirmDeleteFriend(mode) {
+    const friendKey = document.getElementById('deleteFriendKeyInput')?.value;
+    if (!friendKey) return;
+
+    const allTxns = await window.db.getAll('transactions');
+    const friendTxns = allTxns.filter(t => 
+      t.duplicateStatus !== 'merged' &&
+      (t.category || '').toLowerCase() === 'friend' &&
+      window.friendsManager.getFriendKey(t) === friendKey
+    );
+
+    if (mode === 'untag') {
+      // Option 1: Untag category 'Friend' -> 'Miscellaneous'
+      for (const t of friendTxns) {
+        t.category = 'Miscellaneous';
+        t.updatedAt = new Date().toISOString();
+        await window.db.put('transactions', t);
+      }
+      window.friendsManager.deleteCustomProfile(friendKey);
+      this.showToast('Friend profile removed from Personal Transactions. All transactions kept safe.', 'info');
+    } else if (mode === 'delete_all') {
+      // Option 2: Delete transactions completely
+      for (const t of friendTxns) {
+        await window.db.delete('transactions', t.id);
+      }
+      window.friendsManager.deleteCustomProfile(friendKey);
+      this.showToast(`Deleted ${friendTxns.length} transactions and removed friend profile.`, 'info');
+    }
+
+    this.closeDeleteFriendModal();
+    if (this.activeFriendKey === friendKey) {
+      this.activeFriendKey = null;
+    }
+    await this.refreshAllViews();
   }
 
   // --- STATEMENT IMPORT & DROPZONE ---
@@ -2218,7 +2823,7 @@ class App {
     }
   }
 
-  async openManualTxnModal(accountId = null, prefillDate = null) {
+  async openManualTxnModal(accountId = null, prefillDate = null, prefillCategory = null, prefillDesc = null) {
     const modal = document.getElementById('manualTxnModal');
     if (!modal) return;
     await this.populateModalAccountOptions();
@@ -2228,6 +2833,16 @@ class App {
     }
     const modeSelect = document.getElementById('mTxnMode');
     if (modeSelect) modeSelect.value = 'UPI';
+
+    if (prefillCategory) {
+      const catSelect = document.getElementById('mTxnCategory');
+      if (catSelect) catSelect.value = prefillCategory;
+    }
+
+    if (prefillDesc) {
+      const descInput = document.getElementById('mTxnDesc');
+      if (descInput) descInput.value = prefillDesc;
+    }
 
     const dateInput = document.getElementById('mTxnDate');
     if (dateInput) {
